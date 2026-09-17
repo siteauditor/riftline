@@ -56,9 +56,13 @@ PLATFORMS: dict[str, Platform] = {
         _p("kr", "KR", Regional.ASIA),
         _p("jp1", "JP", Regional.ASIA),
         _p("oc1", "OCE", Regional.SEA),
+        # PH2 and TH2 are not here, and must not come back as shards: Riot
+        # folded both into SG2, and ph2.api.riotgames.com and
+        # th2.api.riotgames.com no longer resolve. Listed as shards they were
+        # offered on the leaderboard, where choosing TH answered 502 and the page
+        # blamed Riot for being down. They survive as aliases below instead, so
+        # a link or a search that names them lands where those accounts now live.
         _p("sg2", "SG", Regional.SEA),
-        _p("ph2", "PH", Regional.SEA),
-        _p("th2", "TH", Regional.SEA),
         _p("tw2", "TW", Regional.SEA),
         _p("vn2", "VN", Regional.SEA),
         _p("pbe1", "PBE", Regional.AMERICAS),
@@ -70,7 +74,10 @@ _ALIASES: dict[str, str] = {
     "na": "na1", "br": "br1", "lan": "la1", "las": "la2",
     "euw": "euw1", "eune": "eun1", "eun": "eun1", "tr": "tr1",
     "me": "me1", "mena": "me1", "jp": "jp1", "oce": "oc1", "oc": "oc1",
-    "sg": "sg2", "ph": "ph2", "th": "th2", "tw": "tw2", "vn": "vn2",
+    "sg": "sg2", "tw": "tw2", "vn": "vn2",
+    # Merged into SG2 (see PLATFORMS). Both the short names and the old shard
+    # ids, since /summoner/th2/... links already exist.
+    "ph": "sg2", "ph2": "sg2", "th": "sg2", "th2": "sg2",
     "pbe": "pbe1",
 }
 

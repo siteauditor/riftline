@@ -586,19 +586,39 @@ async def test_a_profile_on_the_right_shard_claims_nothing_about_other_shards(cl
 
 
 def test_every_sea_shard_is_reachable():
-    """OCE, PH and TH were missing from the routing table, so a player on any
-    of them could not be looked up at all."""
+    """Every SEA name a player might type routes to a shard that still exists.
+
+    The first version of this test put PH and TH on ph2 and th2 and checked only
+    that the routing table said so. Neither host resolves: Riot folded both
+    shards into SG2. So the table was consistent with itself and wrong about
+    the world, and choosing TH on the leaderboard answered 502. They now route
+    to sg2, which is where those accounts live.
+    """
     from app.riot.routing import Regional, resolve_platform
 
     for name, platform_id in (
-        ("oce", "oc1"), ("sg", "sg2"), ("ph", "ph2"),
-        ("th", "th2"), ("tw", "tw2"), ("vn", "vn2"),
+        ("oce", "oc1"), ("sg", "sg2"), ("tw", "tw2"), ("vn", "vn2"),
+        ("ph", "sg2"), ("ph2", "sg2"), ("th", "sg2"), ("th2", "sg2"),
     ):
         platform = resolve_platform(name)
         assert platform.id == platform_id
         assert platform.regional is Regional.SEA
         # account-v1 has no SEA host; these collapse to asia.
         assert platform.account_region is Regional.ASIA
+
+
+def test_no_offered_shard_is_one_riot_has_retired():
+    """The leaderboard and search offer PLATFORMS, so nothing retired may be in it.
+
+    Pinned by name rather than by DNS so the suite stays offline. Measured from
+    the production host on 2026-09-18: ph2 and th2 do not resolve; sg2, tw2,
+    vn2 and oc1 do.
+    """
+    from app.riot.routing import PLATFORMS
+
+    assert "ph2" not in PLATFORMS
+    assert "th2" not in PLATFORMS
+    assert {"sg2", "tw2", "vn2", "oc1"} <= set(PLATFORMS)
 
 
 @respx.mock
