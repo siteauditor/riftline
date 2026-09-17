@@ -14,5 +14,9 @@ dist
 !.env.example
 
 .git
-.gitignore
 *.log
+
+# .gitignore deliberately stays: oxlint reads it, and the explicit
+# ignorePatterns in .oxlintrc.json is the belt to this set of braces. Without
+# either, oxlint walked node_modules in the image and reported 482 errors in
+# @tanstack's compiled output.

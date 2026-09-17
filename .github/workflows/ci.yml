@@ -36,7 +36,7 @@ jobs:
     runs-on: [self-hosted, riftline]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build the API image
         run: docker build --pull -t riftline-api:ci ./backend
@@ -81,7 +81,7 @@ jobs:
     runs-on: [self-hosted, riftline]
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The deploy directory is the source of truth for what is running, and it
       # holds the one file that is not in git: .env, with the Riot key. Copying
