@@ -13,6 +13,7 @@ import Draft from './routes/Draft'
 import Champion from './routes/Champion'
 import LiveGame from './routes/LiveGame'
 import Leaderboard from './routes/Leaderboard'
+import NotFound, { RouteError } from './routes/NotFound'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,6 +47,9 @@ const router = createBrowserRouter([
   {
     path: '/',
     element: <App />,
+    // Without this, a crash anywhere below shows React Router's own developer
+    // screen, which addresses the visitor as the person who can fix it.
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Home /> },
       { path: 'summoner/:platform/:name/:tag', element: <Profile /> },
@@ -55,6 +59,9 @@ const router = createBrowserRouter([
       { path: 'tierlist', element: <Tierlist /> },
       { path: 'draft', element: <Draft /> },
       { path: 'champions/:championId', element: <Champion /> },
+      // nginx serves index.html for every path it does not recognise, so the
+      // router is what decides an address is not a page. Keep this last.
+      { path: '*', element: <NotFound /> },
     ],
   },
 ])
