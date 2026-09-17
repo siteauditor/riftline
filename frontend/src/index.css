@@ -1,0 +1,280 @@
+@import 'tailwindcss';
+
+/*
+ * Riftline.
+ *
+ * The ground is not a neutral blue-black. Summoner's Rift is a forest, and its
+ * terrain in shadow reads deep teal-green; taking the base from the map itself
+ * is what keeps this from being any dark dashboard with a gold accent.
+ *
+ * There is one fixed accent, hextech gold, and one variable accent: the rank
+ * being described. A Challenger profile reads cyan and an Iron one grey,
+ * because on a site about rank the colour should be carrying information rather
+ * than decorating the page. Components read the current rank through
+ * `--accent`, which a wrapper sets.
+ *
+ * On layers. Tailwind v4 emits its utilities inside `@layer utilities`, and
+ * unlayered CSS beats layered CSS regardless of specificity or source order.
+ * So element defaults go in `base` and our own classes go in `components`,
+ * both of which a utility can override. Authored outside a layer, `.display`
+ * silently beat `font-700` on the same element and `.control` beat `px-3` and
+ * `text-sm`: the classes were dictating the type and spacing that every caller
+ * believed it was setting. `@theme` stays at the top level, where Tailwind
+ * requires it.
+ */
+
+@theme {
+  /* Ground: the Rift's terrain in shadow, green-cast rather than blue-black. */
+  --color-deep: #0a1114;
+  --color-panel: #111b1f;
+  --color-raised: #18262c;
+  --color-line: #24363e;
+  --color-line-soft: #182931;
+
+  --color-ink: #e8f0f2;
+  --color-ink-dim: #93a9b2;
+  /*
+   * Raised from #61787f, which measured 4.08:1 on the page ground and 3.33:1 on
+   * a raised surface: under the 4.5:1 AA floor for the 11px and 12px labels
+   * this colour is used for, 106 times. Now 5.57:1 and 4.80:1.
+   */
+  --color-ink-faint: #7d949c;
+
+  /* Hextech gold. The one accent that never changes. */
+  --color-gold: #c9a227;
+  --color-gold-bright: #e8c65a;
+
+  /*
+   * Blue side and red side. Win and loss inherit the map's own duality.
+   *
+   * Both were lifted for legibility, measured rather than guessed: #3d8bd4 sat
+   * at 4.32:1 on a raised surface and #cf4a4a at 4.29:1 even on the page
+   * ground, and every use is small text (a KDA figure, a W/L count, the word
+   * Loss). They now clear 4.5:1 on both grounds. The deep pair are backgrounds
+   * only, so they are unchanged.
+   */
+  --color-win: #4a93d8;
+  --color-win-deep: #12293f;
+  --color-loss: #e56b6b;
+  --color-loss-deep: #3a1a1c;
+
+  /*
+   * The ladder. Players read these colours faster than they read the words, so
+   * they are load-bearing, not badge decoration. Raised off the originals where
+   * contrast failed: iron and bronze both sat near 2.9:1 on their own tinted
+   * grounds at 11px.
+   */
+  --color-iron: #9a938c;
+  --color-bronze: #c08552;
+  --color-silver: #b3c3cb;
+  --color-gold-tier: #e3b64a;
+  --color-platinum: #4fc9bd;
+  --color-emerald: #4fbf6d;
+  --color-diamond: #7fa3ff;
+  --color-master: #b06fe0;
+  --color-grandmaster: #e05a60;
+  --color-challenger: #4fd4f5;
+
+  /*
+   * Barlow Condensed for anything that is a name or a number, Barlow for prose.
+   * One superfamily, width as the contrast axis. The reference is a competitive
+   * timing screen: on a stats site the numerals are the content, so they get
+   * the condensed cut that lets them run large without crowding.
+   */
+  --font-display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-sans: 'Barlow', system-ui, sans-serif;
+
+  /* Tailwind v4 emits `font-700` only where a token declares it. */
+  --font-weight-400: 400;
+  --font-weight-500: 500;
+  --font-weight-600: 600;
+  --font-weight-700: 700;
+  --font-weight-800: 800;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    /* Overridden per subject. Gold is the neutral standing in for "no rank". */
+    --accent: var(--color-gold);
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-deep);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* Dense stat tables only line up with tabular figures. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-gold-bright);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-gold);
+    color: var(--color-deep);
+  }
+
+  /* Scrollbars, so dense panels do not sprout bright chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+}
+
+@layer components {
+  /* Numerals in stat positions must never shift width as they change. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * A name or a number. Condensed, tight, and optically aligned: Barlow
+   * Condensed carries a little too much letter-spacing for large sizes straight
+   * out of the box. The weight is a starting point, not a decision: callers set
+   * `font-600` or `font-700` and, being utilities, those win.
+   */
+  .display {
+    font-family: var(--font-display);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    line-height: 1.05;
+  }
+
+  /*
+   * The accent rule. Three pixels of the subject's own rank colour, used where
+   * a card border would otherwise go. This is the redesign's one repeated
+   * motif, so it stays a rule and never becomes a glow, a gradient or a full
+   * border.
+   *
+   * An inset shadow rather than a border, because a border here is not safe:
+   * `border-line` sets the colour of all four sides and recoloured this rule
+   * to the generic line grey on two of the five callers, while `border-l-0`
+   * removed it outright. A shadow cannot be reached by a border utility, and
+   * it takes no space, so callers keep their own padding.
+   */
+  .accent-edge {
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+
+  /*
+   * Splash art wants a scrim or the type on top of it is unreadable, and the
+   * scrim wants to be the page ground so the art appears to emerge from it
+   * rather than sit in a window.
+   */
+  .art-scrim {
+    background-image:
+      linear-gradient(to top, var(--color-deep) 2%, color-mix(in srgb, var(--color-deep) 62%, transparent) 48%, color-mix(in srgb, var(--color-deep) 20%, transparent) 100%),
+      linear-gradient(to right, var(--color-deep) 4%, color-mix(in srgb, var(--color-deep) 78%, transparent) 32%, transparent 66%);
+  }
+
+  /*
+   * Form controls.
+   *
+   * Left native, a `<select>` on Windows paints with the system widget theme
+   * and ignores the background we set: a light grey box with a black triangle,
+   * sitting in the middle of a dark page. `appearance: none` is the only way to
+   * keep them on-theme, and it means drawing the chevron ourselves.
+   */
+  .control {
+    appearance: none;
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: 2px;
+    color: var(--color-ink);
+    /* Longhand, not the `font` shorthand: the shorthand resets font-variant,
+       and these sit next to `.tnum` fields that need tabular figures. */
+    font-family: inherit;
+    font-size: inherit;
+    line-height: 1.4;
+    padding: 0.3rem 0.55rem;
+    transition: border-color 120ms ease;
+  }
+
+  .control:hover {
+    border-color: color-mix(in srgb, var(--color-gold) 45%, var(--color-line));
+  }
+
+  /*
+   * No `outline: none` here. Chrome's own default ring is already scoped to
+   * `:focus-visible`, so a mouse click never draws one and there is nothing to
+   * suppress; what the suppression did do, from this layer, was beat the
+   * `*:focus-visible` ring in `base` on every control in the app.
+   */
+  .control:focus {
+    border-color: var(--color-gold);
+  }
+
+  select.control,
+  select.control-bare {
+    cursor: pointer;
+    /*
+     * The open option list is drawn by the browser and cannot be themed: Chrome
+     * on Windows paints it on its own light ground and ignores
+     * `background-color` on an `<option>`, while still honouring `color`. Our
+     * near-white ink was therefore inherited into the popup and the list came
+     * out white on white. Measured in Chrome on Windows 11, 2026-09-18.
+     *
+     * So the popup is pinned to the light scheme, which every platform draws
+     * light, and the options below take an ink that contrasts with it. The
+     * closed control is unaffected: it sets its own colours explicitly.
+     */
+    color-scheme: light;
+    /* Room for the chevron. A caller that sets `px-*` overrides this and the
+       text runs under the arrow, so selects take their padding from here. */
+    padding-right: 1.55rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2393a9b2' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.5rem center;
+    background-size: 9px 6px;
+  }
+
+  /*
+   * For a select inside a composite field, which must not draw its own box. It
+   * deliberately sets nothing else: the caller owns the type and colour.
+   */
+  select.control-bare {
+    appearance: none;
+    background-color: transparent;
+    border: 0;
+  }
+
+  /* The spinner is a third piece of native chrome, and nobody steps a game
+     count one at a time. */
+  .control::-webkit-inner-spin-button,
+  .control::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  /*
+   * A literal dark ink, not `inherit` and not a system colour: the ground it
+   * sits on belongs to the browser, and the light scheme pinned above is the
+   * only thing we know about it.
+   */
+  select.control option,
+  select.control-bare option {
+    color: #11181b;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

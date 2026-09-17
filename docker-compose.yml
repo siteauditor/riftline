@@ -1,0 +1,104 @@
+# Riftline on the shared VPS.
+#
+# Two containers, no published ports. TLS, certificates and HTTP routing belong
+# to the `caddy-docker-proxy` container that already fronts this box, which
+# reads the `caddy` labels below off any container attached to `edge_default`.
+# That network is created and owned by the `edge` project (/root/edge), hence
+# `external: true`: Compose uses it and must never create or delete it.
+#
+# The consequence worth stating: deploying or tearing down this project cannot
+# affect the five other sites on this box, because nothing here is shared with
+# them except a network they already expect strangers on. There is no edit to
+# /root/edge and no host port to collide over.
+#
+# `configurespaces.rhasta.space` and `configurespaces-api.rhasta.space` are set
+# up exactly this way on the same box and in the same DNS zone, which is why the
+# label shape below is copied rather than invented.
+
+services:
+  api:
+    build:
+      context: ./backend
+    image: riftline-api:local
+    container_name: riftline-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Absolute, and inside the volume. The app would otherwise anchor a
+      # relative path to its project root, which works but leaves the most
+      # important file on the box implicit.
+      DATABASE_URL: sqlite+aiosqlite:////srv/riftline/data/lol.db
+      # The browser reaches the API same-origin through the web container, so
+      # this only matters for anything calling riftline-api.rhasta.space
+      # directly from a page.
+      CORS_ORIGINS: https://riftline.rhasta.space
+    volumes:
+      # The corpus: 1,795 matches, every stored Riot payload, and the scores
+      # derived from them. A named volume rather than a bind mount so a stray
+      # `git clean` in the deploy directory cannot reach it.
+      - riftline_data:/srv/riftline/data
+    networks: [default, edge]
+    labels:
+      caddy: riftline-api.rhasta.space
+      caddy.reverse_proxy: '{{upstreams 8000}}'
+      caddy.encode: zstd gzip
+      caddy.header.Strict-Transport-Security: '"max-age=31536000; includeSubDomains"'
+      caddy.header.X-Content-Type-Options: nosniff
+      caddy.header.Referrer-Policy: strict-origin-when-cross-origin
+    healthcheck:
+      # The app's own readiness answer: it reports the key, the Data Dragon
+      # version and the rate-limit state, so a container that is up but cannot
+      # serve is not called healthy.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  web:
+    build:
+      context: ./frontend
+    image: riftline-web:local
+    container_name: riftline-web
+    restart: unless-stopped
+    depends_on:
+      # Not a hard gate: nginx re-resolves the upstream, so the site comes up
+      # and serves the shell even if the API is still starting.
+      api:
+        condition: service_started
+    networks: [default, edge]
+    labels:
+      caddy: riftline.rhasta.space
+      caddy.reverse_proxy: '{{upstreams 80}}'
+      caddy.encode: zstd gzip
+      caddy.header.Strict-Transport-Security: '"max-age=31536000; includeSubDomains"'
+      caddy.header.X-Content-Type-Options: nosniff
+      caddy.header.Referrer-Policy: strict-origin-when-cross-origin
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/", "-O", "/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  default:
+    name: riftline_default
+  edge:
+    external: true
+    name: edge_default
+
+volumes:
+  riftline_data:
+    name: riftline_data

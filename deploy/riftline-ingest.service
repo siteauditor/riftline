@@ -1,0 +1,29 @@
+# Nightly corpus ingestion. Installed at /etc/systemd/system/.
+#
+# A one-shot unit driven by riftline-ingest.timer rather than a cron line, for
+# two reasons: `journalctl -u riftline-ingest` keeps the output of every run
+# where the rest of this box's logs are, and a run that is still going when the
+# next one is due does not start a second copy on the same SQLite file.
+
+[Unit]
+Description=Riftline nightly corpus ingestion
+Documentation=https://github.com/siteauditor/riftline/blob/main/docs/deploy.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/root/riftline/deploy/nightly-ingest.sh
+WorkingDirectory=/root/riftline
+
+# A crawl on a development key is slow by design (100 requests per two
+# minutes). This is a ceiling that stops a wedged run from overlapping the next
+# night's, not a target.
+TimeoutStartSec=5h
+
+# The script decides what "success" means: a dead Riot key is an expected
+# nightly state, not a failure, and it says so in the log.
+SuccessExitStatus=0
+
+StandardOutput=journal
+StandardError=journal

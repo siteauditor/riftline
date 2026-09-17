@@ -1,0 +1,23 @@
+# When the nightly ingestion runs. Installed at /etc/systemd/system/.
+#
+# 03:20 UTC: after Riot's daily patch/maintenance windows and outside the hours
+# this box does anything else on a schedule, and offset from the top of the hour
+# so it does not start alongside every other timer on the machine.
+
+[Unit]
+Description=Run Riftline corpus ingestion nightly
+Documentation=https://github.com/siteauditor/riftline/blob/main/docs/deploy.md
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 UTC
+
+# Spreads the start over ten minutes. With several timers on one box, all of
+# them firing on the same second is how you get a thundering herd on a disk.
+RandomizedDelaySec=10m
+
+# If the box was off or the timer missed its window, run once on the next boot
+# rather than skipping the night silently.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

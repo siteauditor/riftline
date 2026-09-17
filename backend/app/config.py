@@ -1,0 +1,96 @@
+"""Application settings, loaded from the environment or backend/.env."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- Riot ---------------------------------------------------------------
+    riot_api_key: str = Field(default="", alias="RIOT_API_KEY")
+    default_platform: str = Field(default="euw1", alias="DEFAULT_PLATFORM")
+
+    # A development key is 20:1,100:120. Override once you hold a personal or
+    # production key -- same syntax Riot uses in X-App-Rate-Limit.
+    app_rate_limits: str = Field(default="20:1,100:120", alias="APP_RATE_LIMITS")
+
+    riot_timeout_seconds: float = Field(default=10.0, alias="RIOT_TIMEOUT_SECONDS")
+    riot_max_retries: int = Field(default=3, alias="RIOT_MAX_RETRIES")
+
+    # --- Storage ------------------------------------------------------------
+    # SQLite by default so the project runs with no external services. The
+    # schema and every query are written to move to Postgres by URL alone.
+    # Relative paths are anchored to the project root by db.base.normalize_database_url,
+    # not to the process CWD, so no "../" is needed here.
+    database_url: str = Field(
+        default="sqlite+aiosqlite:///data/lol.db", alias="DATABASE_URL"
+    )
+
+    # --- Cache TTLs (seconds) ----------------------------------------------
+    # Matches are immutable once played, so they are cached permanently in the
+    # database and never re-fetched. These cover the mutable resources.
+    ttl_account: int = Field(default=86_400, alias="TTL_ACCOUNT")
+    ttl_summoner: int = Field(default=600, alias="TTL_SUMMONER")
+    ttl_league: int = Field(default=300, alias="TTL_LEAGUE")
+    ttl_mastery: int = Field(default=600, alias="TTL_MASTERY")
+    ttl_match_ids: int = Field(default=120, alias="TTL_MATCH_IDS")
+    ttl_static: int = Field(default=21_600, alias="TTL_STATIC")
+
+    # --- Features -----------------------------------------------------------
+    # Riot announced Spectator-V5's deactivation in Oct 2025 over player
+    # anonymity. Live-game lookup stays behind this flag so its removal
+    # degrades the draft tool instead of breaking it.
+    enable_spectator: bool = Field(default=True, alias="ENABLE_SPECTATOR")
+
+    # Ranks for the other nine people in a lobby, who nobody searched for.
+    # Longer than ttl_league because twenty LP of drift on a stranger is
+    # irrelevant, and because the alternative is nine Riot calls per page view.
+    ttl_league_bulk: int = Field(default=900, alias="TTL_LEAGUE_BULK")
+    # How long a live-game view will wait for those ranks before rendering
+    # without them. Partial is the right answer: whatever landed is cached, so
+    # the client's next poll completes the roster.
+    spectator_rank_budget_seconds: float = Field(
+        default=8.0, alias="SPECTATOR_RANK_BUDGET_SECONDS"
+    )
+
+    # Ladder snapshots. A ladder is one Riot call, so these are short; Master is
+    # ten thousand entries and a multi-megabyte transfer, so it is not.
+    ttl_ladder: int = Field(default=900, alias="TTL_LADDER")
+    ttl_ladder_master: int = Field(default=3600, alias="TTL_LADDER_MASTER")
+
+    cors_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173", alias="CORS_ORIGINS"
+    )
+
+    @field_validator("default_platform")
+    @classmethod
+    def _lower(cls, v: str) -> str:
+        return v.strip().lower()
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def parsed_rate_limits(self) -> list[tuple[int, float]]:
+        from app.riot.limiter import DEV_KEY_LIMITS, parse_limit_header
+
+        return parse_limit_header(self.app_rate_limits) or DEV_KEY_LIMITS
+
+    @property
+    def has_key(self) -> bool:
+        return bool(self.riot_api_key.strip())
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

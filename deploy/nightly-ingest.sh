@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# Nightly ingestion for the deployed corpus.
+#
+# Run by a systemd timer on the VPS (see riftline-ingest.service/.timer). It
+# works through the pipeline in dependency order, inside the api container, so
+# it uses the same code and the same database the site serves.
+#
+# The shape of this script is dictated by one fact: a Riot development key
+# expires 24 hours after it is issued, so on most nights some or all of it will
+# run with a dead key. It therefore splits into two halves.
+#
+#   Riot-dependent   crawl, timelines, lobbyranks. Skipped entirely when the
+#                    key is dead, because every request would fail and the log
+#                    would be noise rather than information.
+#   Local-only       aggregate, score. These read the stored corpus and make no
+#                    network call at all, so they always run and always finish.
+#                    A dead key therefore still leaves the site's derived data
+#                    consistent with whatever was ingested before it died.
+#
+# Exit status is the honest one: 0 when everything that could run did, 1 only
+# when a stage that should have worked failed.
+
+set -uo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-/root/riftline}"
+COMPOSE="docker compose -f ${PROJECT_DIR}/docker-compose.yml"
+
+# How much to fetch per night. Deliberately modest: a development key allows 100
+# requests per two minutes, so this is a few hours of crawling, and the point is
+# a corpus that grows steadily rather than one that races a rate limiter.
+CRAWL_TARGET="${CRAWL_TARGET:-400}"
+TIMELINE_TARGET="${TIMELINE_TARGET:-400}"
+LOBBY_TARGET="${LOBBY_TARGET:-600}"
+
+log() { printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+run_stage() {
+  local name="$1"; shift
+  log "=== ${name} ==="
+  if $COMPOSE exec -T api "$@"; then
+    log "${name}: done"
+    return 0
+  fi
+  log "${name}: FAILED"
+  return 1
+}
+
+cd "$PROJECT_DIR" || { log "no project at ${PROJECT_DIR}"; exit 1; }
+
+if ! $COMPOSE ps --status running --services 2>/dev/null | grep -qx api; then
+  log "api container is not running; nothing to do"
+  exit 1
+fi
+
+failures=0
+
+# Is the key alive? Asked by making the cheapest real call there is rather than
+# by reading the clock: a key can also be revoked, and the answer we want is
+# "will Riot talk to us", not "is it probably still fresh".
+log "=== checking the Riot key ==="
+key_state=$($COMPOSE exec -T api python - <<'PY' 2>/dev/null || echo unknown
+import asyncio
+from app.config import get_settings
+from app.riot.client import RiotClient
+from app.riot.errors import RiotUnauthorized
+from app.riot.routing import resolve_platform
+
+async def main():
+    settings = get_settings()
+    if not settings.has_key:
+        print("absent"); return
+    async with RiotClient(settings.riot_api_key) as client:
+        try:
+            # Challenger ladder: one call, no puuid needed, always exists.
+            await client.apex_league("RANKED_SOLO_5x5", "challenger", resolve_platform("euw1"))
+            print("alive")
+        except RiotUnauthorized:
+            print("expired")
+        except Exception as exc:
+            print(f"unreachable:{type(exc).__name__}")
+
+asyncio.run(main())
+PY
+)
+key_state="${key_state//[$'\r\n ']/}"
+log "riot key: ${key_state}"
+
+case "$key_state" in
+  alive)
+    # Order matters. Crawling finds matches, timelines deepen them, lobby ranks
+    # measure them; each later stage works on what the earlier one found.
+    run_stage "crawl"      python -m scripts.ingest crawl --target "$CRAWL_TARGET"      || failures=$((failures+1))
+    run_stage "timelines"  python -m scripts.ingest timelines --target "$TIMELINE_TARGET" || failures=$((failures+1))
+    run_stage "lobbyranks" python -m scripts.ingest lobbyranks --target "$LOBBY_TARGET"  || failures=$((failures+1))
+    ;;
+  expired|absent)
+    log "skipping crawl, timelines and lobbyranks: the key is ${key_state}."
+    log "rotate it with: docs/deploy.md -> 'Rotating the Riot key'"
+    ;;
+  *)
+    log "skipping the Riot stages: could not reach Riot (${key_state})."
+    ;;
+esac
+
+# Always. These read the stored corpus and make no network call, so they are
+# what keeps the tier list, the champion pages and the scores consistent with
+# whatever is on disk, key or no key.
+run_stage "aggregate" python -m scripts.ingest aggregate || failures=$((failures+1))
+run_stage "score"     python -m scripts.ingest score --rebuild-distributions || failures=$((failures+1))
+
+log "=== corpus now holds ==="
+$COMPOSE exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'
+
+if [ "$failures" -gt 0 ]; then
+  log "finished with ${failures} failed stage(s)"
+  exit 1
+fi
+log "finished cleanly"

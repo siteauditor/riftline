@@ -1,0 +1,490 @@
+"""Ingestion CLI.
+
+    python -m scripts.ingest status
+    python -m scripts.ingest crawl --target 500 --tier challenger
+    python -m scripts.ingest timelines --target 500
+    python -m scripts.ingest lobbyranks --target 2000
+    python -m scripts.ingest ladders --platform euw1
+    python -m scripts.ingest score
+    python -m scripts.ingest aggregate
+    python -m scripts.ingest aggregate --patch 15.18 --queue 420
+
+``crawl`` is resumable: stop it whenever and it picks the frontier back up. On a
+development key expect roughly 3,000 matches an hour, and remember the key
+itself expires after 24.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+
+from app.config import get_settings
+from app.db.base import SessionLocal, init_db
+from app.riot.client import RiotClient
+from app.riot.errors import RiotUnauthorized
+from app.riot.limiter import RateLimiter
+from app.services.aggregate import (
+    ALL_BRACKETS,
+    available_brackets,
+    available_slices,
+    rebuild_champion_stats,
+    rebuild_facet_stats,
+    rebuild_matchup_stats,
+    rebuild_synergy_stats,
+)
+from app.services.ingest import (
+    Ingestor,
+    LobbyRankBackfill,
+    TimelineBackfill,
+    corpus_summary,
+)
+from app.services.ladders import APEX_TIERS as LADDER_APEX_TIERS
+from app.services.ladders import DIVISIONS as LADDER_DIVISIONS
+from app.services.ladders import LadderService
+from app.services.scores import ScoreService
+from app.services.static_data import static_data
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-7s %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("ingest")
+
+
+def make_client(settings) -> RiotClient:
+    return RiotClient(
+        settings.riot_api_key,
+        limiter=RateLimiter(settings.parsed_rate_limits),
+        timeout=settings.riot_timeout_seconds,
+        max_retries=settings.riot_max_retries,
+    )
+
+
+async def cmd_status() -> int:
+    await init_db()
+    async with SessionLocal() as session:
+        summary = await corpus_summary(session)
+
+    print(f"\nMatches stored:      {summary['matches']:,}")
+    print(f"Participant rows:    {summary['participants']:,}")
+
+    held, left = summary["timelines"], summary["timelines_outstanding"]
+    # One decimal, because rounding 99.6% to "100%" beside "6 have no timeline"
+    # reads as a contradiction.
+    share = ""
+    if held + left:
+        pct = held / (held + left) * 100
+        share = "  (100% of matches)" if not left else f"  ({pct:.1f}% of matches)"
+    print(f"Timelines stored:    {held:,}{share}")
+    if left:
+        print(
+            f"  {left:,} match(es) have no timeline, so their laning scores, skill\n"
+            "  order and build paths are blank. Run: python -m scripts.ingest timelines"
+        )
+
+    scores = summary["scores"]
+    if scores["participants"]:
+        print(
+            f"Riftline scores:     {scores['scored']:,}"
+            f"  ({scores['percent']:.1f}% of participants)"
+        )
+        if scores["withheld_matches"]:
+            print(
+                f"  {scores['withheld_matches']:,} lobby(ies) withheld: not ten"
+                " players with lane roles, a remake, or a queue the corpus"
+                " cannot carry"
+            )
+        if not scores["distributions"]:
+            print("  no distributions measured yet. Run: python -m scripts.ingest score")
+
+    if not summary["slices"]:
+        print("\nNothing ingested yet. Run: python -m scripts.ingest crawl\n")
+        return 0
+
+    print("\nBy patch and queue:")
+    print(f"  {'patch':<10} {'queue':<8} {'matches':>10}")
+    for s in summary["slices"][:20]:
+        print(f"  {s['patch'] or '?':<10} {s['queue_id']:<8} {s['matches']:>10,}")
+    print()
+    return 0
+
+
+async def cmd_crawl(args) -> int:
+    settings = get_settings()
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+
+    await init_db()
+    await static_data.ensure_loaded()
+
+    client = make_client(settings)
+    try:
+        async with SessionLocal() as session:
+            ingestor = Ingestor(
+                session,
+                client,
+                settings,
+                platform=args.platform,
+                queue=args.queue,
+                seed_tier=args.tier,
+            )
+            log.info(
+                "crawling %s queue %s, target %d new matches (Ctrl-C to stop; progress is saved)",
+                args.platform, args.queue, args.target,
+            )
+            try:
+                await ingestor.crawl(
+                    target_matches=args.target,
+                    matches_per_player=args.per_player,
+                    seed_tier=args.tier,
+                )
+            except KeyboardInterrupt:
+                log.info("interrupted: %s", ingestor.stats.line())
+    except RiotUnauthorized as exc:
+        log.error("%s", exc.message)
+        return 2
+    finally:
+        await client.aclose()
+    return 0
+
+
+async def cmd_timelines(args) -> int:
+    settings = get_settings()
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+
+    await init_db()
+    client = make_client(settings)
+    try:
+        async with SessionLocal() as session:
+            backfill = TimelineBackfill(session, client, settings)
+            log.info(
+                "fetching up to %d timelines (Ctrl-C to stop; progress is the data itself)",
+                args.target,
+            )
+            try:
+                await backfill.run(target=args.target, batch=args.batch, patch=args.patch)
+            except KeyboardInterrupt:
+                log.info("interrupted: %s", backfill.stats.line())
+            left = await backfill.remaining(args.patch)
+            print()
+            print(
+                f"{backfill.stats.matches_new} timelines stored, "
+                f"{left:,} still outstanding"
+            )
+            if backfill.stats.matches_new:
+                print("run `python -m scripts.ingest aggregate` to fold them into the rollups")
+    except RiotUnauthorized as exc:
+        log.error("%s", exc.message)
+        return 2
+    finally:
+        await client.aclose()
+    return 0
+
+
+async def cmd_lobby_ranks(args) -> int:
+    settings = get_settings()
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+
+    await init_db()
+    client = make_client(settings)
+    try:
+        async with SessionLocal() as session:
+            backfill = LobbyRankBackfill(session, client, settings)
+            log.info(
+                "measuring up to %d lobbies (Ctrl-C to stop; progress is the data itself)",
+                args.target,
+            )
+            try:
+                await backfill.run(target=args.target, batch=args.batch, patch=args.patch)
+            except KeyboardInterrupt:
+                log.info("interrupted: %s", backfill.stats.line())
+            left = await backfill.remaining(args.patch)
+            print()
+            print(
+                f"{backfill.stats.matches_new} lobbies measured, "
+                f"{left:,} still outstanding"
+            )
+            print(
+                "note: this is every player's rank TODAY, not their rank on the "
+                "day they played. Riot exposes no historical rank, so the "
+                "measurement date is stored alongside and shown in the UI."
+            )
+    except RiotUnauthorized as exc:
+        log.error("%s", exc.message)
+        return 2
+    finally:
+        await client.aclose()
+    return 0
+
+
+async def cmd_ladders(args) -> int:
+    settings = get_settings()
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+
+    await init_db()
+    client = make_client(settings)
+    tiers = (
+        [t.upper() for t in args.tier.split(",")]
+        if args.tier != "apex"
+        else list(LADDER_APEX_TIERS)
+    )
+    try:
+        async with SessionLocal() as session:
+            service = LadderService(session, client, settings)
+            total = 0
+            for tier in tiers:
+                divisions = ["I"] if tier in LADDER_APEX_TIERS else list(LADDER_DIVISIONS)
+                for division in divisions:
+                    stored = await service.refresh(
+                        args.platform, queue_id=args.queue, tier=tier,
+                        division=division, pages=args.pages,
+                    )
+                    total += stored
+            print()
+            print(f"{total:,} ladder rows stored for {args.platform}")
+            print(
+                "names fill in as pages are viewed, and a resolved name is kept, "
+                "so a ladder gets cheaper the more it is used"
+            )
+    except RiotUnauthorized as exc:
+        log.error("%s", exc.message)
+        return 2
+    finally:
+        await client.aclose()
+    return 0
+
+
+async def cmd_aggregate(args) -> int:
+    await init_db()
+    await static_data.ensure_loaded()
+
+    async with SessionLocal() as session:
+        slices = await available_slices(session)
+        if not slices:
+            log.error("No matches to aggregate. Run `crawl` first.")
+            return 1
+
+        targets = [
+            s
+            for s in slices
+            if (args.patch is None or s["patch"] == args.patch)
+            and (args.queue is None or s["queue_id"] == args.queue)
+        ]
+        if not targets:
+            log.error("No data for patch=%s queue=%s", args.patch, args.queue)
+            return 1
+
+        # "ALL" plus each crawl provenance we hold, so the UI can offer a
+        # bracket filter. On a single-bracket corpus the two are identical and
+        # that is fine; it costs one extra pass and keeps the shape uniform.
+        brackets = [ALL_BRACKETS] if args.bracket == ALL_BRACKETS else [args.bracket]
+        if args.bracket is None:
+            brackets = await available_brackets(session)
+
+        for s in targets:
+            if s["matches"] < args.min_matches:
+                log.info(
+                    "skipping patch %s queue %s: only %d matches (need %d)",
+                    s["patch"], s["queue_id"], s["matches"], args.min_matches,
+                )
+                continue
+            for bracket in brackets:
+                slice_kwargs = {
+                    "patch": s["patch"],
+                    "queue_id": s["queue_id"],
+                    "rank_bracket": bracket,
+                }
+                champions = await rebuild_champion_stats(session, **slice_kwargs)
+                if not champions:
+                    continue
+                matchups = await rebuild_matchup_stats(
+                    session, **slice_kwargs, min_games=args.min_pair_games
+                )
+                synergies = await rebuild_synergy_stats(
+                    session, **slice_kwargs, min_games=args.min_pair_games
+                )
+                facets = await rebuild_facet_stats(
+                    session, **slice_kwargs, min_games=args.min_facet_games
+                )
+                print(
+                    f"patch {s['patch']} queue {s['queue_id']} [{bracket}]: "
+                    f"{champions} champion, {matchups} matchup, "
+                    f"{synergies} synergy, {facets} facet rows "
+                    f"from {s['matches']:,} matches"
+                )
+    return 0
+
+
+async def cmd_score(args) -> int:
+    """Lift the unmapped Riot fields, measure the corpus, score every lobby.
+
+    The only ingest command that makes no Riot request. Everything it reads is
+    already on disk in `matches.raw`, so there is no key to check, no limiter to
+    respect and no reason to pace it.
+    """
+    await init_db()
+
+    async with SessionLocal() as session:
+        service = ScoreService(session)
+
+        outstanding = await service.lift_remaining()
+        if outstanding:
+            log.info("lifting %d participant rows out of stored payloads", outstanding)
+            await service.lift_fields()
+
+        if args.rebuild_distributions or not await service.has_distributions():
+            await service.rebuild_distributions()
+
+        if args.rescore:
+            cleared = await service.rescore_stale()
+            if cleared:
+                print(f"{cleared:,} scores cleared: they were computed under older weights")
+
+        left = await service.unscored()
+        log.info("lobbies to score: %d", left)
+        try:
+            await service.score_matches(target=args.target)
+        except KeyboardInterrupt:
+            log.info("interrupted: %s", service.stats.line())
+
+        print()
+        print(service.stats.line())
+        coverage = await service.coverage()
+        print(
+            f"{coverage['scored']:,} of {coverage['participants']:,} participants scored "
+            f"({coverage['percent']:.1f}%), {coverage['distributions']} distributions"
+        )
+        if coverage["withheld_matches"]:
+            print(
+                f"{coverage['withheld_matches']:,} lobbies withheld: not ten players "
+                "with lane roles, a remake, or a queue our corpus cannot carry"
+            )
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog="ingest", description="Collect and aggregate League match data."
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("status", help="Show what has been ingested.")
+
+    crawl = sub.add_parser("crawl", help="Collect matches by walking the ladder.")
+    crawl.add_argument("--platform", default="euw1")
+    crawl.add_argument("--queue", type=int, default=420, help="420 solo, 440 flex.")
+    crawl.add_argument("--target", type=int, default=500, help="New matches to collect.")
+    crawl.add_argument("--per-player", type=int, default=10)
+    crawl.add_argument(
+        "--tier",
+        default="challenger",
+        help="Seed ladder: challenger, grandmaster, master, DIAMOND, EMERALD, ...",
+    )
+
+    tl = sub.add_parser(
+        "timelines",
+        help="Fetch match timelines for stored matches (laning score, skill order, build path).",
+    )
+    tl.add_argument("--target", type=int, default=500, help="Timelines to fetch this run.")
+    tl.add_argument("--batch", type=int, default=20, help="Matches per round trip.")
+    tl.add_argument("--patch", default=None, help="Restrict to one patch.")
+
+    lr = sub.add_parser(
+        "lobbyranks",
+        help="Measure the average rank of the players in stored matches.",
+    )
+    lr.add_argument("--target", type=int, default=2000, help="Lobbies to measure.")
+    lr.add_argument("--batch", type=int, default=20)
+    lr.add_argument("--patch", default=None, help="Restrict to one patch.")
+
+    ld = sub.add_parser("ladders", help="Snapshot ranked ladders for a platform.")
+    ld.add_argument("--platform", default="euw1")
+    ld.add_argument("--queue", type=int, default=420)
+    ld.add_argument(
+        "--tier",
+        default="apex",
+        help="'apex' for master/grandmaster/challenger, or a comma-separated list.",
+    )
+    ld.add_argument(
+        "--pages", type=int, default=5, help="Pages per division below apex."
+    )
+
+    sc = sub.add_parser(
+        "score",
+        help="Riftline scores, placements and badges. Reads local storage only.",
+    )
+    sc.add_argument(
+        "--target",
+        type=int,
+        default=None,
+        help="Stop after this many lobbies. Defaults to every unscored one.",
+    )
+    sc.add_argument(
+        "--rebuild-distributions",
+        action="store_true",
+        help="Re-measure the corpus first. Do this after ingesting new matches.",
+    )
+    sc.add_argument(
+        "--rescore",
+        action="store_true",
+        help="Clear scores computed under older weights so they are recomputed.",
+    )
+
+    agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
+    agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
+    agg.add_argument("--queue", type=int, default=None)
+    agg.add_argument(
+        "--min-matches",
+        type=int,
+        default=50,
+        help="Skip slices thinner than this; aggregates below it are noise.",
+    )
+    agg.add_argument(
+        "--bracket",
+        default=None,
+        help="Crawl provenance to aggregate. Defaults to ALL plus every bracket held.",
+    )
+    agg.add_argument(
+        "--min-pair-games",
+        type=int,
+        default=2,
+        help="Floor for matchup and synergy pairs.",
+    )
+    agg.add_argument(
+        "--min-facet-games",
+        type=int,
+        default=3,
+        help="Floor for builds, runes and spells. Complete builds have a long tail.",
+    )
+
+    args = parser.parse_args()
+    if args.command == "status":
+        return asyncio.run(cmd_status())
+    if args.command == "crawl":
+        return asyncio.run(cmd_crawl(args))
+    if args.command == "timelines":
+        return asyncio.run(cmd_timelines(args))
+    if args.command == "lobbyranks":
+        return asyncio.run(cmd_lobby_ranks(args))
+    if args.command == "ladders":
+        return asyncio.run(cmd_ladders(args))
+    if args.command == "score":
+        return asyncio.run(cmd_score(args))
+    if args.command == "aggregate":
+        return asyncio.run(cmd_aggregate(args))
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

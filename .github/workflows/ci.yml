@@ -1,0 +1,133 @@
+# Test, then deploy, on the box that serves the site.
+#
+# Everything runs inside the images, so the only thing this workflow needs from
+# the runner is Docker. That is deliberate: the VPS has Python 3.10 and no Node,
+# the project needs 3.12 and Node 22, and installing either on the host would
+# put the build environment out of step with the thing that serves traffic. The
+# suite runs in the image that gets deployed, not an approximation of it.
+#
+# The test job uses `docker build` and `docker run` rather than Compose, because
+# the Compose file requires `.env` (it carries the Riot key) and CI has no
+# business holding one. Tests need no key: the suite mocks Riot at the transport
+# layer and points the database at a throwaway file.
+#
+# The runner is self-hosted on the VPS, which is why this repository is private:
+# a fork's pull request must never be able to run arbitrary code on a box that
+# serves five other sites.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A second push while a deploy is mid-flight would leave two `compose up` runs
+# racing over one SQLite file and one set of containers.
+concurrency:
+  group: riftline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests and build
+    runs-on: [self-hosted, riftline]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the API image
+        run: docker build --pull -t riftline-api:ci ./backend
+
+      - name: Backend suite
+        run: docker run --rm riftline-api:ci python -m pytest -q
+
+      - name: Backend lint
+        run: docker run --rm riftline-api:ci ruff check app scripts tests
+
+      # The build stage is `tsc -b && vite build`, so a type error or a broken
+      # bundle fails here rather than shipping.
+      - name: Build the web bundle
+        run: docker build --pull --target build -t riftline-web:ci ./frontend
+
+      - name: Frontend lint
+        run: docker run --rm riftline-web:ci pnpm lint
+
+      - name: No em dashes
+        # A house rule, enforced rather than remembered.
+        run: |
+          if grep -rn "—" --include="*.ts" --include="*.tsx" --include="*.py" \
+               --include="*.css" --include="*.md" --include="*.yml" \
+               backend/app backend/scripts backend/tests frontend/src docs; then
+            echo "::error::em dash found; use commas, periods or parentheses"
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, riftline]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # The deploy directory is the source of truth for what is running, and it
+      # holds the one file that is not in git: .env, with the Riot key. Copying
+      # the checkout over it would delete that, so tracked files are synced and
+      # .env is excluded from both the copy and the delete.
+      - name: Sync the checkout into the deploy directory
+        run: |
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='data/' \
+            ./ /root/riftline/
+          chmod +x /root/riftline/deploy/nightly-ingest.sh
+
+      - name: Start the new containers
+        working-directory: /root/riftline
+        run: |
+          test -f .env || { echo "::error::/root/riftline/.env is missing"; exit 1; }
+          docker compose up -d --build
+
+      # A container that is up is not a site that works. This asks the app the
+      # same question a visitor's first page load asks.
+      - name: Health check
+        working-directory: /root/riftline
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T api python -c "
+import json, sys, urllib.request
+with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5) as r:
+    body = json.load(r)
+print(json.dumps({k: body.get(k) for k in ('status', 'riot_key_configured', 'static_data_version')}))
+sys.exit(0 if body.get('status') == 'ok' else 1)
+"; then
+              echo "api healthy after ${attempt} attempt(s)"
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::api did not become healthy"
+              docker compose logs --tail 50 api
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker compose exec -T web wget -qO- http://127.0.0.1/ -O /dev/null \
+            || { echo "::error::web container is not serving"; docker compose logs --tail 50 web; exit 1; }
+
+      # The schema is additive and idempotent, so this is safe on every deploy
+      # and is the only way a new column reaches the live corpus.
+      - name: Apply migrations
+        working-directory: /root/riftline
+        run: docker compose exec -T api python -m scripts.migrate
+
+      - name: Report what is live
+        working-directory: /root/riftline
+        run: |
+          docker compose ps
+          docker compose exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'
