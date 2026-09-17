@@ -130,6 +130,22 @@ pages and the scores consistent with whatever is on disk.
 journalctl -u riftline-ingest -n 100 --no-pager   # last run
 systemctl list-timers riftline-ingest             # when the next one is due
 /root/riftline/deploy/nightly-ingest.sh           # run it now
+make ingest                                       # the same, from here
+```
+
+The script itself is deployed with everything else, so editing it is a push.
+**The two systemd units are not**: they live in `/etc/systemd/system/`, outside
+the deploy directory, so changing `deploy/riftline-ingest.service` or `.timer`
+needs one command afterwards.
+
+```bash
+ssh MyVPS 'cp /root/riftline/deploy/riftline-ingest.{service,timer} /etc/systemd/system/            && systemctl daemon-reload && systemctl restart riftline-ingest.timer'
+```
+
+A first run with small targets, to prove the plumbing rather than fetch much:
+
+```bash
+ssh MyVPS 'CRAWL_TARGET=3 TIMELINE_TARGET=3 LOBBY_TARGET=5 /root/riftline/deploy/nightly-ingest.sh'
 ```
 
 ## CI/CD
@@ -159,12 +175,20 @@ run anything there, and this box serves five other sites.
 ### The runner
 
 ```bash
-systemctl status actions.runner.siteauditor-riftline.*   # is it up
-journalctl -u actions.runner.siteauditor-riftline.* -n 50
+systemctl status actions.runner.siteauditor-riftline.vmi3198945-riftline
+journalctl -u actions.runner.siteauditor-riftline.vmi3198945-riftline -n 50
 ```
 
-It is a second runner, in its own directory, alongside the one that already
-serves another project. They share nothing but the Docker daemon.
+It is a second runner, in its own directory (`/root/actions-runner-riftline`),
+alongside the one that already serves another project. They share nothing but
+the Docker daemon. Repo-scoped, labelled `riftline`, running as root, which is
+what lets it drive Compose.
+
+To re-register it (a new token is needed each time, and lasts an hour):
+
+```bash
+gh api -X POST repos/siteauditor/riftline/actions/runners/registration-token -q .token   | ssh MyVPS 'read -r T; cd /root/actions-runner-riftline; export RUNNER_ALLOW_RUNASROOT=1;       ./config.sh --unattended --replace --url https://github.com/siteauditor/riftline         --token "$T" --name vmi3198945-riftline --labels riftline --work _work < /dev/null'
+```
 
 ## Operating notes
 
