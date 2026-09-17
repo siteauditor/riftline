@@ -21,3 +21,8 @@ Makefile    text eol=lf
 *.ico binary
 *.webp binary
 *.db  binary
+
+# Riot's domain verification file. It must contain the code and nothing else,
+# so it is kept exactly as written: no end-of-line normalization, and nothing
+# appended on checkout.
+frontend/public/riot.txt -text
