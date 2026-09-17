@@ -55,14 +55,13 @@ async def get_profile(
     """Profile header: level, icon and every ranked queue."""
     asked = resolve_platform(platform)
     player = await players.resolve(platform, game_name, tag_line, refresh=refresh)
-    ranks = await players.ranks(player, platform, refresh=refresh)
-    # No summoner record on this shard. Every ranked queue will be empty too, so
-    # rather than report an unranked player, find out where they really play.
-    elsewhere = (
-        await players.home_platform(player.puuid, asked)
-        if player.summoner_level is None
-        else None
-    )
+    # Where this account's per-shard data actually is, which for an OCE Riot ID
+    # is usually SG2. Asked before the ranks, not after: reading league-v4 on
+    # the shard that has no record answers 200 with an empty list, and that
+    # renders as an unranked Challenger.
+    home = await players.effective_platform(player, asked)
+    ranks = await players.ranks(player, home.id, refresh=refresh)
+    elsewhere = home if home.id != asked.id else None
     # Their level and icon live on that shard, so read them from there rather
     # than showing a blank avatar for an account that plainly has one.
     elsewhere_summoner = (
@@ -125,7 +124,11 @@ async def get_mastery(
     """Full champion mastery table: one call to Riot, every champion the player has touched."""
     player = await players.resolve(platform, game_name, tag_line)
     puuid = player.puuid
-    masteries = await players.masteries(player, platform, refresh=refresh)
+    # champion-mastery-v4 on a shard this account has no record on answers 200
+    # with an empty list, so asking the wrong one reports a player who has
+    # never touched a champion.
+    home = await players.effective_platform(player, resolve_platform(platform))
+    masteries = await players.masteries(player, home.id, refresh=refresh)
     return to_mastery_response(puuid, masteries, sd)
 
 
@@ -285,10 +288,16 @@ async def get_live_game(
     # this line would fire a lazy SELECT and fail as MissingGreenlet. The match
     # history route guards the same way.
     puuid = player.puuid
-    game = await live.for_puuid(puuid, platform)
+    # spectator-v5 is per shard as well, and "not in a game" on the wrong shard
+    # is indistinguishable from the truth, so ask the one that holds the
+    # account. The response names the shard actually checked rather than the one
+    # in the URL: reporting `oc1` for a lookup made against `sg2` would be a
+    # quiet lie about where the answer came from.
+    home = await players.effective_platform(player, resolve_platform(platform))
+    game = await live.for_puuid(puuid, home.id)
     return LiveGameResponse(
         puuid=puuid,
-        platform=resolve_platform(platform).id,
+        platform=home.id,
         in_game=game is not None,
         game=(
             to_live_game(game, sd, sd.queue_name(game.queue_id))

@@ -54,6 +54,7 @@ ADDITIVE: dict[str, list[tuple[str, str]]] = {
     "players": [
         ("summoner_platform", "VARCHAR(8)"),
         ("league_platform", "VARCHAR(8)"),
+        ("mastery_platform", "VARCHAR(8)"),
     ],
     "match_participants": [
         ("laning_score", "FLOAT"),

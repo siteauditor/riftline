@@ -72,6 +72,12 @@ class Player(Base):
     summoner_platform: Mapped[str | None] = mapped_column(String(8))
     league_platform: Mapped[str | None] = mapped_column(String(8))
     mastery_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Same reason, one endpoint later. Mastery is per shard too, and a lookup on
+    # the wrong one answers 200 with an empty list, so without this the empty
+    # answer was cached against the puuid and the real table stayed hidden for
+    # the whole TTL. Measured on Veystrix#999, whose account is on SG2 and who
+    # holds 100 champions there and none on the OCE route.
+    mastery_platform: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     # lazy="raise_on_sql": under asyncio an implicit lazy load does not just cost

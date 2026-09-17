@@ -534,7 +534,11 @@ async def test_a_profile_on_the_wrong_shard_says_where_the_account_lives(client)
             404, json={"status": {"message": "Data not found", "status_code": 404}}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/league/v4/.*").mock(
+    # Not scoped to oc1: the ranked lookup follows the account to the shard it
+    # is actually on, so this has to answer for sg2 as well. This fixture has no
+    # ranked entries anywhere, which is what keeps the test about the borrowed
+    # identity rather than about ranks.
+    respx.get(url__regex=r".*/lol/league/v4/entries/by-puuid/.*").mock(
         return_value=httpx.Response(200, json=[])
     )
     ids = respx.get(
@@ -724,3 +728,323 @@ async def test_the_summoner_cache_is_scoped_to_one_shard():
             assert sg2.called
             assert player.summoner_level == 72
             assert player.summoner_platform == "sg2"
+
+
+@respx.mock
+async def test_mastery_reads_the_shard_the_account_is_on(client):
+    """champion-mastery-v4 answers 200 with an empty list on the wrong shard.
+
+    That is worse than the summoner-v4 404 next door, because there is nothing
+    to catch: a real account with 100 champions rendered as one that had never
+    touched a champion, and the page said so in good faith.
+
+    Measured on an OCE Riot ID whose account is on SG2: 0 champions on the OCE
+    route, 100 and 787,348 points on the SG2 one.
+    """
+    puuid = "M" * 78
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": puuid, "gameName": "Mastered", "tagLine": "999"}
+        )
+    )
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    )
+    wrong_shard = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    right_shard = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "championId": 45,
+                    "championLevel": 25,
+                    "championPoints": 249_708,
+                    "championPointsSinceLastLevel": 9_108,
+                    "championPointsUntilNextLevel": 1_892,
+                    "lastPlayTime": 1_789_597_438_000,
+                    "chestGranted": False,
+                    "tokensEarned": 12,
+                },
+                {
+                    "championId": 161,
+                    "championLevel": 10,
+                    "championPoints": 80_060,
+                    "championPointsSinceLastLevel": 4_460,
+                    "championPointsUntilNextLevel": 6_540,
+                    "lastPlayTime": 1_789_000_000_000,
+                    "chestGranted": False,
+                    "tokensEarned": 0,
+                },
+            ],
+        )
+    )
+
+    response = await client.get("/api/summoner/oc1/Mastered/999/mastery")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert right_shard.called
+    assert not wrong_shard.called
+    assert body["total_champions_played"] == 2
+    assert body["total_points"] == 329_768
+    assert [entry["champion"]["id"] for entry in body["entries"]] == [45, 161]
+
+
+@respx.mock
+async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
+    """spectator-v5 is per shard too, and its answer is a 404 either way.
+
+    "Not in a game" and "wrong shard" are the same response, so this one could
+    not be noticed from the outside at all: the tab simply never showed a game.
+    """
+    puuid = "L" * 78
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": puuid, "gameName": "Playing", "tagLine": "999"}
+        )
+    )
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    )
+    wrong_shard = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/spectator/v5/.*"
+    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
+    right_shard = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/spectator/v5/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "gameId": 7_412_345_678,
+                "gameType": "MATCHED_GAME",
+                "gameQueueConfigId": 420,
+                "gameMode": "CLASSIC",
+                "platformId": "SG2",
+                "gameLength": 556,
+                "gameStartTime": 1_789_600_000_000,
+                "bannedChampions": [],
+                "participants": [
+                    {
+                        "puuid": puuid,
+                        "teamId": 100,
+                        "championId": 45,
+                        "spell1Id": 4,
+                        "spell2Id": 14,
+                        "perks": {
+                            "perkIds": [8214],
+                            "perkStyle": 8200,
+                            "perkSubStyle": 8300,
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
+    response = await client.get("/api/summoner/oc1/Playing/999/live")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert right_shard.called
+    assert not wrong_shard.called
+    assert body["in_game"] is True
+    # The shard actually asked, not the one in the URL. Reporting oc1 for an
+    # answer that came from sg2 would be a quiet lie about its provenance.
+    assert body["platform"] == "sg2"
+    assert body["game"]["queue_id"] == 420
+
+
+@respx.mock
+async def test_ranks_come_from_the_shard_the_account_is_on(client):
+    """league-v4 on the wrong shard is an empty list, which renders as unranked.
+
+    The profile already borrowed the level and icon from the home shard, so the
+    page showed a level-85 account with a face and "Unranked this season" over
+    a real Bronze III. Two of the three facts were right, which is what made it
+    convincing.
+    """
+    puuid = "R" * 78
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": puuid, "gameName": "Ranked", "tagLine": "999"}
+        )
+    )
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    )
+    respx.get(url__regex=r".*sg2\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "puuid": puuid,
+                "profileIconId": 7180,
+                "revisionDate": 1_726_000_000_000,
+                "summonerLevel": 85,
+            },
+        )
+    )
+    wrong_shard = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/league/v4/.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    right_shard = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/league/v4/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "queueType": "RANKED_SOLO_5x5",
+                    "tier": "BRONZE",
+                    "rank": "III",
+                    "leaguePoints": 51,
+                    "wins": 121,
+                    "losses": 156,
+                    "hotStreak": False,
+                    "inactive": False,
+                }
+            ],
+        )
+    )
+
+    response = await client.get("/api/summoner/oc1/Ranked/999")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert right_shard.called
+    assert not wrong_shard.called
+    assert body["plays_on"] == "sg2"
+    assert body["summoner_level"] == 85
+    assert [(r["tier"], r["division"], r["league_points"]) for r in body["ranks"]] == [
+        ("BRONZE", "III", 51)
+    ]
+
+
+@respx.mock
+async def test_the_mastery_cache_is_scoped_to_one_shard():
+    """An empty mastery table read from the wrong shard must not be cached.
+
+    Same shape as the summoner cache above, and the reason it needs its own
+    test: the stamp said "fetched at", nothing said "from where", so the empty
+    OCE answer satisfied the next SG2 lookup for the whole TTL. That is why
+    this outlived the first fix.
+
+    The TTL is zeroed in the test settings, so this drives the service directly
+    rather than going through a request, which cannot tell a scoped cache from
+    a cold one.
+    """
+    from app.config import get_settings
+    from app.db.base import SessionLocal
+    from app.db.models import Player, utcnow
+    from app.riot.client import RiotClient
+    from app.services.players import PlayerService
+
+    # Named rather than the usual repeated letter: the suite shares one
+    # database, "C" * 78 already belongs to a test above, and the collision
+    # surfaces as a UNIQUE constraint failure a long way from the cause.
+    puuid = "mastery-cache-scope".ljust(78, "0")
+    oc1 = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    sg2 = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"championId": 45, "championLevel": 25, "championPoints": 249_708}],
+        )
+    )
+
+    async with SessionLocal() as session:
+        session.add(
+            Player(
+                puuid=puuid,
+                game_name="Cached",
+                tag_line="0003",
+                search_name="cached",
+                platform="oc1",
+            )
+        )
+        await session.commit()
+
+        settings = get_settings()
+        async with RiotClient(settings.riot_api_key) as riot:
+            service = PlayerService(session, riot, settings)
+            player = await session.get(Player, puuid)
+
+            empty = await service.masteries(player, "oc1")
+            assert oc1.called
+            assert empty == []
+            # The miss is stamped, but against the shard it happened on.
+            assert player.mastery_platform == "oc1"
+            assert player.mastery_fetched_at is not None
+
+            # Freshly stamped a moment ago, and it must still not answer for
+            # another shard.
+            player.mastery_fetched_at = utcnow()
+            found = await service.masteries(player, "sg2")
+            assert sg2.called
+            assert [m.champion_id for m in found] == [45]
+            assert player.mastery_platform == "sg2"
+
+
+@respx.mock
+async def test_the_asked_shard_is_used_when_the_account_is_on_it():
+    """The ordinary case must cost nothing.
+
+    Every profile on the right shard would otherwise pay a regional match-ids
+    call to be told what it already knew, and most traffic is on the right
+    shard.
+    """
+    from app.config import get_settings
+    from app.db.base import SessionLocal
+    from app.db.models import Player
+    from app.riot.client import RiotClient
+    from app.riot.routing import resolve_platform
+    from app.services.players import PlayerService
+
+    puuid = "asked-shard-is-used".ljust(78, "0")
+    ids = respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    )
+
+    async with SessionLocal() as session:
+        session.add(
+            Player(
+                puuid=puuid,
+                game_name="Local",
+                tag_line="EUW",
+                search_name="local",
+                platform="euw1",
+                summoner_level=731,
+                summoner_platform="euw1",
+            )
+        )
+        await session.commit()
+
+        settings = get_settings()
+        async with RiotClient(settings.riot_api_key) as riot:
+            service = PlayerService(session, riot, settings)
+            player = await session.get(Player, puuid)
+            euw1 = resolve_platform("euw1")
+
+            assert (await service.effective_platform(player, euw1)).id == "euw1"
+            assert not ids.called
+
+            # With no record on the asked shard it goes looking, and believes
+            # what the match id says.
+            player.summoner_level = None
+            assert (await service.effective_platform(player, euw1)).id == "sg2"
+            assert ids.called

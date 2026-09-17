@@ -243,6 +243,32 @@ class PlayerService:
             return None
         return None if found.id == asked.id else found
 
+    async def effective_platform(self, player: Player, asked: Platform) -> Platform:
+        """The shard whose per-shard endpoints actually hold this account.
+
+        account-v1 resolves a Riot ID across a whole *region*, so a search on
+        any shard in that region finds the account. Everything after that is
+        per shard: summoner-v4, league-v4, champion-mastery-v4 and
+        spectator-v5 each answer only for the platform they are asked. On the
+        wrong one, summoner-v4 says 404 while the other three answer 200 with
+        nothing in them, which is the worse failure: a real account renders as
+        unranked, with no mastery and never in a game.
+
+        OCE is where this bites in practice. `oc1` and `sg2` share the `sea`
+        regional route, so an OCE Riot ID resolves and its matches load, while
+        the account itself lives on SG2 and the four endpoints above are blank.
+
+        Call this after ``resolve``: a null ``summoner_level`` is
+        ``ensure_summoner`` reporting that this shard has no record, which is
+        the only cheap signal that the question needs asking at all. When it
+        does, ``home_platform`` reads the answer out of stored matches for
+        free, and costs one regional call only for an account nobody has
+        looked at yet.
+        """
+        if player.summoner_level is not None:
+            return asked
+        return await self.home_platform(player.puuid, asked) or asked
+
     async def summoner_snapshot(self, puuid: str, platform: Platform) -> dict | None:
         """summoner-v4 on ``platform``, read only: nothing is written.
 
@@ -296,7 +322,14 @@ class PlayerService:
         stmt = select(ChampionMastery).where(ChampionMastery.puuid == player.puuid)
         current = list((await self.session.execute(stmt)).scalars())
 
-        if not refresh and _is_fresh(player.mastery_fetched_at, self.settings.ttl_mastery):
+        # Scoped to the platform, like the summoner and league caches above and
+        # for the same reason: mastery on the wrong shard is an empty 200, and
+        # stamping that as fresh hides the real table until the TTL runs out.
+        if (
+            not refresh
+            and player.mastery_platform == platform.id
+            and _is_fresh(player.mastery_fetched_at, self.settings.ttl_mastery)
+        ):
             return current
 
         raw_list = await self.client.champion_masteries(player.puuid, platform)
@@ -322,6 +355,7 @@ class PlayerService:
             if champion_id not in existing:
                 self.session.add(mastery)
 
+        player.mastery_platform = platform.id
         player.mastery_fetched_at = utcnow()
         await self._commit_tolerating_race(player)
         return list((await self.session.execute(stmt)).scalars())
