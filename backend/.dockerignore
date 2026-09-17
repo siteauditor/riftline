@@ -1,0 +1,20 @@
+# What must not reach the image build.
+#
+# .venv is 111 MB of Linux-or-Windows wheels that the image installs itself
+# from requirements.txt, and data/ is the corpus, which lives in a volume.
+.venv
+venv
+data
+
+.env
+.env.*
+!.env.example
+
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+*.egg-info
+
+.git
+.gitignore

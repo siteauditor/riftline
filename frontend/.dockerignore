@@ -1,0 +1,18 @@
+# What must not reach the image build.
+#
+# node_modules is the one that matters. `COPY . .` runs after
+# `pnpm install --frozen-lockfile`, so without this line a Windows checkout's
+# node_modules would overwrite the freshly installed Linux one, and the build
+# would fail on a native binary (esbuild, rollup) compiled for the wrong
+# platform. It is also 150 MB of build context for nothing.
+node_modules
+dist
+.vite
+
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+*.log

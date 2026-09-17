@@ -81,7 +81,9 @@ services:
       caddy.header.X-Content-Type-Options: nosniff
       caddy.header.Referrer-Policy: strict-origin-when-cross-origin
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/", "-O", "/dev/null"]
+      # BusyBox wget. Two -O flags (as in `-qO- ... -O /dev/null`) is the kind
+      # of thing that works until it does not.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
       timeout: 5s
       start_period: 10s

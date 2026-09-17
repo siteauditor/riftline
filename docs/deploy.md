@@ -70,8 +70,9 @@ scp data/lol.db MyVPS:/tmp/lol.db
 ssh MyVPS 'docker run --rm -v riftline_data:/data -v /tmp:/host alpine \
              sh -c "cp /host/lol.db /data/lol.db && chmod 644 /data/lol.db" && rm /tmp/lol.db'
 
-# 3. Bring it up.
+# 3. Bring it up, and ask it whether that worked.
 ssh MyVPS 'cd /root/riftline && docker compose up -d --build'
+make health
 
 # 4. The nightly ingestion timer.
 ssh MyVPS 'cp /root/riftline/deploy/riftline-ingest.{service,timer} /etc/systemd/system/ \
@@ -98,7 +99,7 @@ or by hand:
 ssh MyVPS 'cd /root/riftline \
   && sed -i "s|^RIOT_API_KEY=.*|RIOT_API_KEY=RGAPI-...|" .env \
   && docker compose up -d --force-recreate api \
-  && sleep 5 && docker compose exec -T api python -m scripts.ingest status | head -3'
+  && docker compose exec -T api python - < deploy/healthcheck.py'
 ```
 
 It is a restart, not a rebuild: the key is read from `.env` at start, so there
@@ -141,9 +142,15 @@ build, `oxlint`, and an em dash check. Nothing is installed on the host; the
 runner needs only Docker. The suite runs in the image that gets deployed.
 
 **Deploy** (pushes to `main` only) rsyncs the checkout into `/root/riftline`
-excluding `.env` and `data/`, rebuilds and restarts the containers, waits for
-`/api/health` to answer `ok`, checks the web container is serving, applies
-migrations, and prints what is live.
+excluding `.env` and `data/`, rebuilds and restarts the containers, runs
+`deploy/healthcheck.py`, checks nginx is serving the built bundle rather than
+merely answering, applies migrations, and prints what is live.
+
+`deploy/healthcheck.py` waits for `/api/health` to say `ok`, then counts the
+rows in the live database. The second half earns its keep: a container comes up
+perfectly healthy against an empty database, and the only symptom would be a
+site that looks right and shows nothing. `make health` runs the same check by
+hand.
 
 The repository is **private** on purpose. A self-hosted runner executes
 workflow code on the box; on a public repository a fork's pull request could

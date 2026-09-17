@@ -14,6 +14,7 @@ help:
 	@echo "logs [N=50]                Tail the API log"
 	@echo "ingest                     Run the nightly pipeline now"
 	@echo "backup                     Copy the live corpus here as a tarball"
+	@echo "health                     Is the API answering, with the corpus under it"
 	@echo "deploy                     Rebuild and restart from what is on the box"
 
 # A development key expires 24 hours after it is issued. This is a restart, not
@@ -25,11 +26,7 @@ rotate-key:
 	@ssh $(VPS) 'set -e; cd $(DIR); \
 	  sed -i "s|^RIOT_API_KEY=.*|RIOT_API_KEY=$(KEY)|" .env; \
 	  docker compose up -d --force-recreate api >/dev/null; \
-	  sleep 6; \
-	  docker compose exec -T api python -c "\
-import json,urllib.request; \
-b=json.load(urllib.request.urlopen(\"http://127.0.0.1:8000/api/health\",timeout=10)); \
-print(\"key configured:\", b[\"riot_key_configured\"], \"| data dragon:\", b[\"static_data_version\"])"'
+	  docker compose exec -T api python - < deploy/healthcheck.py'
 	@echo "rotated. The key is never printed by this target or by the app."
 
 .PHONY: status
@@ -56,5 +53,12 @@ backup:
 .PHONY: deploy
 deploy:
 	@ssh $(VPS) 'set -e; $(COMPOSE) up -d --build; \
-	  $(COMPOSE) exec -T api python -m scripts.migrate; \
-	  $(COMPOSE) ps'
+	  docker compose exec -T api python - < deploy/healthcheck.py; \
+	  docker compose exec -T api python -m scripts.migrate; \
+	  docker compose ps'
+
+# What CI checks after a deploy: the app answers, and the corpus is still
+# under it.
+.PHONY: health
+health:
+	@ssh $(VPS) 'cd $(DIR) && docker compose exec -T api python - < deploy/healthcheck.py'

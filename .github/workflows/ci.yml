@@ -57,10 +57,19 @@ jobs:
 
       - name: No em dashes
         # A house rule, enforced rather than remembered.
+        #
+        # The pattern is spelled as its UTF-8 bytes rather than written out,
+        # so this file can be swept along with everything else instead of
+        # matching itself forever.
         run: |
-          if grep -rn "—" --include="*.ts" --include="*.tsx" --include="*.py" \
+          dash=$(printf '\342\200\224')
+          if grep -rn "$dash" \
+               --include="*.ts" --include="*.tsx" --include="*.py" \
                --include="*.css" --include="*.md" --include="*.yml" \
-               backend/app backend/scripts backend/tests frontend/src docs; then
+               --include="*.sh" --include="*.conf" --include="Dockerfile" \
+               --include="Makefile" --include="*.service" --include="*.timer" \
+               backend/app backend/scripts backend/tests frontend/src \
+               docs deploy .github Makefile docker-compose.yml; then
             echo "::error::em dash found; use commas, periods or parentheses"
             exit 1
           fi
@@ -94,31 +103,20 @@ jobs:
           docker compose up -d --build
 
       # A container that is up is not a site that works. This asks the app the
-      # same question a visitor's first page load asks.
+      # same question a visitor's first page load asks, and then asks whether
+      # the corpus is still under it: a healthy container on an empty database
+      # would serve a site that looks fine and shows nothing.
+      #
+      # The program goes in on stdin so there is no second copy of the image's
+      # layout to keep in step.
       - name: Health check
         working-directory: /root/riftline
-        run: |
-          for attempt in $(seq 1 30); do
-            if docker compose exec -T api python -c "
-import json, sys, urllib.request
-with urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5) as r:
-    body = json.load(r)
-print(json.dumps({k: body.get(k) for k in ('status', 'riot_key_configured', 'static_data_version')}))
-sys.exit(0 if body.get('status') == 'ok' else 1)
-"; then
-              echo "api healthy after ${attempt} attempt(s)"
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "::error::api did not become healthy"
-              docker compose logs --tail 50 api
-              exit 1
-            fi
-            sleep 2
-          done
+        run: docker compose exec -T api python - < deploy/healthcheck.py
 
-          docker compose exec -T web wget -qO- http://127.0.0.1/ -O /dev/null \
-            || { echo "::error::web container is not serving"; docker compose logs --tail 50 web; exit 1; }
+      - name: The site is serving the bundle
+        working-directory: /root/riftline
+        run: |
+          docker compose exec -T web wget -q -O - http://127.0.0.1/             | grep -q 'id="root"'             || { echo "::error::web container is not serving the built bundle";                  docker compose logs --tail 50 web; exit 1; }
 
       # The schema is additive and idempotent, so this is safe on every deploy
       # and is the only way a new column reaches the live corpus.

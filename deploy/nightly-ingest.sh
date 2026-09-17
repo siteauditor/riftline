@@ -58,7 +58,7 @@ failures=0
 # by reading the clock: a key can also be revoked, and the answer we want is
 # "will Riot talk to us", not "is it probably still fresh".
 log "=== checking the Riot key ==="
-key_state=$($COMPOSE exec -T api python - <<'PY' 2>/dev/null || echo unknown
+key_output=$($COMPOSE exec -T api python - <<'PY' 2>/dev/null
 import asyncio
 from app.config import get_settings
 from app.riot.client import RiotClient
@@ -81,15 +81,29 @@ async def main():
 
 asyncio.run(main())
 PY
-)
-key_state="${key_state//[$'\r\n ']/}"
+) || key_output=""
+
+# Only the four answers below count. Anything else the container happened to
+# write on stdout is ignored, so one stray line of application logging cannot be
+# mistaken for a verdict on the key.
+key_state=$(printf '%s\n' "$key_output" | tr -d '\r' \
+  | grep -Ex 'alive|expired|absent|unreachable:.*' | tail -n 1)
+key_state="${key_state:-unknown}"
 log "riot key: ${key_state}"
+
+# Whether tonight actually brought anything new in. It decides below whether the
+# percentile distributions are worth rebuilding.
+ingested=0
 
 case "$key_state" in
   alive)
     # Order matters. Crawling finds matches, timelines deepen them, lobby ranks
     # measure them; each later stage works on what the earlier one found.
-    run_stage "crawl"      python -m scripts.ingest crawl --target "$CRAWL_TARGET"      || failures=$((failures+1))
+    if run_stage "crawl" python -m scripts.ingest crawl --target "$CRAWL_TARGET"; then
+      ingested=1
+    else
+      failures=$((failures+1))
+    fi
     run_stage "timelines"  python -m scripts.ingest timelines --target "$TIMELINE_TARGET" || failures=$((failures+1))
     run_stage "lobbyranks" python -m scripts.ingest lobbyranks --target "$LOBBY_TARGET"  || failures=$((failures+1))
     ;;
@@ -106,7 +120,18 @@ esac
 # what keeps the tier list, the champion pages and the scores consistent with
 # whatever is on disk, key or no key.
 run_stage "aggregate" python -m scripts.ingest aggregate || failures=$((failures+1))
-run_stage "score"     python -m scripts.ingest score --rebuild-distributions || failures=$((failures+1))
+
+# --rescore costs one query and makes a change to the weights self-applying on
+# the first run after a deploy. --rebuild-distributions is the expensive one: it
+# clears and recomputes every score in the corpus, which is worth doing when the
+# night brought new matches and is pure work when the key was dead and nothing
+# moved. So it is conditional, and `score` on its own still measures the
+# distributions the first time it finds none.
+score_stage=(python -m scripts.ingest score --rescore)
+if [ "$ingested" -eq 1 ]; then
+  score_stage+=(--rebuild-distributions)
+fi
+run_stage "score" "${score_stage[@]}" || failures=$((failures+1))
 
 log "=== corpus now holds ==="
 $COMPOSE exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'
