@@ -220,17 +220,19 @@
   select.control-bare {
     cursor: pointer;
     /*
-     * The open option list is drawn by the browser and cannot be themed: Chrome
-     * on Windows paints it on its own light ground and ignores
-     * `background-color` on an `<option>`, while still honouring `color`. Our
-     * near-white ink was therefore inherited into the popup and the list came
-     * out white on white. Measured in Chrome on Windows 11, 2026-09-18.
+     * The open option list takes its ground from this element's own
+     * `background-color`, which is dark. An earlier fix here assumed the
+     * opposite, that Chrome on Windows always paints the popup light and
+     * ignores author colours inside it, and pinned `color-scheme: light` with a
+     * dark ink on the options to suit. The popup stayed dark and every option
+     * went with it: a seventeen-row list with one readable entry, the selected
+     * one, visible only because the system highlight sat behind it.
      *
-     * So the popup is pinned to the light scheme, which every platform draws
-     * light, and the options below take an ink that contrasts with it. The
-     * closed control is unaffected: it sets its own colours explicitly.
+     * So the scheme matches the ground the popup actually gets, and the options
+     * below state both halves of the pair rather than relying on either being
+     * inherited.
      */
-    color-scheme: light;
+    color-scheme: dark;
     /* Room for the chevron. A caller that sets `px-*` overrides this and the
        text runs under the arrow, so selects take their padding from here. */
     padding-right: 1.55rem;
@@ -250,6 +252,27 @@
     border: 0;
   }
 
+  /*
+   * Loading placeholders.
+   *
+   * One shape, one fill, and the breathing lives on the *container*, so every
+   * placeholder in a list changes together. Per-element `animate-pulse` with a
+   * staggered delay was read, accurately, as water flowing down the page: a
+   * travelling wave draws the eye along it, which is the opposite of what a
+   * placeholder is for. In phase, it reads as a held breath instead.
+   *
+   * `prefers-reduced-motion` stops it via the global rule at the end of this
+   * file, leaving the shapes in place.
+   */
+  .skeleton {
+    background-color: var(--color-line-soft);
+    border-radius: 2px;
+  }
+
+  .skeleton-breathing {
+    animation: skeleton-breathe 2s ease-in-out infinite;
+  }
+
   /* The spinner is a third piece of native chrome, and nobody steps a game
      count one at a time. */
   .control::-webkit-inner-spin-button,
@@ -259,13 +282,30 @@
   }
 
   /*
-   * A literal dark ink, not `inherit` and not a system colour: the ground it
-   * sits on belongs to the browser, and the light scheme pinned above is the
-   * only thing we know about it.
+   * Both halves, stated together. Whether the popup takes its ground from the
+   * select, from these options or from the colour scheme, the pair is the same
+   * one, so the list cannot come out one colour on itself the way it did twice.
+   *
+   * Literal values rather than the tokens: these are read by the browser's own
+   * popup, outside the document, and a custom property that failed to resolve
+   * there would fall back to "no colour" and take the text with it.
    */
   select.control option,
   select.control-bare option {
-    color: #11181b;
+    background-color: #111b1f;
+    color: #e8f0f2;
+  }
+}
+
+/* Outside every layer on purpose: a keyframe set is not a style rule and
+   cascade layers do not apply to it. */
+@keyframes skeleton-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
   }
 }
 

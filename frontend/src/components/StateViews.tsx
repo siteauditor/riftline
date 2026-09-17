@@ -14,16 +14,88 @@ export function Spinner({ label }: { label?: string }) {
   )
 }
 
-/** Skeleton rows sized to the real match list, so the layout does not jump. */
+/**
+ * Placeholder match rows.
+ *
+ * It traces the real row's grid, `[104px auto 1fr auto]`, and the shapes inside
+ * each column, so the list that arrives lands where the placeholder stood and
+ * nothing jumps. Six blank bars did hold the height, but they said nothing
+ * about what was coming and their staggered pulse travelled down the page like
+ * water. The breathing is on the wrapper here, so all of it moves as one.
+ */
 export function MatchListSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="space-y-1.5" aria-hidden>
+    <div className="skeleton-breathing space-y-1.5" aria-hidden>
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}
-          className="h-[86px] animate-pulse border-b border-l-[3px] border-line-soft border-l-line bg-panel/40"
-          style={{ animationDelay: `${i * 70}ms` }}
-        />
+          className="border-b border-l-[3px] border-line-soft border-l-line bg-panel/40"
+        >
+          <div className="grid grid-cols-1 gap-x-4 gap-y-3 px-3 py-3 sm:grid-cols-[104px_auto_1fr_auto]">
+            {/* Queue, time, result and duration. Not the lobby rank badge: a
+                row only grows that once its lobby has been measured, and a
+                profile being loaded for the first time is exactly the case
+                this stands in for. */}
+            <div className="space-y-1.5">
+              <div className="skeleton h-3 w-20" />
+              <div className="skeleton h-2.5 w-12" />
+              <div className="skeleton h-2.5 w-16" />
+            </div>
+
+            {/* Champion, then the two 22px stacks of spells and runes */}
+            <div className="flex items-center gap-2">
+              <div className="skeleton size-12 shrink-0" />
+              <div className="flex flex-col gap-0.5">
+                <div className="skeleton size-[22px]" />
+                <div className="skeleton size-[22px]" />
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <div className="skeleton size-[22px] rounded-full" />
+                <div className="skeleton size-[22px] rounded-full" />
+              </div>
+            </div>
+
+            {/* KDA and the Riftline score, then the two stat pairs and the
+                item row, in the same flex-wrap the row uses. */}
+            <div className="flex flex-wrap items-start gap-x-6 gap-y-2">
+              {/* KDA at 22px display, its ratio, and the score with its
+                  placement. Laning is left out for the same reason as the rank
+                  badge: it needs a timeline that has not been fetched yet.
+                  Measured against a freshly loaded row, 118px, which is what a
+                  placeholder is standing in front of. */}
+              <div className="space-y-1.5">
+                <div className="skeleton h-5 w-24" />
+                <div className="skeleton h-2.5 w-16" />
+                <div className="skeleton h-3.5 w-20" />
+              </div>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1 pt-0.5 sm:grid-cols-1">
+                <div className="skeleton h-2.5 w-20" />
+                <div className="skeleton h-2.5 w-14" />
+              </div>
+              <div className="grid grid-cols-2 gap-x-5 gap-y-1 pt-0.5 sm:grid-cols-1">
+                <div className="skeleton h-2.5 w-16" />
+                <div className="skeleton h-2.5 w-12" />
+              </div>
+              <div className="flex gap-1 pt-0.5">
+                {Array.from({ length: 6 }).map((_, n) => (
+                  <div key={n} className="skeleton size-[26px]" />
+                ))}
+                <div className="skeleton size-[26px] rounded-full" />
+              </div>
+            </div>
+
+            {/* Ten names in two columns, only on the wide layout, exactly as
+                the row itself hides them when narrow. */}
+            <div className="hidden grid-cols-2 gap-x-4 gap-y-1 lg:grid">
+              {Array.from({ length: 10 }).map((_, n) => (
+                <div key={n} className="flex items-center gap-1.5">
+                  <div className="skeleton size-4 shrink-0" />
+                  <div className="skeleton h-2 w-16" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       ))}
     </div>
   )
