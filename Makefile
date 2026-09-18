@@ -15,7 +15,7 @@ help:
 	@echo "ingest                     Run the nightly pipeline now"
 	@echo "backup                     Copy the live corpus here as a tarball"
 	@echo "health                     Is the API answering, with the corpus under it"
-	@echo "deploy                     Rebuild and restart from what is on the box"
+	@echo "deploy [SHA=...]           Deploy the tip of main, or a given commit"
 
 # A development key expires 24 hours after it is issued. This is a restart, not
 # a rebuild: the key is read from .env at start.
@@ -48,14 +48,15 @@ backup:
 	  > riftline-corpus-$$(date +%F).tar.gz
 	@ls -lh riftline-corpus-$$(date +%F).tar.gz
 
-# Normally CI does this on a push to main. Useful when the runner is down or to
-# redeploy without a commit.
+# Normally CI does this on a push to main. By hand, it goes through the same
+# entry point CI does, so the lock and the main-only check still apply. Deploys
+# the tip of main, or SHA=<commit> to deploy (or roll back to) a specific one.
 .PHONY: deploy
 deploy:
-	@ssh $(VPS) 'set -e; $(COMPOSE) up -d --build; \
-	  docker compose exec -T api python - < deploy/healthcheck.py; \
-	  docker compose exec -T api python -m scripts.migrate; \
-	  docker compose ps'
+	@sha="$(SHA)"; \
+	  [ -n "$$sha" ] || sha=$$(git ls-remote origin refs/heads/main | cut -f1); \
+	  echo "deploying $$sha"; \
+	  ssh $(VPS) "SSH_ORIGINAL_COMMAND=$$sha /usr/local/bin/riftline-deploy"
 
 # What CI checks after a deploy: the app answers, and the corpus is still
 # under it.

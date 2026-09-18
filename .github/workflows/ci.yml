@@ -1,19 +1,31 @@
-# Test, then deploy, on the box that serves the site.
+# Test on GitHub's machines, then ask the server to deploy the commit that passed.
 #
-# Everything runs inside the images, so the only thing this workflow needs from
-# the runner is Docker. That is deliberate: the VPS has Python 3.10 and no Node,
-# the project needs 3.12 and Node 22, and installing either on the host would
-# put the build environment out of step with the thing that serves traffic. The
-# suite runs in the image that gets deployed, not an approximation of it.
+# The repository is public, so anyone can open a pull request, and a pull
+# request can edit this file. Everything here is arranged so that doing so
+# reaches nothing that matters.
 #
-# The test job uses `docker build` and `docker run` rather than Compose, because
-# the Compose file requires `.env` (it carries the Riot key) and CI has no
-# business holding one. Tests need no key: the suite mocks Riot at the transport
-# layer and points the database at a throwaway file.
+# * Tests run on GitHub-hosted runners: a fresh virtual machine per job, thrown
+#   away afterwards. A hostile pull request can run anything it likes there, and
+#   it runs on a machine that holds nothing.
 #
-# The runner is self-hosted on the VPS, which is why this repository is private:
-# a fork's pull request must never be able to run arbitrary code on a box that
-# serves five other sites.
+# * There is no self-hosted runner. This project used to have one on the VPS,
+#   running as root with Docker, which is root on a box serving five other
+#   sites. A pull request that edited `runs-on` could have run code there. The
+#   runner is gone, so there is no machine of ours for a workflow to name.
+#
+# * Deploying needs the `production` environment, which only `main` may use,
+#   and which holds the only secrets this workflow has. GitHub never gives
+#   secrets to a pull request from a fork.
+#
+# * The deploy key cannot open a shell. It is a forced command on the server
+#   (deploy/riftline-deploy): it accepts one commit sha, only one already on
+#   main, and deploys exactly that. See docs/deploy.md.
+#
+# Everything runs inside the images, so a runner needs nothing but Docker, and
+# the suite runs in the image that gets deployed rather than an approximation of
+# it. The test job uses `docker build` and `docker run` rather than Compose,
+# because the Compose file requires `.env` (the Riot key) and CI has no business
+# holding one: the suite mocks Riot at the transport layer.
 
 name: CI
 
@@ -24,8 +36,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The token every job gets. Read-only: nothing here writes to the repository.
+permissions:
+  contents: read
+
 # A second push while a deploy is mid-flight would leave two `compose up` runs
-# racing over one SQLite file and one set of containers.
+# racing over one SQLite file. The server takes a lock as well (see
+# deploy/riftline-deploy), which also covers a deploy started by hand.
 concurrency:
   group: riftline-${{ github.ref }}
   cancel-in-progress: false
@@ -33,7 +50,7 @@ concurrency:
 jobs:
   test:
     name: Tests and build
-    runs-on: [self-hosted, riftline]
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -78,54 +95,35 @@ jobs:
     name: Deploy
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: [self-hosted, riftline]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment:
+      name: production
+      url: https://riftline.rhasta.space
     steps:
-      - uses: actions/checkout@v5
-
-      # The deploy directory is the source of truth for what is running, and it
-      # holds the one file that is not in git: .env, with the Riot key. Copying
-      # the checkout over it would delete that, so tracked files are synced and
-      # .env is excluded from both the copy and the delete.
-      - name: Sync the checkout into the deploy directory
+      # No checkout: the server fetches the commit itself, from the public
+      # repository, and refuses anything that is not on main.
+      - name: Load the deploy key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
-          rsync -a --delete \
-            --exclude='.git/' \
-            --exclude='.env' \
-            --exclude='data/' \
-            ./ /root/riftline/
-          chmod +x /root/riftline/deploy/nightly-ingest.sh
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          # Pinned, not scanned: the host key was read from the server over an
+          # already-trusted session, so a first connection cannot be spoofed.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
-      - name: Start the new containers
-        working-directory: /root/riftline
+      # The server runs deploy/riftline-deploy whatever is asked for; the sha is
+      # the only thing it reads. It deploys this exact commit, not whatever main
+      # points at by now, so a push that lands mid-run cannot ship untested.
+      - name: Deploy this commit
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          test -f .env || { echo "::error::/root/riftline/.env is missing"; exit 1; }
-          docker compose up -d --build
-
-      # A container that is up is not a site that works. This asks the app the
-      # same question a visitor's first page load asks, and then asks whether
-      # the corpus is still under it: a healthy container on an empty database
-      # would serve a site that looks fine and shows nothing.
-      #
-      # The program goes in on stdin so there is no second copy of the image's
-      # layout to keep in step.
-      - name: Health check
-        working-directory: /root/riftline
-        run: docker compose exec -T api python - < deploy/healthcheck.py
-
-      - name: The site is serving the bundle
-        working-directory: /root/riftline
-        run: |
-          docker compose exec -T web wget -q -O - http://127.0.0.1/             | grep -q 'id="root"'             || { echo "::error::web container is not serving the built bundle";                  docker compose logs --tail 50 web; exit 1; }
-
-      # The schema is additive and idempotent, so this is safe on every deploy
-      # and is the only way a new column reaches the live corpus.
-      - name: Apply migrations
-        working-directory: /root/riftline
-        run: docker compose exec -T api python -m scripts.migrate
-
-      - name: Report what is live
-        working-directory: /root/riftline
-        run: |
-          docker compose ps
-          docker compose exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'
+          ssh -i ~/.ssh/deploy \
+              -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes \
+              -o BatchMode=yes \
+              "root@${DEPLOY_HOST}" "${GITHUB_SHA}"

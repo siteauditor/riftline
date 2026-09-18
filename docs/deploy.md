@@ -6,9 +6,9 @@ Riftline runs on the shared VPS:
 | --- | --- |
 | Site | https://riftline.rhasta.space |
 | API | https://riftline-api.rhasta.space |
-| Deploy directory | `/root/riftline` |
+| Deploy directory | `/root/riftline`, a clone of the public repository |
 | Corpus | Docker volume `riftline_data`, mounted at `/srv/riftline/data` |
-| CI/CD | GitHub Actions on a self-hosted runner at `/root/actions-runner-riftline` |
+| CI/CD | GitHub-hosted runners; deploys over SSH to a forced command |
 
 ## How it fits on that box
 
@@ -57,10 +57,11 @@ domain is served in parallel for anything that wants to call it directly.
 Done once. Everything after this is a `git push`.
 
 ```bash
-# 1. The deploy directory and the environment file, which is not in git.
-ssh MyVPS 'mkdir -p /root/riftline'
-scp .env.example MyVPS:/root/riftline/.env.example
-ssh MyVPS 'cd /root/riftline && cp -n .env.example .env && nano .env'   # paste the Riot key
+# 1. The deploy directory, a clone of the public repository, and the
+#    environment file, which is not in git (it is ignored, so no deploy's
+#    `git reset --hard` ever touches it).
+ssh MyVPS 'git clone https://github.com/siteauditor/riftline.git /root/riftline'
+ssh MyVPS 'cd /root/riftline && cp -n .env.example .env && chmod 600 .env && nano .env'   # paste the Riot key
 
 # 2. The corpus. 316 MB, so it goes once and deploys never touch it again.
 #    Copy into the volume through a throwaway container: the volume is not a
@@ -77,6 +78,9 @@ make health
 # 4. The nightly ingestion timer.
 ssh MyVPS 'cp /root/riftline/deploy/riftline-ingest.{service,timer} /etc/systemd/system/ \
            && systemctl daemon-reload && systemctl enable --now riftline-ingest.timer'
+
+# 5. What CI deploys through. See "CI/CD" below for the key and the secrets.
+ssh MyVPS 'install -m 0755 /root/riftline/deploy/riftline-deploy /usr/local/bin/riftline-deploy'
 ```
 
 ## Rotating the Riot key
@@ -150,17 +154,46 @@ ssh MyVPS 'CRAWL_TARGET=3 TIMELINE_TARGET=3 LOBBY_TARGET=5 /root/riftline/deploy
 
 ## CI/CD
 
-`.github/workflows/ci.yml`, on a self-hosted runner labelled `riftline`.
+`.github/workflows/ci.yml`. The repository is **public**, so anyone can open a
+pull request, and a pull request can edit that file. The pipeline is built so
+that doing so reaches nothing that matters.
 
-**Test** (every push and pull request) builds both images and runs, inside
-them: the 401-test backend suite, `ruff`, the frontend type-check and bundle
-build, `oxlint`, and an em dash check. Nothing is installed on the host; the
-runner needs only Docker. The suite runs in the image that gets deployed.
+```
+  pull request / push                  push to main only
+         |                                    |
+  GitHub-hosted runner              GitHub-hosted runner
+  (fresh VM, thrown away)           + `production` environment secrets
+         |                                    |
+  tests, lint, bundle build          ssh root@VPS "<commit sha>"
+                                              |
+                                  /usr/local/bin/riftline-deploy
+                                  (forced command: the only thing the key runs)
+                                              |
+                                  sha on main?  fetch, reset, deploy/deploy.sh
+```
 
-**Deploy** (pushes to `main` only) rsyncs the checkout into `/root/riftline`
-excluding `.env` and `data/`, rebuilds and restarts the containers, runs
+**Test** (every push and pull request) runs on a GitHub-hosted machine: it
+builds both images and runs, inside them, the backend suite, `ruff`, the
+frontend type-check and bundle build, `oxlint`, and an em dash check. A hostile
+pull request can run anything it likes there, on a machine that holds nothing
+and is deleted afterwards.
+
+**Deploy** (pushes to `main` only) never runs on the server. It connects over
+SSH with a key whose `authorized_keys` entry is a forced command,
+`deploy/riftline-deploy`, installed at `/usr/local/bin/riftline-deploy`. That
+script ignores whatever the client asked to run and reads it as one thing: a
+40-character commit sha. It refuses anything else, and refuses a sha that is not
+on `main`. Then it takes a lock, moves `/root/riftline` to exactly that commit,
+and runs `deploy/deploy.sh`, which rebuilds the containers, runs
 `deploy/healthcheck.py`, checks nginx is serving the built bundle rather than
 merely answering, applies migrations, and prints what is live.
+
+So a leaked deploy key can redeploy a commit that was already merged, and
+nothing else. Tested with the key itself: no shell (the PTY request is refused),
+no arbitrary command, no sha from outside `main`.
+
+Re-running an old deploy from the Actions tab deploys that old commit, which is
+the rollback.
 
 `deploy/healthcheck.py` waits for `/api/health` to say `ok`, then counts the
 rows in the live database. The second half earns its keep: a container comes up
@@ -168,27 +201,50 @@ perfectly healthy against an empty database, and the only symptom would be a
 site that looks right and shows nothing. `make health` runs the same check by
 hand.
 
-The repository is **private** on purpose. A self-hosted runner executes
-workflow code on the box; on a public repository a fork's pull request could
-run anything there, and this box serves five other sites.
+### Why there is no self-hosted runner
 
-### The runner
+There was one, on this VPS, running as root with Docker, while the repository
+was private. On a public repository that is the worst available arrangement: a
+pull request can change `runs-on` to name it, and whatever it runs, runs as root
+on a box that serves five other sites, next to the Riot key. GitHub's own
+guidance is not to use self-hosted runners with public repositories.
+
+It was removed when the repository went public. Do not add one back.
+
+### The secrets
+
+On the `production` environment, which only `main` may deploy from. There are
+no repository-level secrets, and GitHub never gives secrets to a pull request
+from a fork.
+
+| Secret | Holds |
+| --- | --- |
+| `DEPLOY_SSH_KEY` | The deploy key's private half. Its public half is the forced-command entry in `/root/.ssh/authorized_keys`, commented `riftline-github-deploy` |
+| `DEPLOY_KNOWN_HOSTS` | The server's ed25519 host key, pinned. Read from the server over a trusted session, not scanned, so a first connection cannot be spoofed |
+| `DEPLOY_HOST` | The server address |
+
+To replace the key:
 
 ```bash
-systemctl status actions.runner.siteauditor-riftline.vmi3198945-riftline
-journalctl -u actions.runner.siteauditor-riftline.vmi3198945-riftline -n 50
+ssh-keygen -t ed25519 -N "" -C riftline-github-deploy -f riftline_deploy
+gh secret set DEPLOY_SSH_KEY --env production < riftline_deploy
+# In /root/.ssh/authorized_keys, replace the riftline-github-deploy line with:
+#   command="/usr/local/bin/riftline-deploy",restrict <contents of riftline_deploy.pub>
+rm riftline_deploy riftline_deploy.pub
 ```
 
-It is a second runner, in its own directory (`/root/actions-runner-riftline`),
-alongside the one that already serves another project. They share nothing but
-the Docker daemon. Repo-scoped, labelled `riftline`, running as root, which is
-what lets it drive Compose.
+### Pull requests from outside
 
-To re-register it (a new token is needed each time, and lasts an hour):
-
-```bash
-gh api -X POST repos/siteauditor/riftline/actions/runners/registration-token -q .token   | ssh MyVPS 'read -r T; cd /root/actions-runner-riftline; export RUNNER_ALLOW_RUNASROOT=1;       ./config.sh --unattended --replace --url https://github.com/siteauditor/riftline         --token "$T" --name vmi3198945-riftline --labels riftline --work _work < /dev/null'
-```
+- Anyone can open one. Only collaborators with write access can merge, and
+  there is one: the owner.
+- A pull request from a fork waits for the owner to click **Approve and run**
+  before any workflow runs (Settings, Actions, "Require approval for all
+  external contributors"). With no runner of ours to reach, that is a guard
+  against wasted minutes rather than the only thing between a stranger and
+  root, which is what it would be with a self-hosted runner.
+- `main` has a ruleset: changes arrive through a pull request that passes
+  **Tests and build**, and it cannot be force-pushed or deleted. The owner can
+  bypass it, which is how a direct push to `main` still deploys.
 
 ## Operating notes
 

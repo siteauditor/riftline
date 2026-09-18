@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# The fixed half of a deploy, and the only thing the deploy key may run.
+#
+# Installed at /usr/local/bin/riftline-deploy and named as a forced command on
+# the deploy key in /root/.ssh/authorized_keys:
+#
+#     command="/usr/local/bin/riftline-deploy",restrict ssh-ed25519 AAAA... riftline-github-deploy
+#
+# So whatever a client asks the server to run, this runs instead, with what they
+# asked for in SSH_ORIGINAL_COMMAND. The only thing accepted there is a commit
+# sha, and only one that is already on main. A leaked key can therefore redeploy
+# a commit that was already merged and nothing else: no shell, no forwarding,
+# no arbitrary code.
+#
+# It lives outside the deploy directory on purpose. It is what updates that
+# directory, so it must not be something the update can rewrite underneath
+# itself. Changing it means reinstalling it, like the systemd units:
+#
+#     install -m 0755 /root/riftline/deploy/riftline-deploy /usr/local/bin/riftline-deploy
+
+set -euo pipefail
+
+sha="${SSH_ORIGINAL_COMMAND:-}"
+if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "refused: expected a full 40-character commit sha, got '${sha:0:60}'" >&2
+  exit 2
+fi
+
+# One deploy at a time. CI serializes its own runs, but `make deploy` from a
+# workstation does not know about them, and two `compose up` runs racing over
+# one SQLite file is not a thing to find out about in production.
+exec 9>/var/lock/riftline-deploy.lock
+if ! flock -w 600 9; then
+  echo "refused: another deploy has held the lock for ten minutes" >&2
+  exit 3
+fi
+
+cd /root/riftline
+git fetch --quiet origin main
+if ! git merge-base --is-ancestor "$sha" origin/main; then
+  echo "refused: $sha is not on main" >&2
+  exit 2
+fi
+
+# The exact commit CI tested, not whatever main points at by now: a newer push
+# can land while this one's tests are still running. An older sha is accepted
+# too, which is what makes re-running an old deploy a rollback.
+#
+# .env is ignored, so --hard never touches it; the corpus is a named volume and
+# not in this directory at all.
+git reset --quiet --hard "$sha"
+
+# The lock on fd 9 is inherited, so it holds until the deploy itself finishes.
+exec bash deploy/deploy.sh
