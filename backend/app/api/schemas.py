@@ -103,6 +103,38 @@ class RankInfo(BaseModel):
     numeric_rank: int = 0
 
 
+class LadderPositionOut(BaseModel):
+    """Where the player stands on the stored solo ladder of their home shard."""
+
+    tier: str
+    tier_position: int
+    # Across the whole region. Null when a higher tier's size is unknown.
+    position: int | None = None
+    platform: str
+    platform_label: str
+    # Epoch ms of the ladder snapshot this was read from.
+    as_of: int
+
+
+class RankPointOut(BaseModel):
+    # Epoch ms.
+    at: int
+    tier: str | None = None
+    division: str | None = None
+    league_points: int = 0
+    wins: int = 0
+    losses: int = 0
+    # One sortable scale across tiers, which is what a graph plots.
+    numeric_rank: int = 0
+
+
+class RankHistoryResponse(BaseModel):
+    queue_type: str
+    # Epoch ms of the first reading, null when there is none yet.
+    tracking_since: int | None = None
+    points: list[RankPointOut] = Field(default_factory=list)
+
+
 class ProfileResponse(BaseModel):
     puuid: str
     game_name: str | None = None
@@ -122,6 +154,9 @@ class ProfileResponse(BaseModel):
     # True when the level and icon above were read from `plays_on` rather than
     # from the platform in the URL, which the page has to say out loud.
     identity_from_plays_on: bool = False
+    # Epoch ms of the rank reading shown, so the page can say how old it is.
+    updated_at: int | None = None
+    ladder: LadderPositionOut | None = None
 
 
 class BadgeOut(BaseModel):
@@ -621,6 +656,7 @@ def to_profile(
     platform_label: str,
     plays_on: Platform | None = None,
     elsewhere_summoner: dict | None = None,
+    ladder: LadderPositionOut | None = None,
 ) -> ProfileResponse:
     infos = [to_rank_info(r) for r in ranks]
     # Solo queue first: it is the rank players mean when they say "my rank".
@@ -650,6 +686,8 @@ def to_profile(
         plays_on=plays_on.id if plays_on else None,
         plays_on_label=plays_on.label if plays_on else None,
         identity_from_plays_on=elsewhere_summoner is not None,
+        updated_at=epoch_ms(player.league_fetched_at or player.summoner_fetched_at),
+        ladder=ladder,
     )
 
 
@@ -944,6 +982,45 @@ class ChampionPlayed(BaseModel):
     win_rate: float
     kda: float
     cs_per_min: float
+    avg_kills: float = 0.0
+    avg_deaths: float = 0.0
+    avg_assists: float = 0.0
+    damage_per_min: float = 0.0
+    main_position: str | None = None
+    # Epoch ms.
+    last_played: int | None = None
+    # Each average below is over its own count, not over `games`: a champion
+    # with two scored games of nine reports a score two games deep.
+    scored_games: int = 0
+    avg_score: float | None = None
+    timeline_games: int = 0
+    avg_gold_diff_14: float | None = None
+
+
+class ComponentAverageOut(BaseModel):
+    id: str
+    label: str
+    measures: str
+    # Mean of this player's per-game percentiles in the role, 0 to 1.
+    avg_percentile: float
+
+
+class RoleScoreProfileOut(BaseModel):
+    """What this player's scored games in one role add up to."""
+
+    position: str
+    scored_games: int
+    # False below the floor: the page shows the count and no breakdown.
+    enough: bool
+    avg_score: float
+    avg_placement: float
+    mvp: int
+    ace: int
+    # Highest first.
+    components: list[ComponentAverageOut] = Field(default_factory=list)
+    # The smallest corpus any of the percentiles was measured against.
+    sample: int | None = None
+    min_scored: int
 
 
 class PlayStyleTotals(BaseModel):
@@ -975,6 +1052,8 @@ class AnalyticsResponse(BaseModel):
     activity_utc: list[int] = Field(default_factory=list)
     champions: list[ChampionPlayed] = Field(default_factory=list)
     totals: PlayStyleTotals = Field(default_factory=PlayStyleTotals)
+    # Most scored games first.
+    score_profile: list[RoleScoreProfileOut] = Field(default_factory=list)
 
 
 def _corpus_record_out(record) -> CorpusRecordOut | None:

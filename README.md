@@ -147,7 +147,8 @@ backend/
     riot/          Riot API client: routing, rate limiting, error translation
     db/            SQLAlchemy models and engine
     services/      players, matches, ranks, live, ladders, ingest, timelines,
-                   aggregate, scores, draft, item_taxonomy, static_data
+                   aggregate, scores, profile_stats, suggest, highlights, draft,
+                   item_taxonomy, static_data
     api/           FastAPI routes and response schemas
   scripts/ingest.py    Crawler, timeline and rank backfills, ladders, aggregation,
                        scoring
@@ -156,9 +157,10 @@ backend/
 frontend/
   src/lib/         Typed API client and formatters
   src/components/  Search, form strip, match row and scoreboard, rank card,
-                   champion picker, play-style panel, champion build/rune/pair panels
-  src/routes/      Home, Profile, Mastery, LiveGame, Tierlist, Champion, Draft,
-                   Leaderboard, NotFound
+                   strengths panel, champion picker, play-style panel, champion
+                   build/rune/pair panels
+  src/routes/      Home, Profile, PlayerChampions, Mastery, LiveGame, Match,
+                   Tierlist, Champion, Draft, Leaderboard, NotFound
 deploy/            Production deploy entry points, systemd units, firewall
 docs/deploy.md     How production runs, and how to operate it
 ```
@@ -313,6 +315,29 @@ class mix, a 24-hour activity histogram and per-champion aggregates. It reads
 limited. The trade is that it describes the games we have fetched rather than a
 whole season, which `basis = "stored_matches"` states rather than implying.
 
+The same endpoint feeds the profile's other stored-data views:
+
+- **How they play**: per role, the average score and placement, MVP and ACE
+  counts, and the six score components averaged, strongest first. Withheld below
+  10 scored games in a role (`MIN_SCORED_FOR_PROFILE`), where one game moves an
+  average by ten points.
+- **The Champions tab**: every champion held, with win rate, KDA, CS and damage
+  per minute, average score and gold lead at 14. Each average carries its own
+  count, because scores and timelines do not cover every game.
+
+The profile header also shows the player's **ladder position** ("#355 EUW"),
+read from stored apex ladder snapshots with no Riot call, and hidden when the
+snapshot is over 48 hours old or the player has changed tier since. The nightly
+job refreshes the apex ladders for `LADDER_PLATFORMS` so it stays current.
+
+**Rank history.** Riot keeps none, so an LP graph can only come from readings
+we take. Every rank fetch that finds a change writes a row to `rank_history`
+(and a first reading for a player with none), so the graph starts on the day a
+player is first seen and fills in from there. The profile's **Update** button
+re-asks Riot, but only once the cached answer is a minute old
+(`REFRESH_FLOOR_SECONDS`): before that floor, `?refresh=true` skipped every
+cache and one public URL could spend the key's budget.
+
 ## The Riftline score
 
 Every player in a stored lobby gets a score from 0 to 10 for that game, a placement
@@ -320,6 +345,12 @@ from 1 to 10 in the lobby, and badges. The match row shows the score, the placem
 and up to two badges; expanding it opens the scoreboard for all ten players
 (`/api/matches/{match_id}`). All of it is computed from stored matches, so it costs
 no Riot calls.
+
+A game is scored the moment it is fetched, in the same request that stores it.
+It used to wait for the nightly run, so a player's newest games were exactly the
+ones with no score: 19 of 20 on one Grandmaster profile on 2026-09-19. The Lane
+lead badge needs the timeline, which arrives later, so storing a timeline sends
+an already-scored lobby back through the next scoring pass.
 
 **How it is measured.** Six components: kill participation, share of the team's
 damage to champions, gold per minute, share of the game spent alive, objectives

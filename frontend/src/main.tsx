@@ -8,6 +8,7 @@ import App from './App'
 import Home from './routes/Home'
 import Profile from './routes/Profile'
 import Mastery from './routes/Mastery'
+import PlayerChampions from './routes/PlayerChampions'
 import Tierlist from './routes/Tierlist'
 import Draft from './routes/Draft'
 import Champion from './routes/Champion'
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Home /> },
       { path: 'summoner/:platform/:name/:tag', element: <Profile /> },
+      { path: 'summoner/:platform/:name/:tag/champions', element: <PlayerChampions /> },
       { path: 'summoner/:platform/:name/:tag/mastery', element: <Mastery /> },
       { path: 'summoner/:platform/:name/:tag/live', element: <LiveGame /> },
       { path: 'leaderboards', element: <Leaderboard /> },

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 
 /**
- * The Overview / Mastery / Live nav on a summoner page.
+ * The Overview / Champions / Mastery / Live nav on a summoner page.
  *
  * Extracted because it was written out twice, in Profile and in Mastery, and the
  * two had already drifted apart in how they mark the current tab.
@@ -30,6 +30,7 @@ export default function ProfileTabs({
   const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
   const tabs: { to: string; label: string; end?: boolean }[] = [
     { to: base, label: 'Overview', end: true },
+    { to: `${base}/champions`, label: 'Champions' },
     { to: `${base}/mastery`, label: 'Mastery' },
   ]
   // Shown unless health has positively said the feature is off. Gating on a

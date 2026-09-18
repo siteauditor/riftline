@@ -43,6 +43,7 @@ from __future__ import annotations
 import bisect
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -462,34 +463,44 @@ class ScoreService:
             ).scalars().all()
 
             for match in matches:
-                raw = match.raw
-                if isinstance(raw, str):  # SQLite can hand JSON back as text
-                    raw = json.loads(raw)
-                participants = ((raw or {}).get("info") or {}).get("participants") or []
-                by_index = {
-                    _int(p.get("participantId")): p for p in participants
-                }
-                for participant in match.participants:
-                    source = by_index.get(participant.participant_index)
-                    if source is None:
-                        # No raw payload for this row. Zeroes would be a claim;
-                        # leaving it null keeps it out of every score, and the
-                        # `attempted` set above keeps it out of the next pass.
-                        self.stats.errors += 1
-                        log.warning(
-                            "%s participant %d is absent from the stored payload",
-                            match.match_id,
-                            participant.participant_index,
-                        )
-                        continue
-                    for key, value in lifted_fields(source).items():
-                        setattr(participant, key, value)
-                    total += 1
-                    self.stats.lifted += 1
+                total += self.lift_match(match)
 
             await self.session.commit()
             log.info("lifted %d participant rows", self.stats.lifted)
         return total
+
+    def lift_match(self, match: Match) -> int:
+        """Lift one loaded match's participants from its raw payload. No commit.
+
+        Shared by the backfill above and by the history fetch, which scores a
+        game the moment it is stored rather than leaving it for the nightly
+        run: measured on 2026-09-19, 19 of HONEY BADGER#LIVID's last 20 games
+        showed no score because a profile view had fetched them.
+        """
+        raw = match.raw
+        if isinstance(raw, str):  # SQLite can hand JSON back as text
+            raw = json.loads(raw)
+        participants = ((raw or {}).get("info") or {}).get("participants") or []
+        by_index = {_int(p.get("participantId")): p for p in participants}
+        lifted = 0
+        for participant in match.participants:
+            source = by_index.get(participant.participant_index)
+            if source is None:
+                # No raw payload for this row. Zeroes would be a claim; leaving
+                # it null keeps it out of every score, and the backfill's
+                # `attempted` set keeps it out of the next pass.
+                self.stats.errors += 1
+                log.warning(
+                    "%s participant %d is absent from the stored payload",
+                    match.match_id,
+                    participant.participant_index,
+                )
+                continue
+            for key, value in lifted_fields(source).items():
+                setattr(participant, key, value)
+            lifted += 1
+            self.stats.lifted += 1
+        return lifted
 
     # ------------------------------------------------------- distributions
 
@@ -741,6 +752,21 @@ class ScoreService:
             self.stats.scored += 1
         return len(order)
 
+    async def score_and_stamp(self, matches: Sequence[Match]) -> int:
+        """Score each loaded match, stamping the withheld ones. No commit.
+
+        Shared by the nightly batch and the history fetch so the two cannot
+        disagree about what "considered" means. Returns how many were handled.
+        """
+        for match in matches:
+            if await self.score_match(match) == 0:
+                # Withheld. Stamp the timestamp so the same lobby is not
+                # offered again on every pass, exactly as the lobby-rank
+                # backfill learned to do.
+                for p in match.participants:
+                    p.performance_scored_at = utcnow()
+        return len(matches)
+
     async def score_matches(self, *, target: int | None = None, batch: int = 100) -> int:
         """Score every match that has no score, or a score from old weights."""
         done = 0
@@ -767,14 +793,7 @@ class ScoreService:
                     .options(selectinload(Match.participants))
                 )
             ).scalars().all()
-            for match in matches:
-                if await self.score_match(match) == 0:
-                    # Withheld. Stamp the timestamp so the same lobby is not
-                    # offered again on every pass, exactly as the lobby-rank
-                    # backfill learned to do.
-                    for p in match.participants:
-                        p.performance_scored_at = utcnow()
-                done += 1
+            done += await self.score_and_stamp(matches)
             await self.session.commit()
             log.info("scores: %s", self.stats.line())
         return done

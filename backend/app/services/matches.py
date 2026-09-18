@@ -27,6 +27,7 @@ from app.db.models import Match, MatchParticipant
 from app.riot.client import RiotClient
 from app.riot.errors import RiotApiError, RiotNotFound
 from app.riot.routing import Regional, resolve_platform
+from app.services.scores import ScoreService, lifted_fields
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,11 @@ class PlayedRow(NamedTuple):
     queue_id: int
     game_creation: int
     game_duration: int
+    # Null on a game the score was withheld for, or that has no timeline.
+    performance_score: float | None = None
+    performance_rank: int | None = None
+    performance_detail: dict | None = None
+    gold_diff_14: int | None = None
 
 
 @dataclass(slots=True)
@@ -147,6 +153,14 @@ class MatchService:
             log.info("fetching %d new matches (%d cached)", len(missing), len(have))
             await self._fetch_and_store(missing, regional)
 
+        found = await self._load(match_ids)
+        if not await self._score_unscored(found):
+            # The rollback expired every loaded object, and reading an expired
+            # one under asyncio fails outright, so read them again.
+            found = await self._load(match_ids)
+        return found
+
+    async def _load(self, match_ids: Sequence[str]) -> list[Match]:
         stmt = (
             select(Match)
             .where(Match.match_id.in_(list(match_ids)))
@@ -155,6 +169,37 @@ class MatchService:
         by_id = {m.match_id: m for m in (await self.session.execute(stmt)).scalars()}
         # Preserve Riot's ordering (newest first); drop any that failed to fetch.
         return [by_id[mid] for mid in match_ids if mid in by_id]
+
+    async def _score_unscored(self, matches: Sequence[Match]) -> bool:
+        """Score any of these that have not been through scoring yet.
+
+        Returns False if it had to roll back, which expires the loaded matches.
+
+        Costs no Riot call: a score is the stored match against the stored
+        percentiles. Before this, a game fetched by a profile view waited for
+        the nightly run, so a player's newest games were exactly the ones with
+        no score (19 of 20 on HONEY BADGER#LIVID on 2026-09-19). Older stored
+        games that missed scoring are lifted and scored here too, so that
+        backlog clears page by page as profiles are opened.
+        """
+        pending = [
+            m for m in matches
+            if any(p.performance_scored_at is None for p in m.participants)
+        ]
+        if not pending:
+            return True
+        scorer = ScoreService(self.session)
+        try:
+            for match in pending:
+                if any(p.time_dead is None for p in match.participants):
+                    scorer.lift_match(match)
+            await scorer.score_and_stamp(pending)
+            await self.session.commit()
+        except Exception:  # noqa: BLE001 -- a missing score must never cost the page
+            log.exception("scoring %d fetched matches failed", len(pending))
+            await self.session.rollback()
+            return False
+        return True
 
     async def _fetch_and_store(
         self, match_ids: Sequence[str], regional: Regional | str
@@ -296,6 +341,9 @@ class MatchService:
             summoner2_id=p.get("summoner2Id"),
             items=[p.get(f"item{i}") or 0 for i in range(7)],
             perks=p.get("perks"),
+            # The fields the score reads, lifted at birth so the row can be
+            # scored straight away instead of waiting for the nightly backfill.
+            **lifted_fields(p),
         )
 
     # ---------------------------------------------------------------- history
@@ -342,6 +390,10 @@ class MatchService:
                 Match.queue_id,
                 Match.game_creation,
                 Match.game_duration,
+                MatchParticipant.performance_score,
+                MatchParticipant.performance_rank,
+                MatchParticipant.performance_detail,
+                MatchParticipant.gold_diff_14,
             )
             .join(Match, Match.match_id == MatchParticipant.match_id)
             .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))

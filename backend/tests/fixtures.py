@@ -192,6 +192,11 @@ def match(
             )
         )
 
+    # Riot numbers participants 1-10, and lifting fields out of a stored payload
+    # pairs raw rows with stored ones by this id.
+    for number, participant in enumerate(participants, start=1):
+        participant["participantId"] = number
+
     return {
         "metadata": {
             "matchId": match_id,

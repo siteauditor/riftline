@@ -30,7 +30,7 @@ from app.riot.routing import (
     UnknownPlatform,
     resolve_platform,
 )
-from app.services.ranks import apply_league_entries, is_fresh
+from app.services.ranks import apply_league_entries, is_fresh, puuids_with_history
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +63,18 @@ def normalize_riot_name(name: str) -> str:
 # Shared with `ranks`, which owns it: both modules need the same TTL rule.
 _is_fresh = is_fresh
 
+# A refresh goes back to Riot only once the cached answer is at least this old.
+# Without a floor `?refresh=true` skipped every TTL, so reloading one public URL
+# could spend a development key's 100 requests per two minutes, and the profile's
+# Update button makes that one click. Riot's own data does not move faster than
+# a game, so a minute loses nothing.
+REFRESH_FLOOR_SECONDS = 60
+
+
+def _cached_is_good(stamp, ttl: int, refresh: bool) -> bool:
+    """Whether a cached answer may be served instead of asking Riot again."""
+    return _is_fresh(stamp, min(ttl, REFRESH_FLOOR_SECONDS) if refresh else ttl)
+
 
 class PlayerService:
     def __init__(self, session: AsyncSession, client: RiotClient, settings) -> None:
@@ -85,8 +97,8 @@ class PlayerService:
 
         player = await self._find_cached(platform, game_name, tag_line)
 
-        if player is None or refresh or not _is_fresh(
-            player.account_fetched_at, self.settings.ttl_account
+        if player is None or not _cached_is_good(
+            player.account_fetched_at, self.settings.ttl_account, refresh
         ):
             try:
                 account = await self.client.account_by_riot_id(
@@ -169,10 +181,8 @@ class PlayerService:
         viewed.
         """
         cached_here = player.summoner_platform == platform.id
-        if (
-            not refresh
-            and cached_here
-            and _is_fresh(player.summoner_fetched_at, self.settings.ttl_summoner)
+        if cached_here and _cached_is_good(
+            player.summoner_fetched_at, self.settings.ttl_summoner, refresh
         ):
             return player
         try:
@@ -296,17 +306,19 @@ class PlayerService:
 
         # Same scoping as the summoner cache: a ranked entry is per shard, and
         # the stored rows are rewritten for whichever platform is being read.
-        if (
-            not refresh
-            and player.league_platform == platform.id
-            and _is_fresh(player.league_fetched_at, self.settings.ttl_league)
+        if player.league_platform == platform.id and _cached_is_good(
+            player.league_fetched_at, self.settings.ttl_league, refresh
         ):
             return current
 
         entries = await self.client.league_entries_by_puuid(player.puuid, platform)
         # Shared with RankCache so the two rank paths cannot drift on which
         # queues to write and which to drop.
-        await apply_league_entries(self.session, player.puuid, entries, current)
+        tracked = await puuids_with_history(self.session, [player.puuid])
+        await apply_league_entries(
+            self.session, player.puuid, entries, current,
+            platform=platform.id, baseline=player.puuid not in tracked,
+        )
 
         player.league_platform = platform.id
         player.league_fetched_at = utcnow()
@@ -325,10 +337,8 @@ class PlayerService:
         # Scoped to the platform, like the summoner and league caches above and
         # for the same reason: mastery on the wrong shard is an empty 200, and
         # stamping that as fresh hides the real table until the TTL runs out.
-        if (
-            not refresh
-            and player.mastery_platform == platform.id
-            and _is_fresh(player.mastery_fetched_at, self.settings.ttl_mastery)
+        if player.mastery_platform == platform.id and _cached_is_good(
+            player.mastery_fetched_at, self.settings.ttl_mastery, refresh
         ):
             return current
 

@@ -26,7 +26,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +50,25 @@ QUEUE_BY_ID = {420: "RANKED_SOLO_5x5", 440: "RANKED_FLEX_SR"}
 # a part of the ladder that is never read. The total is reported regardless, so
 # the cap is visible rather than hidden.
 MAX_ROWS_PER_SLICE = 1000
+
+# A snapshot older than this is not offered as a player's position. The nightly
+# job refreshes the apex ladders, so anything older means that stage stopped
+# running, and last week's position would read as today's.
+POSITION_MAX_AGE = timedelta(hours=48)
+
+
+@dataclass(frozen=True, slots=True)
+class LadderPosition:
+    tier: str
+    # Place within the tier's ladder, 1 = top.
+    tier_position: int
+    # Place on the whole region's ladder: the tier position plus everyone in
+    # the tiers above. None when a higher tier's size is not known, rather than
+    # a number that quietly assumes it.
+    position: int | None
+    platform: str
+    as_of: datetime
+
 
 # How many unnamed rows one page view will resolve. Bounded because
 # `account_by_puuid` is one call per player and a 205-row page would otherwise
@@ -324,6 +343,61 @@ class LadderService:
             exact_total if exact_total is not None else "an unknown total",
         )
         return len(kept)
+
+    # ------------------------------------------------------------ position
+
+    async def position_of(
+        self,
+        puuid: str,
+        platform: Platform | str,
+        tier: str | None,
+        *,
+        queue_type: str = "RANKED_SOLO_5x5",
+    ) -> LadderPosition | None:
+        """Where this player stands on the stored ladder. Never calls Riot.
+
+        Read in the tier the player holds *now*: a snapshot can be a day old,
+        and a player promoted since then is also still listed in the tier below,
+        where their old position is no longer true.
+        """
+        tier = (tier or "").upper()
+        if tier not in APEX_TIERS:
+            return None
+        resolved = resolve_platform(platform)
+        entry = (
+            await self.session.execute(
+                select(LadderEntry).where(
+                    LadderEntry.platform == resolved.id,
+                    LadderEntry.queue_type == queue_type,
+                    LadderEntry.tier == tier,
+                    LadderEntry.puuid == puuid,
+                )
+            )
+        ).scalars().first()
+        if entry is None:
+            return None
+        as_of = entry.fetched_at
+        if as_of.tzinfo is None:  # SQLite hands back naive datetimes
+            as_of = as_of.replace(tzinfo=UTC)
+        if datetime.now(UTC) - as_of > POSITION_MAX_AGE:
+            return None
+
+        # Everyone in the tiers above counts ahead of this player. An apex
+        # league arrives whole, so those totals are exact when we hold them.
+        above: int | None = 0
+        for higher in APEX_TIERS[APEX_TIERS.index(tier) + 1:]:
+            _, total, _ = await self._meta(resolved.id, queue_type, higher, "I")
+            if total is None:
+                above = None
+                break
+            above += total
+        return LadderPosition(
+            tier=tier,
+            tier_position=entry.position,
+            position=entry.position + above if above is not None else None,
+            platform=resolved.id,
+            as_of=as_of,
+        )
 
     # --------------------------------------------------------------- paging
 

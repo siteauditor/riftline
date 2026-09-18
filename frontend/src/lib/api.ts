@@ -225,6 +225,19 @@ export interface Profile {
   plays_on_label: string | null
   /** The level and icon above were read from `plays_on`, not from this region. */
   identity_from_plays_on: boolean
+  /** Epoch ms of the rank reading shown. */
+  updated_at: number | null
+  /** Position on the stored solo ladder, when they are on one and it is fresh. */
+  ladder: {
+    tier: string
+    tier_position: number
+    /** Across the whole region; null when a higher tier's size is unknown. */
+    position: number | null
+    platform: string
+    platform_label: string
+    /** Epoch ms of the snapshot. */
+    as_of: number
+  } | null
 }
 
 /** A badge, with the rule that earned it and this player's own figure. */
@@ -662,14 +675,7 @@ export interface Analytics {
   classes: { tag: string; games: number; share: number }[]
   /** 24 buckets in UTC; the client shifts them into local time. */
   activity_utc: number[]
-  champions: {
-    champion: ChampionRef
-    games: number
-    wins: number
-    win_rate: number
-    kda: number
-    cs_per_min: number
-  }[]
+  champions: ChampionPlayed[]
   totals: {
     win_rate: number
     kda: number
@@ -680,6 +686,61 @@ export interface Analytics {
     vision_per_game: number
     damage_per_min: number
   }
+  /** Most scored games first. */
+  score_profile: RoleScoreProfile[]
+}
+
+/** One champion over the stored games. Each average is over its own count. */
+export interface ChampionPlayed {
+  champion: ChampionRef
+  games: number
+  wins: number
+  win_rate: number
+  kda: number
+  cs_per_min: number
+  avg_kills: number
+  avg_deaths: number
+  avg_assists: number
+  damage_per_min: number
+  main_position: string | null
+  /** Epoch ms. */
+  last_played: number | null
+  scored_games: number
+  avg_score: number | null
+  timeline_games: number
+  avg_gold_diff_14: number | null
+}
+
+/** What a player's scored games in one role add up to. */
+export interface RoleScoreProfile {
+  position: Position
+  scored_games: number
+  /** False below `min_scored`: show the count, not a breakdown. */
+  enough: boolean
+  avg_score: number
+  avg_placement: number
+  mvp: number
+  ace: number
+  /** Highest first. */
+  components: { id: string; label: string; measures: string; avg_percentile: number }[]
+  /** The smallest corpus any of the percentiles was measured against. */
+  sample: number | null
+  min_scored: number
+}
+
+export interface RankHistory {
+  queue_type: string
+  /** Epoch ms of the first reading, null before there is one. */
+  tracking_since: number | null
+  points: {
+    at: number
+    tier: string | null
+    division: string | null
+    league_points: number
+    wins: number
+    losses: number
+    numeric_rank: number
+  }[]
 }
 
 export interface SliceQuery {
@@ -842,15 +903,21 @@ export const api = {
     platform: string,
     name: string,
     tag: string,
-    opts: { queue?: number | null } = {},
+    opts: { queue?: number | null; limit?: number } = {},
   ) => {
     const params = new URLSearchParams()
     if (opts.queue) params.set('queue', String(opts.queue))
+    if (opts.limit) params.set('limit', String(opts.limit))
     const qs = params.toString()
     return request<Analytics>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/analytics${qs ? `?${qs}` : ''}`,
     )
   },
+
+  rankHistory: (platform: string, name: string, tag: string, queue: string) =>
+    request<RankHistory>(
+      `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/rank-history?queue=${enc(queue)}`,
+    ),
 
   live: (platform: string, name: string, tag: string) =>
     request<LiveGameResponse>(

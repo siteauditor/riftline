@@ -128,6 +128,39 @@ class RankedEntry(Base):
     __table_args__ = (UniqueConstraint("puuid", "queue_type", name="uq_rank_puuid_queue"),)
 
 
+class RankHistory(Base):
+    """One reading of a player's rank, kept whenever it changed.
+
+    Riot keeps no rank history anywhere: league-v4 answers with the rank right
+    now and nothing else. So an LP graph can only be built from readings we
+    took ourselves, and every day we do not record is a day the graph can never
+    show. Written by ``apply_league_entries`` only when the reading differs from
+    the one before, which at the churn measured on 2026-09-19 (about 3,000 of
+    7,334 rank rows changing a day) is a few thousand small rows a day.
+
+    Not foreign-keyed to ``players``: a history outlives a player row being
+    rebuilt, and it is only ever read by puuid.
+    """
+
+    __tablename__ = "rank_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    puuid: Mapped[str] = mapped_column(String(78))
+    # The shard the reading came from; a rank is per shard.
+    platform: Mapped[str | None] = mapped_column(String(8))
+    queue_type: Mapped[str] = mapped_column(String(32))
+    tier: Mapped[str | None] = mapped_column(String(16))
+    division: Mapped[str | None] = mapped_column(String(8))
+    league_points: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    taken_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        Index("ix_rank_history_player", "puuid", "queue_type", "taken_at"),
+    )
+
+
 class ChampionMastery(Base):
     __tablename__ = "champion_masteries"
 

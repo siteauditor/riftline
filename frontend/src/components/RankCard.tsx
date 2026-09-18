@@ -1,7 +1,14 @@
 import type { CSSProperties } from 'react'
+import { useQuery } from '@tanstack/react-query'
 
-import type { RankInfo } from '../lib/api'
+import { api, type RankHistory, type RankInfo } from '../lib/api'
 import { pct, tierColor, tierLabel } from '../lib/format'
+
+interface PlayerKey {
+  platform: string
+  name: string
+  tag: string
+}
 
 /**
  * A ranked queue at a glance.
@@ -11,9 +18,44 @@ import { pct, tierColor, tierLabel } from '../lib/format'
  * The win/loss bar is the honest version of a win rate -- it shows sample size
  * and split in the same object.
  */
-export default function RankCard({ rank }: { rank: RankInfo }) {
+export default function RankCard({
+  rank,
+  player,
+  compact = false,
+}: {
+  rank: RankInfo
+  player?: PlayerKey
+  /** One line, for the top of a phone screen where the games have to follow fast. */
+  compact?: boolean
+}) {
   const color = tierColor(rank.tier)
   const ranked = Boolean(rank.tier)
+
+  if (compact) {
+    return (
+      <div
+        className="accent-edge flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-r-sm border-y border-r border-line bg-panel px-3 py-2 text-xs"
+        style={{ '--accent': color } as CSSProperties}
+      >
+        <span className="text-ink-dim">{rank.queue_label}</span>
+        {ranked ? (
+          <span className="tnum flex items-baseline gap-2.5">
+            <span className="display text-sm font-600" style={{ color }}>
+              {tierLabel(rank.tier, rank.division)}
+            </span>
+            <span className="text-ink">{rank.league_points.toLocaleString()} LP</span>
+            <span>
+              <span className="text-win">{rank.wins}W</span>{' '}
+              <span className="text-loss">{rank.losses}L</span>
+            </span>
+            <span className="text-ink-dim">{pct(rank.win_rate)}</span>
+          </span>
+        ) : (
+          <span className="text-ink-faint">Unranked this season</span>
+        )}
+      </div>
+    )
+  }
 
   return (
     // The rule carries this queue's own tier, which is not always the one the
@@ -66,11 +108,97 @@ export default function RankCard({ rank }: { rank: RankInfo }) {
                 <span className="tnum">{pct(rank.win_rate)}</span>
               </div>
             </div>
+
+            {player && <LpHistory player={player} queue={rank.queue} />}
           </>
         ) : (
           <p className="text-sm text-ink-faint">Unranked this season</p>
         )}
       </div>
     </section>
+  )
+}
+
+const DAY_MS = 86_400_000
+
+const dateLabel = (ms: number) =>
+  new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+
+/**
+ * The rank over time, from readings Riftline took itself.
+ *
+ * Riot keeps no rank history, so the line starts on the day we first read this
+ * player and has a point only where the rank moved. Until there are two points
+ * a day apart there is no line worth drawing, and the card says when tracking
+ * began instead of drawing a flat stub that would read as "no change".
+ */
+function LpHistory({ player, queue }: { player: PlayerKey; queue: string }) {
+  const { data } = useQuery({
+    queryKey: ['rank-history', player.platform, player.name, player.tag, queue],
+    queryFn: () => api.rankHistory(player.platform, player.name, player.tag, queue),
+    staleTime: 5 * 60_000,
+    retry: false,
+  })
+  if (!data) return null
+
+  const points = data.points
+  const span = points.length > 1 ? points[points.length - 1].at - points[0].at : 0
+  if (points.length < 2 || span < DAY_MS) {
+    return (
+      <p className="mt-3 text-[11px] text-ink-faint">
+        {data.tracking_since
+          ? `LP tracked since ${dateLabel(data.tracking_since)}. The graph starts once the rank moves.`
+          : 'LP tracking starts with the next update.'}
+      </p>
+    )
+  }
+  return <LpLine history={data} />
+}
+
+function LpLine({ history }: { history: RankHistory }) {
+  const points = history.points
+  const width = 240
+  const height = 48
+  const pad = 4
+  const first = points[0].at
+  const last = points[points.length - 1].at
+  const low = Math.min(...points.map((p) => p.numeric_rank))
+  const high = Math.max(...points.map((p) => p.numeric_rank))
+  // A flat line still needs a band to sit in, or it divides by zero.
+  const range = Math.max(high - low, 40)
+  const x = (at: number) => pad + ((at - first) / (last - first)) * (width - pad * 2)
+  const y = (rank: number) =>
+    height - pad - ((rank - low) / range) * (height - pad * 2)
+  const line = points.map((p) => `${x(p.at).toFixed(1)},${y(p.numeric_rank).toFixed(1)}`).join(' ')
+
+  return (
+    <figure className="mt-3">
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="h-auto w-full"
+        role="img"
+        aria-label={`Rank from ${dateLabel(first)} to ${dateLabel(last)}`}
+      >
+        <polyline
+          points={line}
+          fill="none"
+          stroke="var(--accent)"
+          strokeWidth="1.5"
+          vectorEffect="non-scaling-stroke"
+          strokeLinejoin="round"
+        />
+        {points.map((p) => (
+          <circle key={p.at} cx={x(p.at)} cy={y(p.numeric_rank)} r="2" fill="var(--accent)">
+            <title>
+              {`${dateLabel(p.at)}: ${tierLabel(p.tier, p.division)}, ${p.league_points.toLocaleString()} LP`}
+            </title>
+          </circle>
+        ))}
+      </svg>
+      <figcaption className="mt-0.5 flex justify-between text-[10px] text-ink-faint">
+        <span>{dateLabel(first)}</span>
+        <span>{dateLabel(last)}</span>
+      </figcaption>
+    </figure>
   )
 }

@@ -1,13 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-
-import { api } from '../lib/api'
+import type { Analytics } from '../lib/api'
 import { pct, positionLabel } from '../lib/format'
-
-interface Props {
-  platform: string
-  name: string
-  tag: string
-}
 
 /**
  * Play style: which roles, which champion classes, and when they play.
@@ -16,15 +8,12 @@ interface Props {
  * Riot budget and never blocks on a rate limit. The flip side is that it
  * describes the games we hold rather than a whole season, which the footer says
  * plainly rather than leaving the reader to assume.
+ *
+ * The profile owns the query and passes the result in, because it has to be
+ * read after the match list has stored the player's games, not beside it.
  */
-export default function AnalyticsPanel({ platform, name, tag }: Props) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['analytics', platform, name, tag],
-    queryFn: () => api.analytics(platform, name, tag),
-    retry: false,
-  })
-
-  if (isLoading || !data || data.games_analysed === 0) return null
+export default function AnalyticsPanel({ data }: { data: Analytics | undefined }) {
+  if (!data || data.games_analysed === 0) return null
 
   const peakGames = Math.max(...data.activity_utc, 1)
 

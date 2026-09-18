@@ -381,6 +381,15 @@ class TimelineService:
         lanes = [Lane(r.participant_index, r.team_position, r.team_id) for r in rows]
         scores = laning_scores(extracted, lanes)
 
+        # A game can now be scored the moment it is fetched, before its timeline
+        # exists, and the Lane lead badge is judged on the gold lead at 14
+        # minutes written below. Clearing the stamp sends the lobby back through
+        # the next scoring pass: the scores come out the same, the badges now
+        # include the lane.
+        if scores and any(r.performance_scored_at is not None for r in rows):
+            for row in rows:
+                row.performance_scored_at = None
+
         skills = extracted.get("skills") or {}
         buys = extracted.get("buys") or {}
 

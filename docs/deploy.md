@@ -157,6 +157,7 @@ a dead key.
 | `crawl` | yes | skipped |
 | `timelines` | yes | skipped |
 | `lobbyranks` | yes | skipped |
+| `ladders` (apex, per `LADDER_PLATFORMS`) | yes | skipped |
 | `aggregate` | no | **yes** |
 | `score` | no | **yes** |
 

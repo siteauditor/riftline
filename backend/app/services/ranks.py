@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Match, MatchParticipant, Player, RankedEntry, utcnow
+from app.db.models import Match, MatchParticipant, Player, RankedEntry, RankHistory, utcnow
 from app.riot.client import RiotClient
 from app.riot.routing import Platform, resolve_platform
 
@@ -75,16 +75,38 @@ class RankSnapshot:
     known: bool = True
 
 
+def _reading(entry: RankedEntry) -> tuple:
+    return (entry.tier, entry.division, entry.league_points, entry.wins, entry.losses)
+
+
+async def puuids_with_history(session: AsyncSession, puuids: Sequence[str]) -> set[str]:
+    """Which of these players already have a rank reading on record. One query."""
+    if not puuids:
+        return set()
+    stmt = select(RankHistory.puuid).where(RankHistory.puuid.in_(list(puuids))).distinct()
+    return set((await session.execute(stmt)).scalars())
+
+
 async def apply_league_entries(
     session: AsyncSession,
     puuid: str,
     raw_entries: Iterable[dict] | None,
     existing: Sequence[RankedEntry],
+    *,
+    platform: str | None = None,
+    baseline: bool = False,
 ) -> None:
     """Fold a league-v4 response into ``ranked_entries``. Does not commit.
 
     Shared with :meth:`PlayerService.ranks` so the two paths cannot drift on
     something as easy to get subtly wrong as which queues to delete.
+
+    Also the one place a rank changes, so it is where ``rank_history`` is
+    written: a row whenever a queue's reading differs from what was stored,
+    compared before the overwrite, so it costs no extra query. ``baseline``
+    records the reading even when unchanged, for a player with no history yet:
+    otherwise a rank that sits still after this shipped would never start a
+    graph at all.
     """
     by_queue = {e.queue_type: e for e in existing}
     seen: set[str] = set()
@@ -93,6 +115,7 @@ async def apply_league_entries(
         queue = raw.get("queueType") or "UNKNOWN"
         seen.add(queue)
         entry = by_queue.get(queue) or RankedEntry(puuid=puuid, queue_type=queue)
+        before = _reading(entry) if queue in by_queue else None
         entry.tier = raw.get("tier")
         entry.division = raw.get("rank")
         entry.league_points = raw.get("leaguePoints") or 0
@@ -104,6 +127,19 @@ async def apply_league_entries(
         entry.inactive = bool(raw.get("inactive"))
         if queue not in by_queue:
             session.add(entry)
+        if baseline or _reading(entry) != before:
+            session.add(
+                RankHistory(
+                    puuid=puuid,
+                    platform=platform,
+                    queue_type=queue,
+                    tier=entry.tier,
+                    division=entry.division,
+                    league_points=entry.league_points,
+                    wins=entry.wins,
+                    losses=entry.losses,
+                )
+            )
 
     # A queue that vanished means a demotion or a season reset. Dropping the row
     # beats showing a rank the player no longer holds.
@@ -278,11 +314,15 @@ class RankCache:
             return out
 
         fetched = await self._fetch(stale, resolved, budget_seconds)
+        tracked = await puuids_with_history(self.session, list(fetched))
         for puuid, raw in fetched.items():
             if raw is None:
                 out[puuid] = RankSnapshot(puuid, by_puuid[puuid], known=False)
                 continue
-            await apply_league_entries(self.session, puuid, raw, by_puuid[puuid])
+            await apply_league_entries(
+                self.session, puuid, raw, by_puuid[puuid],
+                platform=resolved.id, baseline=puuid not in tracked,
+            )
             players[puuid].league_platform = resolved.id
             players[puuid].league_fetched_at = utcnow()
 

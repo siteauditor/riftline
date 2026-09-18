@@ -9,7 +9,7 @@
 # expires 24 hours after it is issued, so on most nights some or all of it will
 # run with a dead key. It therefore splits into two halves.
 #
-#   Riot-dependent   crawl, timelines, lobbyranks. Skipped entirely when the
+#   Riot-dependent   crawl, timelines, lobbyranks, ladders. Skipped entirely when the
 #                    key is dead, because every request would fail and the log
 #                    would be noise rather than information.
 #   Local-only       aggregate, score. These read the stored corpus and make no
@@ -31,6 +31,11 @@ COMPOSE="docker compose -f ${PROJECT_DIR}/docker-compose.yml"
 CRAWL_TARGET="${CRAWL_TARGET:-400}"
 TIMELINE_TARGET="${TIMELINE_TARGET:-400}"
 LOBBY_TARGET="${LOBBY_TARGET:-600}"
+# Apex ladders to snapshot: Master, Grandmaster and Challenger, one call each per
+# platform. A profile reads its ladder position from these snapshots and hides
+# it once one is two days old, so without this stage the position only existed
+# on days somebody happened to open the leaderboard.
+LADDER_PLATFORMS="${LADDER_PLATFORMS:-euw1 kr na1 oc1 sg2 br1}"
 
 log() { printf '%s  %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
@@ -106,9 +111,12 @@ case "$key_state" in
     fi
     run_stage "timelines"  python -m scripts.ingest timelines --target "$TIMELINE_TARGET" || failures=$((failures+1))
     run_stage "lobbyranks" python -m scripts.ingest lobbyranks --target "$LOBBY_TARGET"  || failures=$((failures+1))
+    for ladder_platform in $LADDER_PLATFORMS; do
+      run_stage "ladders ${ladder_platform}" python -m scripts.ingest ladders --platform "$ladder_platform" --tier apex || failures=$((failures+1))
+    done
     ;;
   expired|absent)
-    log "skipping crawl, timelines and lobbyranks: the key is ${key_state}."
+    log "skipping crawl, timelines, lobbyranks and ladders: the key is ${key_state}."
     log "rotate it with: docs/deploy.md -> 'Rotating the Riot key'"
     ;;
   *)

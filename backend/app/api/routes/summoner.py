@@ -7,11 +7,14 @@ neither browsers nor proxies reliably.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict
+from collections import Counter
 
 from fastapi import APIRouter, Query
+from sqlalchemy import select
 
 from app.api.deps import (
+    DbDep,
+    LadderServiceDep,
     LiveServiceDep,
     MatchServiceDep,
     PlayerServiceDep,
@@ -22,21 +25,34 @@ from app.api.schemas import (
     AnalyticsResponse,
     ChampionPlayed,
     ClassShare,
+    ComponentAverageOut,
+    LadderPositionOut,
     LiveGameResponse,
     MasteryResponse,
     MatchHistoryResponse,
     MatchSummary,
     PlayStyleTotals,
     ProfileResponse,
+    RankHistoryResponse,
+    RankPointOut,
+    RoleScoreProfileOut,
     RoleShare,
+    epoch_ms,
+    numeric_rank,
     to_live_game,
     to_mastery_response,
     to_match_summary,
     to_profile,
 )
 from app.api.schemas import ChampionRef as ChampionRefSchema
+from app.db.models import RankHistory
 from app.riot.errors import RiotForbidden
 from app.riot.routing import resolve_platform
+from app.services.profile_stats import (
+    MIN_SCORED_FOR_PROFILE,
+    champion_totals,
+    score_profile,
+)
 
 router = APIRouter(prefix="/api/summoner", tags=["summoner"])
 
@@ -49,10 +65,14 @@ async def get_profile(
     game_name: str,
     tag_line: str,
     players: PlayerServiceDep,
+    ladders: LadderServiceDep,
     sd: StaticDep,
-    refresh: bool = Query(False, description="Bypass the cache and re-fetch from Riot."),
+    refresh: bool = Query(
+        False,
+        description="Re-fetch from Riot, once the cached answer is at least a minute old.",
+    ),
 ) -> ProfileResponse:
-    """Profile header: level, icon and every ranked queue."""
+    """Profile header: level, icon, every ranked queue and the ladder position."""
     asked = resolve_platform(platform)
     player = await players.resolve(platform, game_name, tag_line, refresh=refresh)
     # Where this account's per-shard data actually is, which for an OCE Riot ID
@@ -67,7 +87,70 @@ async def get_profile(
     elsewhere_summoner = (
         await players.summoner_snapshot(player.puuid, elsewhere) if elsewhere else None
     )
-    return to_profile(player, ranks, sd, asked.label, elsewhere, elsewhere_summoner)
+    # Read from stored ladder snapshots only; no Riot call. On the home shard,
+    # because a ladder is per shard just like the rank it is ordered by.
+    solo = next((r for r in ranks if r.queue_type == "RANKED_SOLO_5x5"), None)
+    found = (
+        await ladders.position_of(player.puuid, home, solo.tier) if solo else None
+    )
+    ladder = (
+        LadderPositionOut(
+            tier=found.tier,
+            tier_position=found.tier_position,
+            position=found.position,
+            platform=found.platform,
+            platform_label=resolve_platform(found.platform).label,
+            as_of=epoch_ms(found.as_of),
+        )
+        if found
+        else None
+    )
+    return to_profile(
+        player, ranks, sd, asked.label, elsewhere, elsewhere_summoner, ladder=ladder
+    )
+
+
+@router.get(
+    "/{platform}/{game_name}/{tag_line}/rank-history", response_model=RankHistoryResponse
+)
+async def get_rank_history(
+    platform: str,
+    game_name: str,
+    tag_line: str,
+    players: PlayerServiceDep,
+    db: DbDep,
+    queue: str = Query("RANKED_SOLO_5x5", description="RANKED_SOLO_5x5 or RANKED_FLEX_SR."),
+) -> RankHistoryResponse:
+    """Every rank reading we took for this player, oldest first.
+
+    Riot keeps no history, so this starts on the day we first read the rank and
+    has a point only where the rank changed. ``tracking_since`` says when that
+    was, so an empty or short graph reads as young, not as inactive.
+    """
+    player = await players.resolve(platform, game_name, tag_line)
+    rows = (
+        await db.execute(
+            select(RankHistory)
+            .where(RankHistory.puuid == player.puuid, RankHistory.queue_type == queue)
+            .order_by(RankHistory.taken_at)
+        )
+    ).scalars().all()
+    return RankHistoryResponse(
+        queue_type=queue,
+        tracking_since=epoch_ms(rows[0].taken_at) if rows else None,
+        points=[
+            RankPointOut(
+                at=epoch_ms(r.taken_at),
+                tier=r.tier,
+                division=r.division,
+                league_points=r.league_points,
+                wins=r.wins,
+                losses=r.losses,
+                numeric_rank=numeric_rank(r.tier, r.division, r.league_points),
+            )
+            for r in rows
+        ],
+    )
 
 
 @router.get("/{platform}/{game_name}/{tag_line}/matches", response_model=MatchHistoryResponse)
@@ -162,9 +245,6 @@ async def get_analytics(
     role_wins: Counter[str] = Counter()
     class_games: Counter[str] = Counter()
     activity = [0] * 24
-    per_champion: dict[int, dict[str, float]] = defaultdict(
-        lambda: {"games": 0, "wins": 0, "k": 0, "d": 0, "a": 0, "cs": 0, "minutes": 0.0}
-    )
 
     totals = {"wins": 0, "k": 0, "d": 0, "a": 0, "cs": 0, "vision": 0, "damage": 0, "minutes": 0.0}
 
@@ -180,15 +260,6 @@ async def get_analytics(
 
         # game_creation is epoch milliseconds, UTC.
         activity[int((row.game_creation // 1000 // 3600) % 24)] += 1
-
-        entry = per_champion[row.champion_id]
-        entry["games"] += 1
-        entry["wins"] += int(row.win)
-        entry["k"] += row.kills
-        entry["d"] += row.deaths
-        entry["a"] += row.assists
-        entry["cs"] += row.total_minions
-        entry["minutes"] += minutes
 
         totals["wins"] += int(row.win)
         totals["k"] += row.kills
@@ -223,19 +294,52 @@ async def get_analytics(
         champions=[
             ChampionPlayed(
                 champion=ChampionRefSchema(
-                    id=champion_id,
-                    name=sd.champion_name(champion_id),
-                    icon_url=sd.champion_icon(champion_id),
+                    id=t.champion_id,
+                    name=sd.champion_name(t.champion_id),
+                    icon_url=sd.champion_icon(t.champion_id),
                 ),
-                games=int(e["games"]),
-                wins=int(e["wins"]),
-                win_rate=e["wins"] / e["games"],
-                kda=(e["k"] + e["a"]) / max(1, e["d"]),
-                cs_per_min=e["cs"] / e["minutes"] if e["minutes"] else 0.0,
+                games=t.games,
+                wins=t.wins,
+                win_rate=t.wins / t.games,
+                kda=(t.kills + t.assists) / max(1, t.deaths),
+                cs_per_min=t.cs / t.minutes if t.minutes else 0.0,
+                avg_kills=t.kills / t.games,
+                avg_deaths=t.deaths / t.games,
+                avg_assists=t.assists / t.games,
+                damage_per_min=t.damage / t.minutes if t.minutes else 0.0,
+                main_position=t.main_position,
+                last_played=t.last_played or None,
+                scored_games=t.scored_games,
+                avg_score=t.score_total / t.scored_games if t.scored_games else None,
+                timeline_games=t.timeline_games,
+                avg_gold_diff_14=(
+                    t.gold_diff_total / t.timeline_games if t.timeline_games else None
+                ),
             )
-            for champion_id, e in sorted(
-                per_champion.items(), key=lambda kv: kv[1]["games"], reverse=True
+            for t in champion_totals(rows)
+        ],
+        score_profile=[
+            RoleScoreProfileOut(
+                position=p.position,
+                scored_games=p.scored_games,
+                enough=p.enough,
+                avg_score=p.avg_score,
+                avg_placement=p.avg_placement,
+                mvp=p.mvp,
+                ace=p.ace,
+                components=[
+                    ComponentAverageOut(
+                        id=c.id,
+                        label=c.label,
+                        measures=c.measures,
+                        avg_percentile=c.avg_percentile,
+                    )
+                    for c in p.components
+                ],
+                sample=p.sample,
+                min_scored=MIN_SCORED_FOR_PROFILE,
             )
+            for p in score_profile(rows)
         ],
         totals=PlayStyleTotals(
             win_rate=totals["wins"] / played,
