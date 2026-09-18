@@ -18,9 +18,13 @@ dist/
 .vite/
 
 # Internal docs: planning notes kept on the workstation, not published with the
-# repository. Ignoring a file only stops future tracking: anything listed here
-# that was committed before it was listed is still in the history.
-docs/feature-gap-analysis.md
+# repository. The whole folder, so a new internal doc is private by default.
+#
+# Nothing in it has ever been committed, which also means switching to an older
+# commit cannot delete it. The one exception to "never committed" is
+# feature-gap-analysis.md, which lived in docs/ until 2026-09-18 and is still in
+# the history from before then.
+internal-docs/
 
 # Data: the match corpus and Data Dragon cache are both rebuildable.
 data/
