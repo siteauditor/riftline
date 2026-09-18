@@ -1,9 +1,11 @@
 # Riftline
 
-A League of Legends analytics site: summoner profiles and match history, a champion
-mastery dashboard, champion tier lists, and a draft assistant.
+A League of Legends analytics site: summoner profiles and match history with a
+per-game performance score, a champion mastery dashboard, live games, champion tier
+lists and pages, ranked leaderboards, and a draft assistant.
 
-FastAPI + SQLAlchemy on the backend, React + Vite + Tailwind on the front.
+Live at <https://riftline.rhasta.space>. FastAPI + SQLAlchemy on the backend,
+React + Vite + Tailwind on the front.
 
 ---
 
@@ -94,12 +96,20 @@ cd backend
 
 # Build the rollups the tier list and draft assistant read
 .venv/Scripts/python.exe -m scripts.ingest aggregate
+
+# Score every stored lobby: the Riftline score, placements and badges
+.venv/Scripts/python.exe -m scripts.ingest score
 ```
 
+Run them in that order: each stage works on what the earlier ones found.
+`aggregate` and `score` read only the stored corpus and make no Riot calls, so they
+can be rerun as often as you like.
+
 `lobbyranks` costs far less than it looks. It is one Riot call per *player*,
-not ten per match, and players repeat: the current corpus holds 1,695 matches
-but only 2,830 distinct players, so the whole backfill is under an hour rather
-than the 16,950 calls a naive count suggests. Be aware of what it measures,
+not ten per match, and players repeat: measured on 2026-09-19, the corpus held
+2,591 matches but only 5,822 distinct players, so a backfill from scratch is 5,822
+calls, about two hours on a development key, rather than the 25,910 (over eight
+hours) that a naive count suggests. Be aware of what it measures,
 though. Riot exposes no historical rank anywhere, so this is every player's rank
 **on the day you run it**, not their rank when the game was played. The
 measurement date is stored beside the number and shown in the UI for exactly
@@ -136,17 +146,21 @@ backend/
   app/
     riot/          Riot API client: routing, rate limiting, error translation
     db/            SQLAlchemy models and engine
-    services/      players, matches, mastery, ingest, aggregate, draft,
-                   item_taxonomy
+    services/      players, matches, ranks, live, ladders, ingest, timelines,
+                   aggregate, scores, draft, item_taxonomy, static_data
     api/           FastAPI routes and response schemas
-  scripts/ingest.py    Crawler, timeline and rank backfills, ladders, aggregation
+  scripts/ingest.py    Crawler, timeline and rank backfills, ladders, aggregation,
+                       scoring
   scripts/migrate.py   Additive SQLite migration (until Alembic)
-  tests/               335 tests, no network required
+  tests/               No network required
 frontend/
   src/lib/         Typed API client and formatters
-  src/components/  Search, form strip, match row, rank card, champion picker,
-                   play-style panel, champion build/rune/pair panels
-  src/routes/      Home, Profile, Mastery, Tierlist, Champion, Draft
+  src/components/  Search, form strip, match row and scoreboard, rank card,
+                   champion picker, play-style panel, champion build/rune/pair panels
+  src/routes/      Home, Profile, Mastery, LiveGame, Tierlist, Champion, Draft,
+                   Leaderboard, NotFound
+deploy/            Production deploy entry points, systemd units, firewall
+docs/deploy.md     How production runs, and how to operate it
 ```
 
 ### Decisions worth knowing
@@ -160,7 +174,10 @@ frontend/
 and `spectator-v5` use platform hosts (`euw1`, `kr`). `account-v1` and `match-v5` use
 regional hosts (`americas`, `europe`, `asia`, `sea`). Mixing them up produces silent
 404s. `app/riot/routing.py` holds the mapping, including that SEA shards must fall
-back to `asia` for `account-v1`.
+back to `asia` for `account-v1`. A Riot ID resolves across a whole region, but the
+account itself lives on one platform, so the platform calls go through
+`PlayerService.effective_platform()`, which reads that platform from the prefix of
+the account's latest match id (see "Things that bite").
 
 **The rate limiter is proactive.** It blocks locally before sending rather than
 learning from 429s, because Riot tracks violations and suspends keys over them. It
@@ -192,7 +209,7 @@ cd backend
 .venv/Scripts/python.exe -m ruff check app scripts tests
 ```
 
-71 tests, no network access needed: Riot is mocked at the transport layer, so
+No network access needed: Riot is mocked at the transport layer, so
 routing, rate limiting, retries, error translation, match normalisation and the cache
 are all exercised against the real code paths. Several are regression tests pinning
 bugs that only live traffic exposed (see "Things that bite" below).
@@ -200,7 +217,24 @@ bugs that only live traffic exposed (see "Things that bite" below).
 ```bash
 cd frontend
 pnpm build      # typecheck + production build
+pnpm lint       # oxlint
 ```
+
+CI runs all of the above, inside the images that get deployed, on every push and
+pull request.
+
+---
+
+## Running it in production
+
+It runs at <https://riftline.rhasta.space> on a shared VPS. A push to `main` runs
+the tests on GitHub-hosted runners and then deploys that exact commit over SSH.
+There is no self-hosted runner, because the repository is public and a pull request
+could otherwise run code on the server. The corpus lives in a Docker volume and
+grows nightly, and the development key is rotated by hand every 24 hours.
+
+`docs/deploy.md` is the runbook: how the site fits on the shared box, first-time
+setup, rotating the key, the nightly pipeline, CI/CD and the firewall.
 
 ---
 
@@ -279,6 +313,60 @@ class mix, a 24-hour activity histogram and per-champion aggregates. It reads
 limited. The trade is that it describes the games we have fetched rather than a
 whole season, which `basis = "stored_matches"` states rather than implying.
 
+## The Riftline score
+
+Every player in a stored lobby gets a score from 0 to 10 for that game, a placement
+from 1 to 10 in the lobby, and badges. The match row shows the score, the placement
+and up to two badges; expanding it opens the scoreboard for all ten players
+(`/api/matches/{match_id}`). All of it is computed from stored matches, so it costs
+no Riot calls.
+
+**How it is measured.** Six components: kill participation, share of the team's
+damage to champions, gold per minute, share of the game spent alive, objectives
+(towers, plates and epic monsters) and vision score per minute. Each becomes a
+percentile within the player's own queue and role across the matches we hold, and
+the six are combined with published per-role weights (`WEIGHTS` in
+`app/services/scores.py`, shown in the UI under "How the Riftline score is
+measured"). Percentiles rather than z-scores, because damage and gold have long
+tails and one stomp should not dominate a distribution. Role-relative, so a support
+is not judged on farm, and the ten scores in a lobby share one scale, which is what
+makes a placement mean anything.
+
+**When it is withheld.** A lobby without ten players in lane roles (ARAM, Arena), a
+remake, or a queue and role with fewer than 200 games in the corpus gets no score.
+The row shows a dash and the reason, never a guess.
+
+**Whether it measures anything.** On the live corpus (2,440 scored lobbies,
+2026-09-19): winners average 5.75 and losers 4.35, the top scorer in a lobby is on
+the winning team 87.7% of the time, and the lowest scorer is on the losing team
+83.0% of the time. Every role averages 5.05, which is the check that a support and a
+mid laner are being measured on the same scale. It is our number, not Riot's, and
+the scoreboard says so.
+
+Badges, rarest first. The last column is how often each fired per game when the
+thresholds were set, and the thresholds were swept against the corpus rather than
+picked.
+
+| Badge | Rule | Per game |
+| --- | --- | --- |
+| Steal | Stole a dragon, herald or baron from the enemy | 0.14 |
+| Deathless | Finished a game of 15 minutes or more without dying | 0.29 |
+| Frontline | Took the largest share of the team's damage, and at least 30% of it | 0.39 |
+| Lifeline | Most healing and shielding that landed on allies in the lobby, and at least 5,000 | 0.52 |
+| Lane lead | Biggest gold lead at 14 minutes in the lobby, and at least 2,000 gold | 0.58 |
+| MVP | Highest Riftline score on the winning team | 1.00 |
+| ACE | Highest Riftline score on the losing team | 1.00 |
+| Damage carry | Largest share of the team's damage to champions, and at least 30% of it | 1.00 |
+| Duelist | Three or more solo kills | 1.41 |
+
+Frontline and Lifeline are there on purpose. A tank who soaks a third of the team's
+damage and an enchanter who shields thousands both look mediocre by KDA, which is
+exactly what the usual badges miss.
+
+`scripts.ingest score` scores new lobbies and `--rebuild-distributions` re-measures
+the percentiles. Changing a weight means bumping `WEIGHTS_VERSION` and running
+`score --rescore`, which recomputes every score made under the old weights.
+
 ---
 
 ## Things that bite
@@ -303,6 +391,23 @@ player's matches and you get an empty list, which reads as "this player has no g
 **A match that fails to fetch must not end pagination.** `has_more` keys off the number
 of ids Riot returned, not the number of matches that rendered.
 
+**A Riot ID resolves across a region; the account lives on one platform.** An OCE
+Riot ID resolves through `sea` and its matches load, while the account itself is on
+SG2. Measured on one such account: on `oc1`, summoner-v4 says 404, league-v4 returns
+no entries and champion-mastery-v4 returns no champions; on `sg2`, the same account
+is Bronze III with 100 champions. Only the 404 admits anything is wrong. The other
+two answer 200 with nothing, which rendered a ranked player with a deep champion
+pool as unranked and new. So the platform calls ask the platform the account's
+latest match was played on, and every per-platform cache records which platform it
+was filled from, so an empty answer from the wrong one is never served for the
+right one.
+
+**PH2 and TH2 no longer exist.** Riot folded both into SG2, and
+`ph2.api.riotgames.com` and `th2.api.riotgames.com` no longer resolve. Listed as
+platforms, they put a TH choice on the leaderboard that answered 502 while the page
+said Riot was down. They are aliases for `sg2` now, so old links and searches still
+land where those accounts live.
+
 ---
 
 ## Not affiliated with Riot Games
@@ -312,6 +417,6 @@ Riot Games or anyone officially involved in producing or managing League of Lege
 League of Legends and Riot Games are trademarks or registered trademarks of Riot
 Games, Inc.
 
-If you make this public, read Riot's developer policies first: production keys
+If you run your own copy, read Riot's developer policies first: production keys
 require an application and approval, and there are rules about what you may display
 and how you may monetise it.
