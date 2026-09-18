@@ -1,0 +1,76 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+Riftline is a League of Legends analytics site (op.gg style): FastAPI + SQLAlchemy 2.0 async + SQLite behind a React 19 + Vite + Tailwind v4 frontend, live at https://riftline.rhasta.space. `README.md` explains most design decisions and the Riot API traps; read it before changing anything that talks to Riot. `docs/deploy.md` is the production runbook. The roadmap is `internal-docs/feature-gap-analysis.md` (work is organised in its lettered feature groups). `internal-docs/` is gitignored: it exists on the owner's workstation and not in a clone, and anything written there stays private.
+
+## Commands
+
+Backend commands run from `backend/` with the venv's interpreter (`.venv/Scripts/python.exe` on Windows, `.venv/bin/python` elsewhere):
+
+```bash
+python -m uvicorn app.main:app --reload          # :8000, /docs, /api/health
+python -m pytest -q                              # whole suite, no network needed
+python -m pytest tests/test_scores.py -q         # one file
+python -m pytest "tests/test_integration.py::test_mastery_reads_the_shard_the_account_is_on" -q
+python -m pytest -q -k shard                     # by name substring
+python -m ruff check app scripts tests
+python -m scripts.migrate                        # additive schema migration, idempotent
+python -m scripts.ingest status                  # also: crawl, timelines, lobbyranks, ladders, aggregate, score
+```
+
+Frontend commands run from `frontend/` (pnpm is pinned by `packageManager`):
+
+```bash
+pnpm dev      # :5173, proxies /api to 127.0.0.1:8000
+pnpm build    # tsc -b && vite build: this is the type check
+pnpm lint     # oxlint
+```
+
+CI (`.github/workflows/ci.yml`) runs the same suite, ruff, build and lint inside the Docker images, plus an em dash check.
+
+## Architecture
+
+### Backend
+
+`app/riot` (HTTP client, rate limiter, host routing) -> `app/services` (all logic) -> `app/api` (routes, and `schemas.py`, which holds the response models and the ORM-to-response mappers). `scripts/ingest.py` drives the services as a CLI.
+
+**Riot host routing is where most bugs have come from.** `app/riot/routing.py` maps each platform to its regional host (match-v5) and its account-v1 region (SEA collapses to `asia`). A Riot ID resolves across a whole region, but summoner-v4, league-v4, champion-mastery-v4 and spectator-v5 answer only for the shard the account lives on, and on the wrong shard the last three return **200 with nothing** rather than an error. OCE Riot IDs are the usual case: they resolve through `sea` while the account lives on `sg2`. So per-shard calls must go through `PlayerService.effective_platform()`, which finds the home shard from the platform prefix of the account's latest match id. Every per-shard cache on `Player` records the shard it came from (`summoner_platform`, `league_platform`, `mastery_platform`); a new per-shard cache needs the same stamp, or the empty wrong-shard answer gets cached for the whole TTL. `ph2` and `th2` are aliases to `sg2`: Riot merged those shards and their hosts no longer resolve, so they must not come back into `PLATFORMS`.
+
+**Storage first.** `matches.raw` holds the full match-v5 payload and `match_timelines.raw_gz` the gzipped timeline, so most new features can be computed from disk without spending the rate limit (a development key allows 100 requests per two minutes). The Riftline performance score (`app/services/scores.py`) is computed entirely from stored data: percentile breakpoints per (queue, role, metric) in `role_metric_stats`, combined with the published per-role `WEIGHTS`. Bumping `WEIGHTS_VERSION` marks existing scores stale.
+
+**Ingestion order matters:** `crawl` (finds matches) -> `timelines` -> `lobbyranks` -> `aggregate` -> `score`. `aggregate` and `score` make no Riot calls. `score --rebuild-distributions` re-measures the percentiles and rescores every lobby; `score --rescore` recomputes scores left stale by a weights change.
+
+**Schema changes have no Alembic.** `init_db` (`create_all`) creates new tables but never alters existing ones, so a new column on an existing table must also be added to `ADDITIVE` in `scripts/migrate.py`. Every deploy runs the migration.
+
+**Database path.** A relative `DATABASE_URL` is anchored to the repository root (`PROJECT_ROOT` in `app/db/base.py`), so the local corpus is `data/lol.db` at the repo root, not under `backend/`. The Docker image mirrors that layout (`/srv/riftline/backend` beside a `/srv/riftline/data` volume) for the same reason.
+
+**Numbers are withheld rather than guessed.** Thin samples are shown with their sample size or not shown at all: tier lists rank by Wilson lower bound, scores are withheld below `MIN_GAMES_FOR_SCORE` games per role, and responses carry `basis` / sample fields that say what a figure was computed from. New statistics should follow the same pattern.
+
+### Tests
+
+`tests/conftest.py` points `DATABASE_URL` at a temporary SQLite file before any app module is imported, zeroes every cache TTL and unthrottles the limiter. Riot is mocked with `respx` at the HTTP transport layer, so everything above it is production code.
+
+The whole suite shares **one database**. A test that inserts rows needs ids no other test uses. The single-letter puuids (`"C" * 78`) are mostly taken, so name them instead (`"my-test".ljust(78, "0")`); a collision surfaces as a UNIQUE constraint failure far from the cause. Because the TTLs are zeroed, a request-level test cannot tell a scoped cache from a cold one, so cache-scoping tests drive the service directly (see `test_the_summoner_cache_is_scoped_to_one_shard`).
+
+### Frontend
+
+`src/lib/api.ts` is the typed client and its response types, kept in step with `backend/app/api/schemas.py` by hand. It fetches relative `/api/...` paths, which the Vite dev server and the production nginx (`frontend/nginx.conf`) both proxy, so there is no CORS. Routes live in `src/main.tsx`.
+
+Tailwind v4 is configured CSS-first: theme tokens are in `@theme` in `src/index.css`, and there is no `tailwind.config`. Custom classes must go inside `@layer components` (or `base`), because unlayered CSS beats every utility and silently overrides classes like `px-3` or `font-700` on the same element. Native `<select>` popups are styled by `.control` / `.control-bare` in the same file, which set both the option background and its colour explicitly; relying on inheritance or `color-scheme` alone has produced unreadable dropdowns twice.
+
+## Deployment
+
+Production is a shared VPS that also serves five other sites. Read `docs/deploy.md` before changing `deploy/`, the workflow, or anything on the server.
+
+- A push to `main` runs CI on GitHub-hosted runners, then the deploy job connects over SSH with a forced-command key. The server runs `/usr/local/bin/riftline-deploy`, which accepts only a commit sha that is on `main`, then runs `deploy/deploy.sh`.
+- The repository is public. Never add a self-hosted runner (a pull request could run code on the server through it), and never add repository-level secrets: the deploy secrets live on the `production` environment, which fork pull requests cannot reach.
+- `deploy/riftline-deploy`, the systemd units and `deploy/cloudflare-only-web` are installed outside the deploy directory, so a push does not update them. Reinstall them as `docs/deploy.md` describes.
+- `main` has a ruleset (changes go through a PR that passes "Tests and build", and no force-pushes). The owner can bypass it.
+
+## Repository rules
+
+- Never write the em dash character, anywhere: code, comments, docs, commit messages. CI fails if one appears under `backend/`, `frontend/src`, `docs/`, `deploy/` or `.github/`, or in the `Makefile` or `docker-compose.yml`; files at the repository root (this one, `README.md`) and commit messages are not scanned, so check those yourself.
+- Never print the Riot API key. `backend/.env` and `data/` are gitignored and must stay untracked.
+- Commits are authored as `Rhasta <244224210+Rhasta0323@users.noreply.github.com>`. That is set in this clone's `.git/config`; a fresh clone needs it set again, because the history was rewritten to remove a personal address.
+- Comments in this codebase explain why, usually naming the measurement or the failure that motivated the code. Match that in new code.
