@@ -367,6 +367,26 @@ exactly what the usual badges miss.
 the percentiles. Changing a weight means bumping `WEIGHTS_VERSION` and running
 `score --rescore`, which recomputes every score made under the old weights.
 
+## The home page and search
+
+Nothing on the home page calls Riot. The best pick in each role comes from the
+tier list's own rows. The best game in each role over the last seven days
+(`/api/highlights/best-games`) reads the stored scores and shows one game per
+player; each game opens on its own page at `/match/{match_id}`, because a
+week-old game is usually not in the player's latest twenty. One per role, not
+the top five overall, because the overall top is all carries: on 2026-09-19 the
+eight highest scores of the week were all top, mid and bot laners.
+
+The search box suggests Riot IDs as you type (`/api/players/suggest`), **only
+from players already stored**. Asking Riot would cost an account-v1 call per
+keystroke on a budget of 100 per two minutes. Suggestions come from an
+in-process index of every named player, not from the `search_name` cache key:
+that column is left empty on rows built from match data, since a name read
+from an old game may be stale and must never answer a Riot ID lookup. A
+suggestion only fills in the field, and the profile lookup still goes through
+Riot. The last region used and the profiles recently opened stay in the
+browser's `localStorage` and are never sent anywhere.
+
 ---
 
 ## Things that bite

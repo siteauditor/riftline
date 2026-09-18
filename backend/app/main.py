@@ -11,9 +11,11 @@ from fastapi.responses import ORJSONResponse
 
 from app.api.routes import champions as champion_routes
 from app.api.routes import draft as draft_routes
+from app.api.routes import highlights as highlight_routes
 from app.api.routes import leaderboard as leaderboard_routes
 from app.api.routes import matches as match_routes
 from app.api.routes import meta as meta_routes
+from app.api.routes import players as player_routes
 from app.api.routes import static_data as static_routes
 from app.api.routes import summoner as summoner_routes
 from app.api.schemas import HealthResponse
@@ -151,6 +153,8 @@ def create_app() -> FastAPI:
     app.include_router(draft_routes.router)
     app.include_router(leaderboard_routes.router)
     app.include_router(match_routes.router)
+    app.include_router(player_routes.router)
+    app.include_router(highlight_routes.router)
 
     @app.get("/api/health", response_model=HealthResponse, tags=["meta"])
     async def health(request: Request) -> HealthResponse:

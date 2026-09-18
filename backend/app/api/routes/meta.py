@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import DbDep, StaticDep
-from app.api.schemas import ChampionRef
-from app.db.models import ChampionStat
+from app.api.schemas import ChampionRef, epoch_ms
+from app.db.models import ChampionStat, Match
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
@@ -70,6 +70,12 @@ class CorpusResponse(BaseModel):
     slices: list[dict]
     brackets: list[str] = Field(default_factory=list)
     total_matches: int
+    # Epoch ms. The newest game held and when the last one was stored. The home
+    # page states the age rather than "updated nightly": with an expired
+    # development key the nightly crawl is skipped, and a schedule would claim
+    # a freshness the data does not have.
+    latest_game_at: int | None = None
+    latest_ingest_at: int | None = None
 
 
 def assign_tiers(rows: list[ChampionMetaRow]) -> None:
@@ -87,10 +93,15 @@ def assign_tiers(rows: list[ChampionMetaRow]) -> None:
 async def get_corpus(db: DbDep) -> CorpusResponse:
     """What data has actually been ingested. Useful before trusting a tier list."""
     slices = await available_slices(db)
+    latest_game, latest_ingest = (
+        await db.execute(select(func.max(Match.game_creation), func.max(Match.ingested_at)))
+    ).one()
     return CorpusResponse(
         slices=slices,
         brackets=await available_brackets(db),
         total_matches=sum(s["matches"] for s in slices),
+        latest_game_at=latest_game,
+        latest_ingest_at=epoch_ms(latest_ingest),
     )
 
 

@@ -491,6 +491,64 @@ export interface CorpusResponse {
   /** Crawl provenances held, always starting with "ALL". Not measured ranks. */
   brackets: string[]
   total_matches: number
+  /** Epoch ms: when the newest game held was played. */
+  latest_game_at: number | null
+  /** Epoch ms: when a game was last stored. */
+  latest_ingest_at: number | null
+}
+
+// --- home page -----------------------------------------------------------------
+
+/** A Riot ID we already hold, offered while somebody types. */
+export interface PlayerSuggestion {
+  riot_id: string
+  game_name: string
+  tag_line: string
+  platform: string
+  platform_label: string
+  profile_icon_url: string | null
+  summoner_level: number | null
+  /** Solo queue as stored. Null means none held, which is not "unranked". */
+  tier: string | null
+  division: string | null
+  league_points: number | null
+}
+
+export interface SuggestResponse {
+  query: string
+  players: PlayerSuggestion[]
+}
+
+/** The highest Riftline score in one role over the window. */
+export interface BestGame {
+  match_id: string
+  /** Lower-case shard id, for the profile link. */
+  platform: string
+  puuid: string
+  game_name: string | null
+  tag_line: string | null
+  champion: TierListChampion
+  position: Position
+  score: number
+  placement: number | null
+  kills: number
+  deaths: number
+  assists: number
+  win: boolean
+  badges: Badge[]
+  game_creation: number
+  game_duration: number
+}
+
+export interface BestGamesResponse {
+  queue_id: number
+  queue_name: string
+  days: number
+  since: number
+  /** What the games were chosen from. */
+  scored_players: number
+  scored_games: number
+  games: BestGame[]
 }
 
 // --- champion detail -------------------------------------------------------
@@ -764,6 +822,15 @@ export const api = {
     ),
 
   corpus: () => request<CorpusResponse>('/api/meta/corpus'),
+
+  /** Players we already hold whose Riot ID starts with `q`. Never calls Riot. */
+  suggest: (q: string, platform: string, signal?: AbortSignal) =>
+    request<SuggestResponse>(
+      `/api/players/suggest?${new URLSearchParams({ q, platform }).toString()}`,
+      { signal },
+    ),
+
+  bestGames: () => request<BestGamesResponse>('/api/highlights/best-games'),
 
   meta: (opts: SliceQuery = {}) =>
     request<MetaResponse>(`/api/meta/champions?${sliceParams(opts, 20)}`),

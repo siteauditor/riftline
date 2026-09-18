@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
@@ -11,6 +11,7 @@ import RankCard from '../components/RankCard'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
 import { api, type MatchSummary } from '../lib/api'
 import { compact, pct, tierColor, tierLabel, winRateColor } from '../lib/format'
+import { rememberSearch } from '../lib/storage'
 
 const PAGE = 20
 
@@ -29,6 +30,19 @@ export default function Profile() {
     queryKey: ['profile', platform, name, tag],
     queryFn: () => api.profile(platform, name, tag),
   })
+
+  // Remembered only once Riot has answered, so a mistyped ID never becomes a
+  // "recent" search. Stored with the name as Riot spells it, not as typed.
+  const loaded = profileQuery.data
+  useEffect(() => {
+    if (!loaded?.game_name || !loaded.tag_line) return
+    rememberSearch({
+      platform: loaded.platform,
+      gameName: loaded.game_name,
+      tagLine: loaded.tag_line,
+      iconUrl: loaded.profile_icon_url,
+    })
+  }, [loaded])
 
   const matchesQuery = useInfiniteQuery({
     queryKey: ['matches', platform, name, tag, queue],
