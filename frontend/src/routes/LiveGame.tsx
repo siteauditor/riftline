@@ -277,7 +277,6 @@ function LaneCard({
   // Blue is the mirrored side: its art sits on the right, beside the lane icon,
   // so both champions in a lane face each other across it.
   const mirrored = side === 'blue'
-  const art = p.skin_tile_url ?? p.champion.icon_url
 
   return (
     // The cell pushes the card towards the lane icon; the card itself is only
@@ -292,9 +291,7 @@ function LaneCard({
       {/* The skin this player is wearing, from spectator's own record of it:
           the same art their teammates see on the loading screen. */}
       <span className="size-12 shrink-0 overflow-hidden rounded-sm bg-raised sm:size-14">
-        {art && (
-          <img src={art} alt={p.champion.name} className="size-full object-cover" loading="lazy" />
-        )}
+        <SkinArt p={p} className="size-full object-cover" />
       </span>
 
       <div className="min-w-0 flex-1">
@@ -421,6 +418,34 @@ function LaneCenter({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * The skin a player is wearing, or the champion's base art if that image fails.
+ *
+ * A chroma used to fail here: spectator reports it by its own number, Community
+ * Dragon has no art for it, and the card showed a broken image with the
+ * champion's name in it. The server now maps a chroma to the skin it recolours,
+ * and this is the net under anything else the image host does not have. The
+ * failed URL is remembered rather than a flag, so the next game's skin is still
+ * tried.
+ */
+function SkinArt({ p, className }: { p: LiveParticipant; className: string }) {
+  const [failed, setFailed] = useState<string | null>(null)
+  const preferred = p.skin_tile_url
+  const src = preferred && preferred !== failed ? preferred : p.champion.icon_url
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      alt={p.champion.name}
+      className={className}
+      loading="lazy"
+      onError={() => {
+        if (src === preferred) setFailed(preferred)
+      }}
+    />
   )
 }
 
@@ -741,14 +766,7 @@ function PlayerRow({
       }`}
     >
       <span className="size-9 shrink-0 overflow-hidden rounded-sm bg-raised">
-        {(p.skin_tile_url ?? p.champion.icon_url) && (
-          <img
-            src={p.skin_tile_url ?? p.champion.icon_url ?? undefined}
-            alt={p.champion.name}
-            className="size-full object-cover"
-            loading="lazy"
-          />
-        )}
+        <SkinArt p={p} className="size-full object-cover" />
       </span>
 
       <Loadout p={p} />

@@ -63,3 +63,56 @@ def test_a_missing_live_feed_leaves_the_rest_of_static_data_intact():
     service = _service(live=None, riot=[{"queueId": 450, "description": "ARAM games"}])
     assert service.queue_names == {}
     assert service.queue_name(450) == "ARAM"
+
+
+# ------------------------------------------------------------------ chromas
+
+
+def _with_jayce() -> StaticDataService:
+    from app.services.static_data import Champion
+
+    service = StaticDataService()
+    service.champions_by_id[126] = Champion(
+        id=126, key="Jayce", name="Jayce", title="", tags=[], partype=""
+    )
+    return service
+
+
+def test_a_chroma_shows_the_skin_it_recolours():
+    """Measured on a live game: Jayce skin 23 is "Resistance Jayce (Obsidian)",
+    a chroma of skin 15, and Community Dragon answers 404 for its tile."""
+    service = _with_jayce()
+    service._index_chromas(
+        {"126015": {"id": 126015, "chromas": [{"id": 126023}, {"id": 126024}]}}
+    )
+    assert service.champion_tile(126, 23).endswith("/126/tile/skin/15")
+    assert service.champion_tile(126, 15).endswith("/126/tile/skin/15"), "a skin is itself"
+    assert service.champion_tile(126, 7).endswith("/126/tile/skin/7"), "unknown passes through"
+    assert service.champion_tile(126, None).endswith("/126/tile")
+    assert service.champion_tile(126, 0).endswith("/126/tile")
+
+
+def test_a_chroma_of_the_base_skin_shows_the_base_art():
+    service = _with_jayce()
+    service._index_chromas({"126000": {"id": 126000, "chromas": [{"id": 126030}]}})
+    assert service.champion_tile(126, 30).endswith("/126/tile")
+
+
+def test_a_malformed_skins_file_does_not_forget_the_chromas_we_had():
+    """An empty result is a reshaped or broken file, not "no chromas exist"."""
+    service = _with_jayce()
+    service._index_chromas({"126015": {"id": 126015, "chromas": [{"id": 126023}]}})
+    service._index_chromas({})
+    assert service.chroma_parent == {126023: 126015}
+
+
+def test_the_chroma_map_survives_the_disk_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.static_data.CACHE_DIR", tmp_path)
+    service = _with_jayce()
+    service._index_chromas({"126015": {"id": 126015, "chromas": [{"id": 126023}]}})
+    service._save_chroma_cache()
+
+    fresh = StaticDataService()
+    fresh._load_chroma_cache()
+    # JSON object keys come back as strings; the lookup needs them as ints.
+    assert fresh.chroma_parent == {126023: 126015}

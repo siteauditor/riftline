@@ -42,6 +42,14 @@ CDRAGON_QUEUES_URL = (
     "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data"
     "/global/default/v1/queues.json"
 )
+# Every skin and the chromas under it. Spectator reports a player wearing a
+# chroma by the chroma's own number, and a chroma has no art of its own, so
+# this is what maps it back to the skin it recolours. 5.9 MB, of which only the
+# chroma-to-skin map (7,058 entries, measured 2026-09-19) is kept.
+CDRAGON_SKINS_URL = (
+    "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data"
+    "/global/default/v1/skins.json"
+)
 CACHE_DIR = PROJECT_ROOT / "data" / "static"
 # How long to serve stale data before retrying a CDN that just failed.
 RETRY_AFTER_FAILURE = 60.0
@@ -73,6 +81,9 @@ class StaticDataService:
         self.queues: dict[int, dict] = {}
         # queue id -> the client's own name, from Community Dragon.
         self.queue_names: dict[int, str] = {}
+        # chroma id -> the id of the skin it recolours, from Community Dragon.
+        # Ids are champion * 1000 + skin number, as Riot writes them.
+        self.chroma_parent: dict[int, int] = {}
         self._loaded_at: float = 0.0
         # Set after a failed refresh so we stop hammering a CDN that is down.
         self._retry_not_before: float = 0.0
@@ -125,7 +136,7 @@ class StaticDataService:
                 # index we had not loaded yet.
                 version = versions[0]
                 base = f"{DDRAGON}/cdn/{version}/data/{self.locale}"
-                champions, items, spells, runes, queues, live_queues = (
+                champions, items, spells, runes, queues, live_queues, skins = (
                     await asyncio.gather(
                         self._get_json(http, f"{base}/champion.json"),
                         self._get_json(http, f"{base}/item.json"),
@@ -135,11 +146,21 @@ class StaticDataService:
                         # Optional: a name is a nicety, and Community Dragon
                         # being down must not cost us champions and items.
                         self._get_json(http, CDRAGON_QUEUES_URL, optional=True),
+                        # Optional for the same reason. Without it a chroma
+                        # shows the champion's base art instead of its skin's
+                        # (the page falls back on a failed image by itself).
+                        self._get_json(http, CDRAGON_SKINS_URL, optional=True),
                     )
                 )
             self.version = version
             self._index(champions, items, spells, runes, queues, live_queues)
             self._save_disk_cache(champions, items, spells, runes, queues, live_queues)
+            if skins:
+                self._index_chromas(skins)
+                self._save_chroma_cache()
+            elif not self.chroma_parent:
+                # Community Dragon is down this time: last known map, if any.
+                self._load_chroma_cache()
             self._loaded_at = time.time()
             self._retry_not_before = 0.0
             log.info("Data Dragon %s loaded", version)
@@ -229,6 +250,46 @@ class StaticDataService:
         except OSError as exc:
             log.warning("Could not write static cache: %s", exc)
 
+    def _index_chromas(self, skins: Any) -> None:
+        """Map every chroma to the skin it recolours.
+
+        A player wearing a chroma is reported by the chroma's own number:
+        ``lastSelectedSkinIndex`` 23 on Jayce is "Resistance Jayce (Obsidian)",
+        a chroma of skin 15. Community Dragon has no tile for a chroma and
+        answers 404, which the live tab rendered as a broken image with the
+        champion's name in it. The parent skin is the right picture: a chroma
+        is that skin recoloured.
+        """
+        rows = skins.values() if isinstance(skins, dict) else (skins or [])
+        mapping: dict[int, int] = {}
+        for skin in rows:
+            parent = skin.get("id") if isinstance(skin, dict) else None
+            if not isinstance(parent, int):
+                continue
+            for chroma in skin.get("chromas") or []:
+                if isinstance(chroma, dict) and isinstance(chroma.get("id"), int):
+                    mapping[chroma["id"]] = parent
+        # An empty result is a malformed file, not "no chromas exist": keep
+        # the map we had rather than forget every chroma at once.
+        if mapping:
+            self.chroma_parent = mapping
+
+    def _save_chroma_cache(self) -> None:
+        try:
+            (CACHE_DIR / "chromas.json").write_text(
+                json.dumps(self.chroma_parent), encoding="utf-8"
+            )
+        except OSError as exc:
+            log.warning("Could not write the chroma cache: %s", exc)
+
+    def _load_chroma_cache(self) -> None:
+        # JSON object keys are strings, so they come back as strings.
+        try:
+            raw = json.loads((CACHE_DIR / "chromas.json").read_text(encoding="utf-8"))
+            self.chroma_parent = {int(k): int(v) for k, v in raw.items()}
+        except (OSError, ValueError, AttributeError):
+            pass
+
     def _load_disk_cache(self) -> bool:
         try:
             version = (CACHE_DIR / "version.txt").read_text(encoding="utf-8").strip()
@@ -248,6 +309,7 @@ class StaticDataService:
             payloads.append(None)
         self.version = version or self.version
         self._index(*payloads)
+        self._load_chroma_cache()
         # Deliberately not updating _loaded_at: stale data should keep retrying
         # the network on the next request rather than settle for the cache.
         log.info("Loaded static data from disk cache (version %s)", self.version)
@@ -292,6 +354,11 @@ class StaticDataService:
         champ = self.champion(champion_id)
         if not champ:
             return None
+        if skin:
+            # A chroma has no art of its own; show the skin it recolours.
+            parent = self.chroma_parent.get(champ.id * 1000 + skin)
+            if parent is not None:
+                skin = parent % 1000
         base = f"{CDRAGON}/champion/{champ.id}/tile"
         return f"{base}/skin/{skin}" if skin else base
 
