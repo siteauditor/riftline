@@ -17,6 +17,11 @@ node_modules/
 dist/
 .vite/
 
+# Internal docs: planning notes kept on the workstation, not published with the
+# repository. Ignoring a file only stops future tracking: anything listed here
+# that was committed before it was listed is still in the history.
+docs/feature-gap-analysis.md
+
 # Data: the match corpus and Data Dragon cache are both rebuildable.
 data/
 *.db
