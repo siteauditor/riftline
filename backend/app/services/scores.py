@@ -129,21 +129,31 @@ class Badge:
 
 
 # Ordered rarest first, which is the order the UI picks from.
+#
+# The rule text is the tooltip, so every threshold in it is formatted from the
+# constant the code applies rather than typed in. Typed in, Lifeline's text said
+# "most healing and shielding in the lobby" while the code also required 5,000
+# of it: a player with the most, short of 5,000, got no badge and no tooltip
+# that explained why.
 BADGES: tuple[Badge, ...] = (
     Badge("steal", "Steal", "Stole a dragon, herald or baron from the enemy", 0.14),
     Badge("deathless", "Deathless",
-          "Finished a game of 15 minutes or more without dying", 0.29),
+          f"Finished a game of {DEATHLESS_MINIMUM_SECONDS // 60} minutes or more "
+          "without dying", 0.29),
     Badge("frontline", "Frontline",
-          "Took the largest share of the team's damage, and at least 30% of it", 0.39),
+          "Took the largest share of the team's damage, and at least "
+          f"{SHARE_FLOOR:.0%} of it", 0.39),
     Badge("lifeline", "Lifeline",
-          "Most healing and shielding that landed on an ally in the lobby", 0.52),
+          "Most healing and shielding that landed on allies in the lobby, and at least "
+          f"{LIFELINE_FLOOR:,}", 0.52),
     Badge("lane_lead", "Lane lead",
-          "Biggest gold lead at 14 minutes in the lobby, and at least 2,000 gold", 0.58),
+          "Biggest gold lead at 14 minutes in the lobby, and at least "
+          f"{LANE_LEAD_GOLD:,} gold", 0.58),
     Badge("mvp", "MVP", "Highest Riftline score on the winning team", 1.00),
     Badge("ace", "ACE", "Highest Riftline score on the losing team", 1.00),
     Badge("damage_carry", "Damage carry",
-          "Largest share of the team's damage to champions, and at least 30% of it",
-          1.00),
+          "Largest share of the team's damage to champions, and at least "
+          f"{SHARE_FLOOR:.0%} of it", 1.00),
     Badge("duelist", "Duelist", "Three or more solo kills", 1.41),
 )
 

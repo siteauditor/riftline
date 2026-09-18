@@ -21,6 +21,7 @@ from app.services.scores import (
     BADGES,
     COMPONENTS,
     DEATHLESS_MINIMUM_SECONDS,
+    DUELIST_SOLO_KILLS,
     LANE_LEAD_GOLD,
     LIFELINE_FLOOR,
     MIN_GAMES_FOR_SCORE,
@@ -470,6 +471,26 @@ async def test_lifeline_is_the_lobby_best_above_a_floor():
         "SC_LIFE_NONE", queue_id=queue, overrides={4: {"heal_and_shield": 100}}
     )
     assert all("lifeline" not in b for b in (await badges_for("SC_LIFE_NONE")).values())
+
+
+def test_every_badge_rule_states_the_threshold_the_code_applies():
+    """The rule text is the tooltip, so a threshold it leaves out is a rule the
+    player cannot see.
+
+    Lifeline's text used to stop at "most healing and shielding in the lobby"
+    while the code also required 5,000 of it: a support with the most healing,
+    short of the floor, got no badge and nothing on the page saying why.
+    """
+    rules = {b.id: b.rule for b in BADGES}
+    assert f"at least {LIFELINE_FLOOR:,}" in rules["lifeline"]
+    assert f"at least {LANE_LEAD_GOLD:,} gold" in rules["lane_lead"]
+    assert f"at least {SHARE_FLOOR:.0%}" in rules["frontline"]
+    assert f"at least {SHARE_FLOOR:.0%}" in rules["damage_carry"]
+    assert f"{DEATHLESS_MINIMUM_SECONDS // 60} minutes" in rules["deathless"]
+    # Spelled as a word, so pinned by value: changing the constant fails here
+    # until the text says the new number too.
+    assert DUELIST_SOLO_KILLS == 3
+    assert rules["duelist"].startswith("Three or more")
 
 
 async def test_lane_lead_needs_a_lead_worth_naming():
