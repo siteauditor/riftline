@@ -44,6 +44,42 @@ port, so this project cannot collide with a neighbour or take one down with it.
 already set up this way on the same box and in the same DNS zone. The label
 shape here is copied from them rather than invented.
 
+### Web traffic only from Cloudflare
+
+Every hostname served from this box is proxied by Cloudflare, so ports 80 and
+443 answer Cloudflare's address ranges and nobody else. Someone who finds the
+origin address gets no answer, rather than a way around Cloudflare's WAF, DDoS
+protection and rate limiting. Keeping the address secret does not hold up
+against scanners or a leaked commit; refusing everyone but Cloudflare does.
+
+`deploy/cloudflare-only-web`, installed at `/usr/local/sbin/` and run at boot
+(and after every Docker restart) by `cloudflare-only-web.service`. It covers IPv4
+and IPv6, and both routes traffic takes to Caddy: Docker's DNAT, which only the
+`DOCKER-USER` chain sees, and Docker's userland proxy, which arrives on `INPUT`.
+
+It leaves alone SSH, the miner's port 8091, and traffic the box starts itself.
+Only new connections arriving on the public interface are checked, so replies
+to a container's own calls out on 443 (Riot's API, Data Dragon) pass. Certificate
+renewal is unaffected: every certificate here was issued through `http-01`,
+which arrives via Cloudflare like any request.
+
+Verified when it went in: all six sites answered exactly as before through
+Cloudflare, the origin stopped answering directly on 80 and 443, and the miner,
+SSH and outbound calls from containers were unchanged.
+
+```bash
+ssh MyVPS cloudflare-only-web status          # the rules in force
+ssh MyVPS systemctl stop cloudflare-only-web  # open 80/443 to everyone again
+ssh MyVPS systemctl start cloudflare-only-web # and close them
+
+# Install or update, after editing the script (for example, when Cloudflare
+# publishes new ranges: https://api.cloudflare.com/client/v4/ips).
+ssh MyVPS 'install -m 0755 /root/riftline/deploy/cloudflare-only-web /usr/local/sbin/ \
+  && install -m 0644 /root/riftline/deploy/cloudflare-only-web.service /etc/systemd/system/ \
+  && systemctl daemon-reload && systemctl enable cloudflare-only-web \
+  && systemctl restart cloudflare-only-web'
+```
+
 ### Why the site proxies its own /api
 
 The client fetches relative paths (`/api/...`, see `frontend/src/lib/api.ts`),

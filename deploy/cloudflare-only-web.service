@@ -1,0 +1,23 @@
+# Re-applies the Cloudflare-only rule for ports 80 and 443 at boot, and whenever
+# Docker restarts. Installed at /etc/systemd/system/. See cloudflare-only-web.
+#
+# The rules live in the kernel, not on disk, so they are gone after a reboot;
+# this puts them back. PartOf ties it to Docker: Docker owns the DOCKER-USER
+# chain the forwarded hook lives in, so when Docker restarts this runs again
+# after it.
+
+[Unit]
+Description=Accept web traffic on 80/443 only from Cloudflare
+Documentation=https://github.com/siteauditor/riftline/blob/main/docs/deploy.md
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/cloudflare-only-web start
+ExecStop=/usr/local/sbin/cloudflare-only-web stop
+
+[Install]
+WantedBy=multi-user.target

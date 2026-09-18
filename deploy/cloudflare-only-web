@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Accept web traffic (ports 80 and 443) on this box only from Cloudflare.
+#
+#     cloudflare-only-web start    apply (idempotent: safe to run again)
+#     cloudflare-only-web stop     remove every rule this script added
+#     cloudflare-only-web status   show what is in force
+#
+# Installed at /usr/local/sbin/cloudflare-only-web and run at boot by
+# cloudflare-only-web.service. It protects every site on the box, not only
+# Riftline: all six hostnames served here are proxied by Cloudflare, so the
+# origin has no reason to talk to anyone else on these ports.
+#
+# Why it exists. Anyone who knows the origin address can skip Cloudflare and
+# reach the sites directly, with no WAF, no DDoS shield and no rate limiting in
+# the way. Hiding the address does not survive contact with scanners or with a
+# leaked commit; refusing to answer anyone but Cloudflare does.
+#
+# What it deliberately leaves alone:
+#   * SSH (22). This script cannot lock anyone out.
+#   * Every other published port, notably the miner's 8091, which its network
+#     must reach directly.
+#   * Certificate renewal. Caddy obtains certificates through http-01, which
+#     arrives via Cloudflare like any other request (every certificate on this
+#     box was issued that way). tls-alpn-01 cannot pass Cloudflare's proxy and
+#     has never succeeded here.
+#   * Traffic the box starts itself. Only NEW connections that arrive on the
+#     public interface are checked, so replies to a container's own call out to
+#     port 443 (Riot's API, Data Dragon) are untouched. Without that, matching on
+#     port 443 alone would drop the answers to every outbound HTTPS request.
+#
+# Two hooks per address family, because traffic reaches Caddy by two routes:
+#   DOCKER-USER  connections Docker DNATs to the container (forwarded). This is
+#                Docker's documented place for such rules; ufw-style INPUT rules
+#                never see these packets.
+#   INPUT        connections Docker's userland proxy accepts on the host, which
+#                is how most IPv6 arrives here.
+
+set -euo pipefail
+
+IFACE="eth0"
+CHAIN="CF-ONLY-WEB"
+
+# https://api.cloudflare.com/client/v4/ips, fetched 2026-09-18, etag
+# 38f79d050aa027e3be3865e495dcc9bc. Cloudflare changes these rarely and
+# announces it; refreshing is editing these two lists and running `start`.
+CF_V4=(
+  173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22
+  141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20
+  197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13
+  104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+)
+CF_V6=(
+  2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32
+  2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+)
+
+# The rules that send new inbound web connections through $CHAIN. One per line:
+# "<chain> <match...>". Kept in one place so start and stop cannot disagree.
+hooks() {
+  local new="-m conntrack --ctstate NEW"
+  cat <<EOF
+DOCKER-USER -i $IFACE -p tcp $new --ctdir ORIGINAL --ctorigdstport 80
+DOCKER-USER -i $IFACE -p tcp $new --ctdir ORIGINAL --ctorigdstport 443
+DOCKER-USER -i $IFACE -p udp $new --ctdir ORIGINAL --ctorigdstport 443
+INPUT -i $IFACE -p tcp --dport 80 $new
+INPUT -i $IFACE -p tcp --dport 443 $new
+INPUT -i $IFACE -p udp --dport 443 $new
+EOF
+}
+
+start_family() {
+  local ipt="$1"; shift
+  # Rebuilt from scratch every time, so a changed range list takes effect and a
+  # second run changes nothing.
+  "$ipt" -N "$CHAIN" 2>/dev/null || "$ipt" -F "$CHAIN"
+  local range
+  for range in "$@"; do
+    "$ipt" -A "$CHAIN" -s "$range" -j RETURN
+  done
+  "$ipt" -A "$CHAIN" -j DROP
+
+  local chain match
+  while read -r chain match; do
+    # shellcheck disable=SC2086 # $match is a list of iptables words on purpose
+    "$ipt" -C "$chain" $match -j "$CHAIN" 2>/dev/null \
+      || "$ipt" -I "$chain" 1 $match -j "$CHAIN"
+  done < <(hooks)
+}
+
+stop_family() {
+  local ipt="$1" chain match
+  while read -r chain match; do
+    # shellcheck disable=SC2086
+    while "$ipt" -D "$chain" $match -j "$CHAIN" 2>/dev/null; do :; done
+  done < <(hooks)
+  "$ipt" -F "$CHAIN" 2>/dev/null || true
+  "$ipt" -X "$CHAIN" 2>/dev/null || true
+}
+
+status_family() {
+  local ipt="$1"
+  echo "== $ipt"
+  "$ipt" -S DOCKER-USER | grep -- "-j $CHAIN" || echo "   (no DOCKER-USER hooks)"
+  "$ipt" -S INPUT | grep -- "-j $CHAIN" || echo "   (no INPUT hooks)"
+  if "$ipt" -S "$CHAIN" >/dev/null 2>&1; then
+    echo "   $CHAIN: $("$ipt" -S "$CHAIN" | grep -c -- '-j RETURN') Cloudflare ranges, then DROP"
+  else
+    echo "   $CHAIN: absent"
+  fi
+}
+
+ip link show "$IFACE" >/dev/null 2>&1 || { echo "no interface $IFACE; refusing" >&2; exit 1; }
+# Docker creates DOCKER-USER when it starts; without it the forwarded hooks
+# have nowhere to go, and half a firewall is worse than an honest error.
+iptables -S DOCKER-USER >/dev/null 2>&1 || { echo "DOCKER-USER missing; is Docker running?" >&2; exit 1; }
+
+case "${1:-}" in
+  start)  start_family iptables "${CF_V4[@]}"; start_family ip6tables "${CF_V6[@]}"; status_family iptables; status_family ip6tables ;;
+  stop)   stop_family iptables; stop_family ip6tables; echo "removed: web ports are open to everyone again" ;;
+  status) status_family iptables; status_family ip6tables ;;
+  *)      echo "usage: $0 start|stop|status" >&2; exit 2 ;;
+esac
