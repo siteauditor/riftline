@@ -16,17 +16,22 @@ dropping those rows or, worse, rendering a champion name as a person.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from app.db.models import RankedEntry
+from sqlalchemy import select
+
+from app.db.models import ChampionStat, MatchupStat, RankedEntry
 from app.riot.client import RiotClient
-from app.riot.errors import RiotForbidden
+from app.riot.errors import RiotApiError, RiotForbidden
 from app.riot.routing import Platform, resolve_platform
+from app.services.aggregate import ALL_BRACKETS, POSITIONS, available_slices
 from app.services.ranks import RankCache
+from app.services.roles import SUMMONERS_RIFT_MAP_ID, assign_team, load_priors
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +51,35 @@ from app.api.schemas import MIN_RANKED_FOR_LOBBY_RANK as MIN_RANKED_FOR_AVERAGE 
 ParticipantState = Literal["ranked", "unranked", "hidden", "bot", "unknown"]
 
 APEX_TIER_NAMES = ("MASTER", "GRANDMASTER", "CHALLENGER")
+
+# The same floor the champion page applies by default to a matchup or a role, so
+# the two pages cannot disagree about whether a record is worth showing. Shown
+# as a W-L record rather than a bare percentage, so a thin one looks thin.
+MIN_CORPUS_GAMES = 5
+
+# A player's mastery on a champion moves by a few thousand points a game, so
+# half an hour of caching loses nothing a person would notice, and it means the
+# tab's own polling (every minute while a game runs) costs no mastery calls.
+MASTERY_TTL_SECONDS = 1800
+MASTERY_CACHE_LIMIT = 5000
+
+
+@dataclass(frozen=True, slots=True)
+class LiveMastery:
+    level: int
+    points: int
+    last_play_time: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CorpusRecord:
+    """A win-loss record from the stored corpus, never shown without its size."""
+
+    games: int
+    wins: int
+    # Lane records only, and only once enough of those games have timelines.
+    gold_diff_14: float | None = None
+    timeline_games: int = 0
 
 
 def rank_points(entry: RankedEntry) -> int:
@@ -83,6 +117,21 @@ class LiveParticipant:
     tag_line: str | None
     state: ParticipantState
     rank: RankedEntry | None = None
+    # The skin number spectator reports as `lastSelectedSkinIndex`.
+    skin_index: int | None = None
+    # Inferred: spectator carries no position at all. See services/roles.py.
+    position: str | None = None
+    position_confidence: float | None = None
+    position_basis: Literal["smite", "inferred"] | None = None
+    # `mastery` is None both when the player has never played the champion and
+    # when we did not find out; `mastery_known` separates the two, because
+    # "first time on this champion" is a claim only an answer from Riot earns.
+    mastery: LiveMastery | None = None
+    mastery_known: bool = False
+    # This champion in this position, and this champion against their lane
+    # opponent, both from the stored corpus.
+    champion_record: CorpusRecord | None = None
+    lane_record: CorpusRecord | None = None
 
 
 @dataclass(slots=True)
@@ -135,11 +184,18 @@ class LiveGame:
     game_length: int
     observed_at: int
     banned_champion_ids: list[int] = field(default_factory=list)
+    # (champion_id, team_id) in pick order, for showing each side's bans apart.
+    bans: list[tuple[int, int]] = field(default_factory=list)
     participants: list[LiveParticipant] = field(default_factory=list)
     lobby_rank: LobbyRank | None = None
     # False when the player we looked up is themselves anonymised: Riot still
     # returns their game, but no row in it can be attributed to them.
     you_identified: bool = True
+    # True when every player has a position, which is what lets the page lay the
+    # game out lane by lane. False off Summoner's Rift, where lanes do not exist.
+    positions_inferred: bool = False
+    # The patch the corpus records were read from, so the page can say so.
+    corpus_patch: str | None = None
 
 
 def spectator_keystone(perks: dict | None) -> int | None:
@@ -200,6 +256,11 @@ def parse_participants(raw_participants: list[dict]) -> list[LiveParticipant]:
                 game_name=name,
                 tag_line=tag,
                 state="bot" if is_bot else ("hidden" if not puuid else "unknown"),
+                skin_index=(
+                    raw["lastSelectedSkinIndex"]
+                    if isinstance(raw.get("lastSelectedSkinIndex"), int)
+                    else None
+                ),
             )
         )
     return out
@@ -287,7 +348,36 @@ class LiveGameService:
 
         participants = parse_participants(payload.get("participants") or [])
         if with_ranks:
-            await self._attach_ranks(participants, resolved, payload)
+            # Both are Riot calls with nothing in common, so they share one time
+            # budget side by side instead of spending two in a row. Only the
+            # rank lookup touches the database session; mastery is cached in
+            # memory, so the two cannot trip over one session.
+            await asyncio.gather(
+                self._attach_ranks(participants, resolved, payload),
+                self._attach_mastery(participants, resolved),
+            )
+
+        queue_id = int(payload.get("gameQueueConfigId") or 0)
+        # Positions and corpus records cost no Riot calls at all: the first is
+        # arithmetic over stored counts, the second two indexed queries.
+        positions_inferred = (
+            payload.get("mapId") == SUMMONERS_RIFT_MAP_ID
+            and await self._infer_positions(participants)
+        )
+        corpus_patch = (
+            await self._attach_corpus_records(participants, queue_id)
+            if positions_inferred
+            else None
+        )
+
+        raw_bans = sorted(
+            (
+                b
+                for b in (payload.get("bannedChampions") or [])
+                if isinstance(b.get("championId"), int) and b["championId"] > 0
+            ),
+            key=lambda b: b.get("pickTurn") or 0,
+        )
 
         length = int(payload.get("gameLength") or 0)
         game = LiveGame(
@@ -300,16 +390,150 @@ class LiveGameService:
             game_start_time=int(payload.get("gameStartTime") or 0),
             game_length=max(0, length),
             observed_at=observed_at_ms or int(time.time() * 1000),
-            banned_champion_ids=[
-                int(b.get("championId"))
-                for b in (payload.get("bannedChampions") or [])
-                if isinstance(b.get("championId"), int) and b.get("championId", -1) > 0
-            ],
+            banned_champion_ids=[int(b["championId"]) for b in raw_bans],
+            bans=[(int(b["championId"]), int(b.get("teamId") or 0)) for b in raw_bans],
             participants=participants,
             you_identified=any(p.puuid == puuid for p in participants),
+            positions_inferred=positions_inferred,
+            corpus_patch=corpus_patch,
         )
         game.lobby_rank = lobby_rank(participants, game.queue_id)
         return game
+
+    async def _infer_positions(self, participants: list[LiveParticipant]) -> bool:
+        """Give every player a position, or nobody one.
+
+        All or nothing, because the page lays the game out lane by lane: a lobby
+        with seven positions and three blanks has no layout, only a puzzle.
+        """
+        teams: dict[int, list[LiveParticipant]] = {}
+        for p in participants:
+            teams.setdefault(p.team_id, []).append(p)
+        if len(teams) != 2 or any(len(team) != len(POSITIONS) for team in teams.values()):
+            return False
+
+        priors = await load_priors(self.session)
+        for team in teams.values():
+            calls = assign_team([(p.champion_id, p.spell1_id, p.spell2_id) for p in team], priors)
+            if calls is None:
+                return False
+            for p, call in zip(team, calls, strict=True):
+                p.position = call.position
+                p.position_confidence = round(call.confidence, 3)
+                p.position_basis = call.basis
+        return True
+
+    async def _attach_mastery(
+        self, participants: list[LiveParticipant], platform: Platform
+    ) -> None:
+        """Each identified player's mastery on the champion they are playing.
+
+        One call per player, which is why it is cached for half an hour and
+        bounded by the same time budget as the rank lookup: a player the budget
+        does not reach is left unknown, never reported as a first-timer.
+        """
+        identified = [p for p in participants if p.puuid]
+        if not identified:
+            return
+
+        async def one(p: LiveParticipant) -> None:
+            key = (platform.id, p.puuid, p.champion_id)
+            hit = _mastery_cache.get(key)
+            if hit is not None and time.monotonic() - hit[0] < MASTERY_TTL_SECONDS:
+                p.mastery, p.mastery_known = hit[1], True
+                return
+            try:
+                raw = await self.client.champion_mastery(p.puuid, p.champion_id, platform)
+            except RiotApiError as exc:
+                log.info("mastery lookup failed for %s: %s", p.puuid[:8], exc)
+                return
+            mastery = (
+                LiveMastery(
+                    level=int(raw.get("championLevel") or 0),
+                    points=int(raw.get("championPoints") or 0),
+                    last_play_time=raw.get("lastPlayTime"),
+                )
+                if raw
+                else None
+            )
+            _remember_mastery(key, mastery)
+            p.mastery, p.mastery_known = mastery, True
+
+        tasks = [asyncio.create_task(one(p)) for p in identified]
+        done, pending = await asyncio.wait(
+            tasks, timeout=self.settings.spectator_rank_budget_seconds
+        )
+        for task in pending:
+            task.cancel()
+        for task in done:
+            # Retrieved so a failure is logged here rather than as an orphaned
+            # "exception was never retrieved" at garbage collection.
+            if not task.cancelled() and task.exception() is not None:
+                log.warning("mastery lookup raised: %r", task.exception())
+
+    async def _attach_corpus_records(
+        self, participants: list[LiveParticipant], queue_id: int
+    ) -> str | None:
+        """Each pick in its role, and against its lane opponent, from stored games.
+
+        The newest patch held for the queue, and the champion page's own floor,
+        so a record shown here is one the champion page would also show.
+        Returns the patch read, or None when the corpus has nothing for the queue.
+        """
+        slices = [s for s in await available_slices(self.session) if s["queue_id"] == queue_id]
+        if not slices:
+            return None
+        patch = slices[0]["patch"]
+        champions = {p.champion_id for p in participants}
+
+        role_rows = (
+            await self.session.execute(
+                select(ChampionStat).where(
+                    ChampionStat.patch == patch,
+                    ChampionStat.queue_id == queue_id,
+                    ChampionStat.rank_bracket == ALL_BRACKETS,
+                    ChampionStat.champion_id.in_(champions),
+                    ChampionStat.games >= MIN_CORPUS_GAMES,
+                )
+            )
+        ).scalars()
+        by_role = {(r.champion_id, r.team_position): r for r in role_rows}
+
+        lane_rows = (
+            await self.session.execute(
+                select(MatchupStat).where(
+                    MatchupStat.patch == patch,
+                    MatchupStat.queue_id == queue_id,
+                    MatchupStat.rank_bracket == ALL_BRACKETS,
+                    MatchupStat.scope == "LANE",
+                    MatchupStat.champion_id.in_(champions),
+                    MatchupStat.enemy_champion_id.in_(champions),
+                    MatchupStat.games >= MIN_CORPUS_GAMES,
+                )
+            )
+        ).scalars()
+        by_lane = {(r.champion_id, r.enemy_champion_id, r.team_position): r for r in lane_rows}
+
+        opponent = {(p.team_id, p.position): p for p in participants}
+        for p in participants:
+            role = by_role.get((p.champion_id, p.position))
+            if role is not None:
+                p.champion_record = CorpusRecord(games=role.games, wins=role.wins)
+            # Summoner's Rift teams are 100 and 200, so the other side is 300 - id.
+            enemy = opponent.get((300 - p.team_id, p.position))
+            lane = by_lane.get((p.champion_id, enemy.champion_id, p.position)) if enemy else None
+            if lane is not None:
+                p.lane_record = CorpusRecord(
+                    games=lane.games,
+                    wins=lane.wins,
+                    gold_diff_14=(
+                        lane.avg_gold_diff_14
+                        if lane.timeline_games >= MIN_CORPUS_GAMES
+                        else None
+                    ),
+                    timeline_games=lane.timeline_games,
+                )
+        return patch
 
     async def _attach_ranks(
         self, participants: list[LiveParticipant], platform: Platform, payload: dict
@@ -351,8 +575,28 @@ class LiveGameService:
 
 
 
+_mastery_cache: dict[tuple[str, str, int], tuple[float, LiveMastery | None]] = {}
+
+
+def _remember_mastery(key: tuple[str, str, int], mastery: LiveMastery | None) -> None:
+    if len(_mastery_cache) >= MASTERY_CACHE_LIMIT:
+        # The oldest fifth out: cheap, and it stops the cache growing for ever.
+        by_age = sorted(_mastery_cache, key=lambda k: _mastery_cache[k][0])
+        for stale in by_age[: MASTERY_CACHE_LIMIT // 5]:
+            del _mastery_cache[stale]
+    _mastery_cache[key] = (time.monotonic(), mastery)
+
+
+def clear_mastery_cache() -> None:
+    """For tests, which must not inherit each other's cached answers."""
+    _mastery_cache.clear()
+
+
 __all__ = [
+    "CorpusRecord",
     "LiveGame",
+    "LiveMastery",
+    "clear_mastery_cache",
     "LiveGameService",
     "LiveParticipant",
     "LobbyRank",

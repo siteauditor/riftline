@@ -66,6 +66,51 @@ export interface LiveParticipant {
   secondary_tree: RuneRef | null
   profile_icon_url: string | null
   rank: RankInfo | null
+  /** The skin this player is wearing, as square art. */
+  skin_tile_url: string | null
+  /** Inferred: spectator carries no position. See `position_model` on the game. */
+  position: Position | null
+  position_confidence: number | null
+  /** 'smite' for a team's only Smite, which is certain. */
+  position_basis: 'smite' | 'inferred' | null
+  mastery: LiveMastery | null
+  /** False: we did not find out. True with no `mastery`: never played it. */
+  mastery_known: boolean
+  /** This champion in this position, from our stored games. */
+  champion_record: CorpusRecord | null
+  /** This champion against the lane opponent, from our stored games. */
+  lane_record: CorpusRecord | null
+}
+
+export type Position = 'TOP' | 'JUNGLE' | 'MIDDLE' | 'BOTTOM' | 'UTILITY'
+
+export interface LiveMastery {
+  level: number
+  points: number
+  last_play_time: number | null
+}
+
+/** Always carries its size: a record is never shown without its games. */
+export interface CorpusRecord {
+  games: number
+  wins: number
+  win_rate: number
+  /** Lane records only, and only with enough timelines behind it. */
+  gold_diff_14: number | null
+  timeline_games: number
+}
+
+export interface LiveBan {
+  champion: ChampionRef
+  team_id: number
+}
+
+/** How far an inferred position can be trusted. Measured on held-out games. */
+export interface PositionModel {
+  accuracy: number
+  players_tested: number
+  /** At or above this a position is shown plainly; below it, as "likely". */
+  confident_at: number
 }
 
 export interface LobbyRank {
@@ -97,9 +142,16 @@ export interface LiveGame {
   /** Our clock when Riot answered. The timer runs forward from this locally. */
   observed_at: number
   banned_champions: ChampionRef[]
+  /** The same bans with their side, in pick order. */
+  bans: LiveBan[]
   participants: LiveParticipant[]
   lobby_rank: LobbyRank | null
   you_identified: boolean
+  /** True when every player has a position, so the game can be shown by lane. */
+  positions_inferred: boolean
+  position_model: PositionModel | null
+  /** The patch the champion and lane records were read from. */
+  corpus_patch: string | null
 }
 
 export interface LiveGameResponse {

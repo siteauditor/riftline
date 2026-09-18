@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import ChampionMastery, Match, MatchParticipant, Player, RankedEntry
 from app.riot.routing import Platform
+from app.services.roles import CONFIDENT_AT, MEASURED_ACCURACY, MEASURED_PLAYERS
 from app.services.scores import (
     BADGES_BY_ID,
     COMPONENT_LABELS,
@@ -370,6 +371,35 @@ class MasteryResponse(BaseModel):
     entries: list[MasteryEntry] = Field(default_factory=list)
 
 
+class LiveMasteryOut(BaseModel):
+    level: int
+    points: int
+    last_play_time: int | None = None
+
+
+class CorpusRecordOut(BaseModel):
+    """A record from the stored corpus. Always carries its size."""
+
+    games: int
+    wins: int
+    win_rate: float
+    gold_diff_14: float | None = None
+    timeline_games: int = 0
+
+
+class LiveBanOut(BaseModel):
+    champion: ChampionRef
+    team_id: int
+
+
+class PositionModelOut(BaseModel):
+    """How far an inferred position can be trusted, measured, not asserted."""
+
+    accuracy: float
+    players_tested: int
+    confident_at: float
+
+
 class LiveParticipantOut(BaseModel):
     """One player in a live game.
 
@@ -390,6 +420,19 @@ class LiveParticipantOut(BaseModel):
     secondary_tree: RuneRef | None = None
     profile_icon_url: str | None = None
     rank: RankInfo | None = None
+    # The skin this player is actually wearing, as square art.
+    skin_tile_url: str | None = None
+    # Inferred, not reported: spectator carries no position. `basis` is "smite"
+    # for a team's only Smite, which is certain, and "inferred" otherwise.
+    position: str | None = None
+    position_confidence: float | None = None
+    position_basis: str | None = None
+    # `mastery_known` false means we did not find out; true with no `mastery`
+    # means Riot says they have never played this champion.
+    mastery: LiveMasteryOut | None = None
+    mastery_known: bool = False
+    champion_record: CorpusRecordOut | None = None
+    lane_record: CorpusRecordOut | None = None
 
 
 class LobbyRankOut(BaseModel):
@@ -437,9 +480,15 @@ class LiveGameOut(BaseModel):
     # locally instead of polling the server for a number it can compute.
     observed_at: int
     banned_champions: list[ChampionRef] = Field(default_factory=list)
+    # The same bans with their side, in pick order.
+    bans: list[LiveBanOut] = Field(default_factory=list)
     participants: list[LiveParticipantOut] = Field(default_factory=list)
     lobby_rank: LobbyRankOut | None = None
     you_identified: bool = True
+    positions_inferred: bool = False
+    position_model: PositionModelOut | None = None
+    # The patch the champion and lane records were read from.
+    corpus_patch: str | None = None
 
 
 class LiveGameResponse(BaseModel):
@@ -928,6 +977,18 @@ class AnalyticsResponse(BaseModel):
     totals: PlayStyleTotals = Field(default_factory=PlayStyleTotals)
 
 
+def _corpus_record_out(record) -> CorpusRecordOut | None:
+    if record is None:
+        return None
+    return CorpusRecordOut(
+        games=record.games,
+        wins=record.wins,
+        win_rate=record.wins / record.games if record.games else 0.0,
+        gold_diff_14=record.gold_diff_14,
+        timeline_games=record.timeline_games,
+    )
+
+
 def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
     """Live game to wire format.
 
@@ -983,9 +1044,39 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
                 ),
                 profile_icon_url=sd.profile_icon(p.profile_icon_id),
                 rank=to_rank_info(p.rank) if p.rank else None,
+                skin_tile_url=sd.champion_tile(p.champion_id, p.skin_index),
+                position=p.position,
+                position_confidence=p.position_confidence,
+                position_basis=p.position_basis,
+                mastery=(
+                    LiveMasteryOut(**dataclasses.asdict(p.mastery)) if p.mastery else None
+                ),
+                mastery_known=p.mastery_known,
+                champion_record=_corpus_record_out(p.champion_record),
+                lane_record=_corpus_record_out(p.lane_record),
             )
             for p in game.participants
         ],
+        bans=[
+            LiveBanOut(
+                champion=ChampionRef(
+                    id=c, name=sd.champion_name(c), icon_url=sd.champion_icon(c)
+                ),
+                team_id=team,
+            )
+            for c, team in game.bans
+        ],
+        positions_inferred=game.positions_inferred,
+        position_model=(
+            PositionModelOut(
+                accuracy=MEASURED_ACCURACY,
+                players_tested=MEASURED_PLAYERS,
+                confident_at=CONFIDENT_AT,
+            )
+            if game.positions_inferred
+            else None
+        ),
+        corpus_patch=game.corpus_patch,
         # asdict, not vars: LobbyRank is a slots dataclass and has no __dict__.
         lobby_rank=(
             LobbyRankOut(**dataclasses.asdict(game.lobby_rank))

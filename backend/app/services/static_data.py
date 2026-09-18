@@ -281,10 +281,19 @@ class StaticDataService:
             f"{CDRAGON}/champion/{champ.id}/splash-art/centered" if champ else None
         )
 
-    def champion_tile(self, champion_id: int | None) -> str | None:
-        """Square key art, for cards that want more than a 48px icon."""
+    def champion_tile(self, champion_id: int | None, skin: int | None = None) -> str | None:
+        """Square key art, for cards that want more than a 48px icon.
+
+        ``skin`` is the skin number, which spectator reports per player as
+        ``lastSelectedSkinIndex``: the live tab shows the skin each player is
+        actually wearing rather than the base art. Community Dragon serves
+        ``/tile/skin/{n}`` for every skin number (checked on skin 47, 2026-09-19).
+        """
         champ = self.champion(champion_id)
-        return f"{CDRAGON}/champion/{champ.id}/tile" if champ else None
+        if not champ:
+            return None
+        base = f"{CDRAGON}/champion/{champ.id}/tile"
+        return f"{base}/skin/{skin}" if skin else base
 
     def champion_splash(self, champion_id: int | None, skin: int = 0) -> str | None:
         champ = self.champion(champion_id)

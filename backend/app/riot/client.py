@@ -297,6 +297,24 @@ class RiotClient:
             path_params={"puuid": puuid},
         )
 
+    async def champion_mastery(
+        self, puuid: str, champion_id: int, platform: Platform | str
+    ) -> dict | None:
+        """One player's mastery on one champion, or ``None`` if they have none.
+
+        Riot answers 404 for a champion the player has never earned a point on,
+        which is a real answer ("first time on this champion"), so it comes back
+        as ``None`` rather than an error. The live tab uses this instead of the
+        full table because it needs one champion per player, and the full table
+        is a hundred-odd rows each.
+        """
+        return await self.get(
+            platform_host(platform),
+            "/lol/champion-mastery/v4/champion-masteries/by-puuid/{puuid}/by-champion/{champion_id}",
+            path_params={"puuid": puuid, "champion_id": champion_id},
+            allow_404=True,
+        )
+
     async def mastery_score(self, puuid: str, platform: Platform | str) -> int:
         return await self.get(
             platform_host(platform),

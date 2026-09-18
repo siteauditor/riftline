@@ -14,19 +14,27 @@ import respx
 
 from app.config import get_settings
 from app.db.base import SessionLocal
-from app.db.models import RankedEntry
+from app.db.models import ChampionStat, MatchupStat, RankedEntry
 from app.riot.client import RiotClient
 from app.services.live import (
     MIN_RANKED_FOR_AVERAGE as MIN_RANKED,
 )
 from app.services.live import (
+    CorpusRecord,
     LiveGameService,
     LiveParticipant,
+    clear_mastery_cache,
     lobby_rank,
     parse_participants,
     spectator_keystone,
     spectator_secondary_style,
     split_riot_id,
+)
+from app.services.roles import (
+    CONFIDENT_AT,
+    MEASURED_ACCURACY,
+    MEASURED_PLAYERS,
+    RolePriors,
 )
 
 PLATFORM = "euw1"
@@ -494,3 +502,251 @@ async def test_an_anonymised_searcher_is_reported_as_such_on_the_wire(client):
     mock_spectator(spectator_game([spectator_participant(riot_id="Sivir")]))
     body = (await client.get("/api/summoner/euw1/Caps/EUW/live")).json()
     assert body["game"]["you_identified"] is False
+
+
+# ------------------------------------------------ lanes, skins and records
+#
+# spectator-v5 carries no position, no gold, no items and no score (checked
+# field by field on 2026-09-19), so everything below is either inferred from
+# what it does carry or read from the stored corpus, and these pin both.
+
+BLUE = [(266, "TOP"), (64, "JUNGLE"), (103, "MIDDLE"), (22, "BOTTOM"), (412, "UTILITY")]
+RED = [(122, "TOP"), (254, "JUNGLE"), (238, "MIDDLE"), (51, "BOTTOM"), (117, "UTILITY")]
+LANE_SPELLS = {
+    "TOP": (4, 12), "JUNGLE": (4, 11), "MIDDLE": (4, 14), "BOTTOM": (4, 7), "UTILITY": (4, 3),
+}
+LEAGUE = r".*/lol/league/v4/entries/by-puuid/.*"
+MASTERY = r".*/lol/champion-mastery/v4/champion-masteries/by-puuid/.*/by-champion/.*"
+
+
+def full_roster(prefix: str | None = None):
+    """Ten players in Riot's spectator shape, all wearing skin 7.
+
+    ``prefix`` makes every puuid unique to one test: the suite shares one
+    database, and rank lookups store what they find.
+    """
+    rows = []
+    for team, lineup in ((100, BLUE), (200, RED)):
+        for champion, role in lineup:
+            puuid = f"{prefix}-{team}-{role}".ljust(78, "0") if prefix else None
+            row = spectator_participant(
+                puuid=puuid, champion_id=champion, team_id=team,
+                riot_id=f"P{champion}#T" if prefix else "Champion",
+            )
+            row["spell1Id"], row["spell2Id"] = LANE_SPELLS[role]
+            row["lastSelectedSkinIndex"] = 7
+            rows.append(row)
+    return rows
+
+
+async def lane_priors(_session):
+    champion = {c: {role: 100} for c, role in BLUE + RED}
+    spell = {role: {a: 100, b: 100} for role, (a, b) in LANE_SPELLS.items()}
+    return RolePriors(champion=champion, spell=spell, participants=1000)
+
+
+@respx.mock
+async def test_a_five_a_side_rift_game_is_laid_out_by_lane(monkeypatch):
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+    mock_spectator(spectator_game(full_roster()))
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+
+    assert game.positions_inferred
+    assert {p.champion_id: p.position for p in game.participants} == dict(BLUE + RED)
+    junglers = [p for p in game.participants if p.position == "JUNGLE"]
+    assert len(junglers) == 2
+    assert all(p.position_basis == "smite" and p.position_confidence == 1.0 for p in junglers)
+
+
+@respx.mock
+async def test_lanes_are_not_invented_off_the_rift(monkeypatch):
+    """ARAM is five a side too, and has no lanes at all."""
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+    aram = spectator_game(full_roster())
+    aram["mapId"] = 12
+    mock_spectator(aram)
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+
+    assert not game.positions_inferred
+    assert all(p.position is None for p in game.participants)
+    assert game.corpus_patch is None
+
+
+def test_the_skin_a_player_picked_is_kept():
+    rows = parse_participants(
+        [{**spectator_participant(), "lastSelectedSkinIndex": 7}, spectator_participant()]
+    )
+    assert rows[0].skin_index == 7
+    assert rows[1].skin_index is None, "no skin reported means the base art, not skin 0"
+
+
+@respx.mock
+async def test_bans_keep_their_side_and_pick_order():
+    payload = spectator_game([spectator_participant()])
+    payload["bannedChampions"] = [
+        {"championId": 55, "teamId": 200, "pickTurn": 6},
+        {"championId": 83, "teamId": 100, "pickTurn": 1},
+        {"championId": -1, "teamId": 200, "pickTurn": 7},
+    ]
+    mock_spectator(payload)
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+    assert game.bans == [(83, 100), (55, 200)]
+
+
+@respx.mock
+async def test_mastery_is_asked_once_per_player_then_cached(monkeypatch):
+    """The tab polls every minute while a game runs; that must not cost ten
+    mastery calls a minute."""
+    clear_mastery_cache()
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+    mock_spectator(spectator_game(full_roster("mastery-cache")))
+    respx.get(url__regex=LEAGUE).mock(return_value=httpx.Response(200, json=[]))
+    mastery = respx.get(url__regex=MASTERY).mock(
+        return_value=httpx.Response(
+            200, json={"championLevel": 7, "championPoints": 123456, "lastPlayTime": 1}
+        )
+    )
+
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM)
+    assert mastery.call_count == 10
+    assert all(p.mastery_known and p.mastery.points == 123456 for p in game.participants)
+
+    async with SessionLocal() as session:
+        await service(session).for_puuid("z" * 78, PLATFORM)
+    assert mastery.call_count == 10, "the second look was served from the cache"
+    clear_mastery_cache()
+
+
+@respx.mock
+async def test_never_played_is_an_answer_and_a_failed_lookup_is_not(monkeypatch):
+    """Riot's 404 means "no mastery on this champion", which is worth saying.
+    A refusal means we did not find out, which must not be said as the same."""
+    clear_mastery_cache()
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+    roster = full_roster("mastery-answer")
+    first_time, refused = roster[0]["puuid"], roster[1]["puuid"]
+
+    def answer(request):
+        if first_time in request.url.path:
+            return httpx.Response(404, json={"status": {"status_code": 404}})
+        if refused in request.url.path:
+            # No rate-limit headers: an endpoint refusal, raised at once.
+            return httpx.Response(403, json={"status": {"status_code": 403}})
+        return httpx.Response(200, json={"championLevel": 3, "championPoints": 9000})
+
+    mock_spectator(spectator_game(roster))
+    respx.get(url__regex=LEAGUE).mock(return_value=httpx.Response(200, json=[]))
+    respx.get(url__regex=MASTERY).mock(side_effect=answer)
+
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM)
+    by_puuid = {p.puuid: p for p in game.participants}
+
+    assert by_puuid[first_time].mastery_known is True
+    assert by_puuid[first_time].mastery is None
+    assert by_puuid[refused].mastery_known is False
+    assert by_puuid[refused].mastery is None
+    clear_mastery_cache()
+
+
+@respx.mock
+async def test_corpus_records_follow_the_champion_page_floor(monkeypatch):
+    """Records under the champion page's floor are withheld, a lane's gold lead
+    needs enough timelines of its own, and a TEAM matchup is never passed off
+    as the lane."""
+    queue, patch = 99901, "T.9"
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+
+    async def one_slice(_session):
+        return [{"patch": patch, "queue_id": queue, "matches": 1}]
+
+    monkeypatch.setattr("app.services.live.available_slices", one_slice)
+
+    def stat(champion, role, games, wins):
+        return ChampionStat(
+            patch=patch, queue_id=queue, rank_bracket="ALL",
+            champion_id=champion, team_position=role, games=games, wins=wins,
+        )
+
+    def lane(champion, enemy, role, games, wins, timelines=0, gold=None, scope="LANE"):
+        return MatchupStat(
+            patch=patch, queue_id=queue, rank_bracket="ALL", scope=scope,
+            team_position=role, champion_id=champion, enemy_champion_id=enemy,
+            games=games, wins=wins, timeline_games=timelines, avg_gold_diff_14=gold,
+        )
+
+    async with SessionLocal() as session:
+        session.add_all([
+            stat(266, "TOP", 20, 12),
+            stat(103, "MIDDLE", 3, 3),                   # under the floor
+            lane(266, 122, "TOP", 8, 5, timelines=6, gold=250.0),
+            lane(266, 122, "TOP", 50, 40, scope="TEAM"),  # not the lane record
+            lane(103, 238, "MIDDLE", 8, 2, timelines=2, gold=-400.0),
+            lane(22, 51, "BOTTOM", 4, 4),                 # under the floor
+        ])
+        await session.commit()
+
+    mock_spectator(spectator_game(full_roster(), queue_id=queue))
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+    by_champion = {p.champion_id: p for p in game.participants}
+
+    assert game.corpus_patch == patch
+    assert by_champion[266].champion_record == CorpusRecord(games=20, wins=12)
+    assert by_champion[103].champion_record is None
+    assert by_champion[266].lane_record == CorpusRecord(
+        games=8, wins=5, gold_diff_14=250.0, timeline_games=6
+    )
+    assert by_champion[103].lane_record.games == 8
+    assert by_champion[103].lane_record.gold_diff_14 is None, "two timelines is not a lead"
+    assert by_champion[22].lane_record is None
+
+
+@respx.mock
+async def test_the_live_endpoint_carries_lanes_skins_and_mastery(client, monkeypatch):
+    """The whole contract, through the API, as the page will read it."""
+    clear_mastery_cache()
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+    roster = full_roster("api-contract")
+    searcher = roster[0]["puuid"]
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": searcher, "gameName": "Contract", "tagLine": "LIVE"}
+        )
+    )
+    respx.get(url__regex=r".*/lol/summoner/v4/summoners/by-puuid/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": searcher, "profileIconId": 1, "revisionDate": 1,
+                       "summonerLevel": 30},
+        )
+    )
+    mock_spectator(spectator_game(roster))
+    respx.get(url__regex=LEAGUE).mock(return_value=httpx.Response(200, json=[]))
+    respx.get(url__regex=MASTERY).mock(
+        return_value=httpx.Response(200, json={"championLevel": 5, "championPoints": 40000})
+    )
+
+    response = await client.get("/api/summoner/euw1/Contract/LIVE/live")
+    assert response.status_code == 200
+    game = response.json()["game"]
+
+    assert game["positions_inferred"] is True
+    assert game["position_model"] == {
+        "accuracy": MEASURED_ACCURACY, "players_tested": MEASURED_PLAYERS,
+        "confident_at": CONFIDENT_AT,
+    }
+    first = game["participants"][0]
+    assert first["position"] == "TOP"
+    assert first["skin_tile_url"].endswith("/tile/skin/7")
+    assert first["mastery"] == {"level": 5, "points": 40000, "last_play_time": None}
+    assert first["mastery_known"] is True
+    assert game["bans"] == [
+        {"champion": game["bans"][0]["champion"], "team_id": 100},
+    ]
+    # Still true with all of the above added: the spectator key stays here.
+    assert "secret-not-ours-to-relay" not in response.text
+    clear_mastery_cache()

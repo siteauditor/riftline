@@ -870,6 +870,19 @@ async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
             },
         )
     )
+    # The rank and mastery lookups for the players in the game are per shard
+    # too, so they must follow the account to sg2 as well. Mocked explicitly:
+    # both are best-effort lookups that log a failure and carry on, so an
+    # unmocked call would pass silently and hide exactly the bug this guards.
+    respx.get(url__regex=r".*sg2\.api\.riotgames\.com/lol/league/v4/.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    mastery_home = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(return_value=httpx.Response(200, json={"championLevel": 25, "championPoints": 249708}))
+    mastery_away = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
 
     response = await client.get("/api/summoner/oc1/Playing/999/live")
 
@@ -877,6 +890,8 @@ async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
     body = response.json()
     assert right_shard.called
     assert not wrong_shard.called
+    assert mastery_home.called and not mastery_away.called
+    assert body["game"]["participants"][0]["mastery"]["level"] == 25
     assert body["in_game"] is True
     # The shard actually asked, not the one in the URL. Reporting oc1 for an
     # answer that came from sg2 would be a quiet lie about its provenance.
