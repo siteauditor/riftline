@@ -102,5 +102,12 @@ networks:
     name: edge_default
 
 volumes:
+  # Created by hand before the first deploy (docs/deploy.md, "The corpus"), so
+  # the database can be copied in before anything runs, and therefore owned
+  # outside this project like `edge_default`. Declared as Compose's own, every
+  # deploy warned "already exists but was not created by Docker Compose". It also
+  # means `docker compose down -v` can never delete the corpus, and a missing
+  # volume stops the deploy instead of starting the site on an empty database.
   riftline_data:
+    external: true
     name: riftline_data

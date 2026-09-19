@@ -101,7 +101,9 @@ ssh MyVPS 'cd /root/riftline && cp -n .env.example .env && chmod 600 .env && nan
 
 # 2. The corpus. 316 MB, so it goes once and deploys never touch it again.
 #    Copy into the volume through a throwaway container: the volume is not a
-#    bind mount, so there is no host path to scp to.
+#    bind mount, so there is no host path to scp to. Compose declares it
+#    `external`, so this step is required: without the volume, `compose up`
+#    stops rather than starting the site on an empty database.
 ssh MyVPS 'docker volume create riftline_data'
 scp data/lol.db MyVPS:/tmp/lol.db
 ssh MyVPS 'docker run --rm -v riftline_data:/data -v /tmp:/host alpine \
