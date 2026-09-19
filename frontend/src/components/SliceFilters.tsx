@@ -21,6 +21,12 @@ interface Props {
   allowAllPositions?: boolean
   /** Rendered on the right, e.g. "1.1k matches on patch 16.18". */
   summary?: ReactNode
+  /**
+   * Leave out "Crawled from". It is where the crawler started, not a rank: on
+   * 16.18 Challenger was 1,403 of 1,593 games, so it barely filters. The tier
+   * list says how its games were really ranked instead.
+   */
+  hideBracket?: boolean
 }
 
 const QUEUES = [
@@ -42,6 +48,7 @@ export default function SliceFilters({
   positions,
   allowAllPositions = false,
   summary,
+  hideBracket = false,
 }: Props) {
   const { data: corpus } = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
 
@@ -94,7 +101,7 @@ export default function SliceFilters({
         options={QUEUES.map((q) => ({ value: String(q.id), label: q.label }))}
       />
 
-      {brackets.length > 1 && (
+      {!hideBracket && brackets.length > 1 && (
         <Select
           label="Crawled from"
           title="Which ladder the crawler was seeded from. Not a measured lobby rank."

@@ -24,6 +24,8 @@ import json
 import logging
 import math
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Select, case, delete, func, insert, select
@@ -68,6 +70,25 @@ def wilson_lower_bound(wins: int, games: int, z: float = WILSON_Z) -> float:
     centre = phat + z**2 / (2 * games)
     margin = z * math.sqrt((phat * (1 - phat) + z**2 / (4 * games)) / games)
     return max(0.0, (centre - margin) / denominator)
+
+
+def wilson_upper_bound(wins: int, games: int, z: float = WILSON_Z) -> float:
+    """Upper bound of the same interval: how high the win rate could plausibly be.
+
+    Shown beside the lower bound so a pick is read as a range. The tier list
+    ranks on the low end, and a 70% over 20 games sorting below 63% over 79
+    only makes sense once the reader can see how wide the first one is.
+    """
+    if games <= 0:
+        return 1.0
+    phat = wins / games
+    denominator = 1 + z**2 / games
+    centre = phat + z**2 / (2 * games)
+    margin = z * math.sqrt((phat * (1 - phat) + z**2 / (4 * games)) / games)
+    # Never below the observed rate. At 20 wins from 20 the formula is exactly
+    # 1.0 on paper and 0.9999999999999999 in floating point, which drew the
+    # range's top a hair under the win rate it is meant to contain.
+    return min(1.0, max(phat, (centre + margin) / denominator))
 
 
 # Fewer rows than this and a percentile describes the list's length rather than
@@ -137,6 +158,59 @@ async def slice_match_count(
         select(func.count(Match.match_id)), patch, queue_id, rank_bracket
     )
     return (await session.execute(stmt)).scalar() or 0
+
+
+# Master, Grandmaster and Challenger as one bucket. A lobby's median rank decodes
+# exactly below Master, but which apex tier a points value belongs to depends on
+# each region's live cutoffs, so splitting them would be a guess.
+APEX_BUCKET = "MASTER+"
+
+
+@dataclass(slots=True)
+class LobbyRankMix:
+    """How the games in a slice were ranked, by each lobby's measured median.
+
+    ``total`` counts every game in the slice and ``measured`` the ones whose
+    lobby rank was measured, so the page can say how much of the slice the mix
+    describes. ``as_of`` is when the newest measurement was taken: Riot keeps no
+    historical rank, so this is where those players stood on that day, not when
+    they played.
+    """
+
+    total: int = 0
+    measured: int = 0
+    # (bucket, games), highest first.
+    buckets: list[tuple[str, int]] = field(default_factory=list)
+    as_of: datetime | None = None
+
+
+async def lobby_rank_mix(
+    session: AsyncSession, patch: str, queue_id: int, rank_bracket: str = ALL_BRACKETS
+) -> LobbyRankMix:
+    """The measured lobby ranks behind one slice of the tier list."""
+    # Imported here: the schemas module imports services that import this one.
+    from app.api.schemas import TIER_ORDER, rank_from_points
+
+    stmt = _slice_filter(
+        select(Match.lobby_rank_points, Match.lobby_rank_measured_at),
+        patch, queue_id, rank_bracket,
+    )
+    mix = LobbyRankMix()
+    counts: Counter[str] = Counter()
+    for points, measured_at in (await session.execute(stmt)).all():
+        mix.total += 1
+        if points is None:
+            continue
+        tier, _ = rank_from_points(int(points))
+        if tier is None:
+            continue
+        mix.measured += 1
+        counts[APEX_BUCKET if tier in ("MASTER", "GRANDMASTER", "CHALLENGER") else tier] += 1
+        if measured_at is not None and (mix.as_of is None or measured_at > mix.as_of):
+            mix.as_of = measured_at
+    order = [APEX_BUCKET, *reversed(TIER_ORDER[: TIER_ORDER.index("MASTER")])]
+    mix.buckets = [(bucket, counts[bucket]) for bucket in order if counts[bucket]]
+    return mix
 
 
 async def _ban_counts(

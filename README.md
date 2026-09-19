@@ -192,9 +192,19 @@ matches because a field was not normalised would take weeks.
 
 **Tier lists rank by Wilson lower bound, not win rate.** A champion at 3-0 is not the
 best in the game. Wilson asks what win rate the sample can actually defend, which
-pushes thin samples down instead of letting them top the list. Tiers are percentile
-bands rather than fixed win-rate thresholds, because win rates cluster near 50% and
-"above 52%" means different things on different patches.
+pushes thin samples down instead of letting them top the list. The page shows the raw
+win rate with the whole interval drawn under it, because the lower bound on its own
+put most S tiers below 50% (Kalista S at 48.3% on 16.18) and read as losing picks.
+Tiers are percentile bands rather than fixed win-rate thresholds, because win rates
+cluster near 50% and "above 52%" means different things on different patches, and
+they are banded within each role, so S means the top of that role even when all
+roles are listed together.
+
+The tier list also says how its games were ranked: each lobby's measured median
+rank, bucketed, with Master and above merged because apex cutoffs are live and per
+region. On 16.18, 95% were Master+ lobbies. That replaced the "Crawled from" filter
+there, which recorded where the crawler started rather than a rank, and filtered
+almost nothing (Challenger was 1,403 of 1,593 games).
 
 **Draft suggestions explain themselves.** Every suggestion returns its baseline, its
 head-to-head record and sample size, and the mastery weighting. Matchup records are

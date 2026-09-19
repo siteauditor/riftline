@@ -477,15 +477,22 @@ export interface ChampionMetaRow {
   games: number
   wins: number
   win_rate: number
+  /** Low end of the range the sample supports; what the list is ranked by. */
   confidence_win_rate: number
+  /** High end of the same range. */
+  confidence_high: number
   pick_rate: number
   ban_rate: number
-  // null when the slice is too thin for percentile tiers to mean anything.
+  // null when the role is too thin for percentile tiers to mean anything.
+  // Banded within the champion's own role, also in the all-roles view.
   tier: string | null
   avg_kda: number
   avg_cs_per_min: number
   avg_damage: number
   avg_vision: number
+  /** Over `timeline_games` only. */
+  avg_gold_diff_14: number | null
+  timeline_games: number
 }
 
 export interface MetaResponse {
@@ -497,6 +504,15 @@ export interface MetaResponse {
   sample_matches: number
   min_games: number
   rows: ChampionMetaRow[]
+  /** How the games behind this slice were ranked, by measured lobby median. */
+  lobby_ranks: {
+    total: number
+    measured: number
+    /** Highest first; MASTER+ merges the apex tiers. */
+    buckets: { tier: string; games: number }[]
+    /** Epoch ms of the newest measurement. */
+    as_of: number | null
+  } | null
 }
 
 export interface CorpusResponse {

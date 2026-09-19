@@ -1,12 +1,14 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import PositionIcon from '../components/PositionIcon'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
-import { api, type ChampionMetaRow } from '../lib/api'
-import { compact, pct, positionLabel } from '../lib/format'
+import WinRateRange from '../components/WinRateRange'
+import { api, type ChampionMetaRow, type MetaResponse } from '../lib/api'
+import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
+import { foldRiotName } from '../lib/storage'
 
 /**
  * Tier badges: a ramp of treatments, not just of hues.
@@ -26,15 +28,33 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
   D: { bg: 'transparent', fg: 'var(--color-ink-faint)' },
 }
 
-type SortKey = 'confidence_win_rate' | 'win_rate' | 'pick_rate' | 'ban_rate' | 'games'
+// Below this many games with a timeline, an average gold lead is one or two
+// stomps, so the cell shows a dash rather than a number.
+const GOLD_FLOOR = 10
 
-const COLUMNS: { key: SortKey; label: string; hint: string }[] = [
-  { key: 'confidence_win_rate', label: 'Adjusted', hint: 'Win rate we can defend at this sample size' },
-  { key: 'win_rate', label: 'Win rate', hint: 'Raw wins over games' },
-  { key: 'pick_rate', label: 'Pick', hint: 'Share of games this champion was picked' },
-  { key: 'ban_rate', label: 'Ban', hint: 'Share of games this champion was banned' },
-  { key: 'games', label: 'Games', hint: 'Sample size' },
+type SortKey = 'confidence_win_rate' | 'win_rate' | 'pick_rate' | 'ban_rate' | 'games' | 'gold'
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: 'confidence_win_rate', label: 'Win rate, low end' },
+  { key: 'win_rate', label: 'Raw win rate' },
+  { key: 'pick_rate', label: 'Pick rate' },
+  { key: 'ban_rate', label: 'Ban rate' },
+  { key: 'games', label: 'Games' },
+  { key: 'gold', label: 'Gold at 14' },
 ]
+
+function goldAt14(row: ChampionMetaRow): number | null {
+  return row.timeline_games >= GOLD_FLOOR ? row.avg_gold_diff_14 : null
+}
+
+// Champions without the figure sort last whichever way round: a missing gold
+// lead is not a small one.
+function sortValue(row: ChampionMetaRow, key: SortKey): number | null {
+  return key === 'gold' ? goldAt14(row) : row[key]
+}
+
+/** Case, accents, spaces and punctuation folded: "kaisa" finds Kai'Sa. */
+const fold = (name: string) => foldRiotName(name).replace(/[^\p{L}\p{N}]/gu, '')
 
 export default function Tierlist() {
   const [slice, setSlice] = useState<SliceValue>({
@@ -45,6 +65,7 @@ export default function Tierlist() {
     minGames: 20,
   })
   const [sort, setSort] = useState<SortKey>('confidence_win_rate')
+  const [search, setSearch] = useState('')
 
   const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
   const meta = useQuery({
@@ -54,10 +75,24 @@ export default function Tierlist() {
   })
   const position = slice.position
 
-  const rows: ChampionMetaRow[] = [...(meta.data?.rows ?? [])].sort((a, b) => {
-    const value = (r: ChampionMetaRow) => r[sort] as number
-    return value(b) - value(a)
-  })
+  // Ranked on the whole list, then filtered, so a search keeps each champion's
+  // real place rather than renumbering the matches from one.
+  const ranked = useMemo(() => {
+    const rows = [...(meta.data?.rows ?? [])]
+    rows.sort((a, b) => {
+      const va = sortValue(a, sort)
+      const vb = sortValue(b, sort)
+      if (va === null && vb === null) return b.confidence_win_rate - a.confidence_win_rate
+      if (va === null) return 1
+      if (vb === null) return -1
+      return vb - va
+    })
+    return rows.map((row, i) => ({ row, place: i + 1 }))
+  }, [meta.data, sort])
+
+  const query = fold(search)
+  const shown = query ? ranked.filter(({ row }) => fold(row.champion.name).includes(query)) : ranked
+  const rows = ranked.map((r) => r.row)
 
   const empty = corpus.data && corpus.data.total_matches === 0
 
@@ -68,9 +103,9 @@ export default function Tierlist() {
           Champion tier list
         </h1>
         <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-dim">
-          Ranked by the win rate the sample actually supports, not by raw win rate.
-          A champion at 3-0 is not the strongest in the game, and this list doesn't
-          pretend otherwise.
+          Ranked by the low end of the win rate each sample supports, not by raw win
+          rate, and tiered within each role. A champion at 3-0 is not the strongest in
+          the game, and this list doesn't pretend otherwise.
         </p>
       </header>
 
@@ -88,6 +123,7 @@ export default function Tierlist() {
               value={slice}
               onChange={(next) => setSlice((s) => ({ ...s, ...next }))}
               allowAllPositions
+              hideBracket
               summary={
                 meta.data && (
                   <SliceSummary
@@ -99,6 +135,8 @@ export default function Tierlist() {
               }
             />
           </div>
+
+          {meta.data?.lobby_ranks && <LobbyRanks lobby={meta.data.lobby_ranks} />}
 
           {meta.isLoading && (
             <div className="py-8">
@@ -114,134 +152,336 @@ export default function Tierlist() {
 
           {rows.length > 0 && rows.every((r) => r.tier === null) && (
             <p className="mt-4 border-l-2 border-gold/50 py-1 pl-3 text-sm text-ink-dim">
-              Only {rows.length}{' '}
-              {rows.length === 1 ? 'champion has' : 'champions have'} enough games
-              in this slice, which is too few to rank against each other, so the
-              tier column is blank. The numbers below are still real. Lower
-              &ldquo;min games&rdquo; to widen the list, or ingest more matches.
+              Every role has too few champions with enough games in this slice to rank
+              them against each other, so the tier column is blank. The numbers below are
+              still real. Lower &ldquo;min games&rdquo; to widen the list, or ingest more
+              matches.
             </p>
           )}
 
           {rows.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-line text-xs text-ink-faint">
-                    <th className="w-9 py-2.5 text-left font-500">#</th>
-                    <th className="w-12 py-2.5 text-left font-500">Tier</th>
-                    <th className="py-2.5 text-left font-500">Champion</th>
-                    {COLUMNS.map((c) => (
-                      <th
-                        key={c.key}
-                        aria-sort={sort === c.key ? 'descending' : 'none'}
-                        className="py-2.5 text-right font-500"
-                      >
-                        <button
-                          onClick={() => setSort(c.key)}
-                          title={c.hint}
-                          className={`border-b-2 pb-0.5 transition-colors ${
-                            sort === c.key
-                              ? 'border-gold text-gold-bright'
-                              : 'border-transparent hover:text-ink'
-                          }`}
-                        >
-                          {c.label}
-                        </button>
-                      </th>
+            <>
+              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-sm">
+                <label className="flex min-w-0 flex-1 items-center gap-2 sm:max-w-xs">
+                  <span className="sr-only">Find a champion</span>
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Find a champion"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="control w-full"
+                  />
+                </label>
+                <label className="flex items-center gap-2">
+                  <span className="text-xs text-ink-faint">Sort by</span>
+                  <select
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as SortKey)}
+                    className="control"
+                  >
+                    {SORTS.map((s) => (
+                      <option key={s.key} value={s.key}>
+                        {s.label}
+                      </option>
                     ))}
-                    <th className="py-2.5 text-right font-500">KDA</th>
-                    <th className="py-2.5 text-right font-500">CS/m</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r, i) => {
-                    const style = (r.tier && TIER_STYLE[r.tier]) || TIER_STYLE.D
-                    return (
-                      <tr
-                        key={`${r.champion.id}-${r.position}`}
-                        className="border-b border-line-soft transition-colors hover:bg-raised/40"
-                      >
-                        <td className="tnum py-2.5 text-xs text-ink-faint">{i + 1}</td>
-                        <td className="py-2.5">
-                          {r.tier ? (
-                            <span
-                              className="inline-grid size-7 place-items-center rounded-sm font-display text-sm font-800"
-                              style={{
-                                background: style.bg,
-                                color: style.fg,
-                                boxShadow: style.ring ? `inset 0 0 0 1px ${style.ring}` : undefined,
-                              }}
-                            >
-                              {r.tier}
-                            </span>
-                          ) : (
-                            <span
-                              className="text-ink-faint"
-                              title="Too few champions in this slice to rank them against each other"
-                            >
-                              –
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5">
-                          <Link
-                            to={`/champions/${r.champion.id}?position=${r.position}`}
-                            className="group flex items-center gap-3"
-                          >
-                            {r.champion.icon_url && (
-                              <img
-                                src={r.champion.icon_url}
-                                alt=""
-                                className="size-10 rounded-sm ring-1 ring-line transition-[box-shadow] group-hover:ring-gold"
-                                loading="lazy"
-                              />
-                            )}
-                            <div className="min-w-0">
-                              <p className="display truncate text-[17px] font-600 text-ink transition-colors group-hover:text-gold-bright">
-                                {r.champion.name}
-                              </p>
-                              {!position && (
-                                <p className="flex items-center gap-1 text-[11px] text-ink-faint">
-                                  <PositionIcon
-                                    position={r.position}
-                                    className="size-[13px]"
-                                  />
-                                  {positionLabel(r.position)}
-                                </p>
-                              )}
-                            </div>
-                          </Link>
-                        </td>
-                        <td className="tnum display py-2.5 text-right text-xl font-700 text-ink">
-                          {pct(r.confidence_win_rate, 1)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-dim">
-                          {pct(r.win_rate, 1)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-dim">
-                          {pct(r.pick_rate, 1)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-dim">
-                          {pct(r.ban_rate, 1)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-faint">
-                          {compact(r.games)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-dim">
-                          {r.avg_kda.toFixed(2)}
-                        </td>
-                        <td className="tnum py-2.5 text-right text-ink-dim">
-                          {r.avg_cs_per_min.toFixed(1)}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                  </select>
+                </label>
+                {query && (
+                  <span className="text-xs text-ink-faint">
+                    {shown.length} of {rows.length}
+                  </span>
+                )}
+              </div>
+
+              {shown.length === 0 ? (
+                <p className="mt-6 text-sm text-ink-dim">
+                  No champion in this slice matches &ldquo;{search}&rdquo;. It may have
+                  fewer than {meta.data?.min_games} games here; lower &ldquo;min
+                  games&rdquo; to include it.
+                </p>
+              ) : (
+                <>
+                  <Table
+                    rows={shown}
+                    sort={sort}
+                    onSort={setSort}
+                    showRole={!position}
+                  />
+                  <Cards rows={shown} showRole={!position} />
+                </>
+              )}
+            </>
           )}
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * How the games behind this slice were ranked.
+ *
+ * Measured, not assumed: each lobby's median rank. The crawler starts from the
+ * top of the ladder, so on 16.18 95% of the games were Master+ lobbies, and a
+ * Gold player reading this list should know that. Riot keeps no historical
+ * rank, so the measurement is where those players stood on the day it was
+ * taken, which the line says.
+ */
+function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']> }) {
+  if (lobby.measured === 0) return null
+  const top = lobby.buckets[0]
+  const label = (tier: string) => (tier === 'MASTER+' ? 'Master+' : tierLabel(tier))
+  const colour = (tier: string) => tierColor(tier === 'MASTER+' ? 'MASTER' : tier)
+  const measuredOn = lobby.as_of
+    ? new Date(lobby.as_of).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-ink-dim">
+      <span className="flex h-1.5 w-32 overflow-hidden rounded-full bg-raised" aria-hidden>
+        {lobby.buckets.map((b) => (
+          <span
+            key={b.tier}
+            style={{ width: `${(b.games / lobby.measured) * 100}%`, background: colour(b.tier) }}
+          />
+        ))}
+      </span>
+      <span title={lobby.buckets.map((b) => `${label(b.tier)}: ${b.games}`).join(', ')}>
+        <span className="tnum text-ink">{pct(top.games / lobby.measured)}</span> of these
+        games were {label(top.tier)} lobbies
+        <span className="text-ink-faint">
+          {' '}
+          ({lobby.measured.toLocaleString()} of {lobby.total.toLocaleString()} measured)
+        </span>
+      </span>
+      <span className="text-ink-faint">
+        Median rank of each lobby
+        {measuredOn ? `, measured ${measuredOn}` : ''}, not when the games were played.
+      </span>
+    </div>
+  )
+}
+
+function TierBadge({ tier }: { tier: string | null }) {
+  if (!tier) {
+    return (
+      <span
+        className="text-ink-faint"
+        title="Too few champions in this role to rank them against each other"
+      >
+        –
+      </span>
+    )
+  }
+  const style = TIER_STYLE[tier] ?? TIER_STYLE.D
+  return (
+    <span
+      className="inline-grid size-7 place-items-center rounded-sm font-display text-sm font-800"
+      style={{
+        background: style.bg,
+        color: style.fg,
+        boxShadow: style.ring ? `inset 0 0 0 1px ${style.ring}` : undefined,
+      }}
+      title={`Tier ${tier} within its role on this patch`}
+    >
+      {tier}
+    </span>
+  )
+}
+
+function Gold({ row }: { row: ChampionMetaRow }) {
+  const gold = goldAt14(row)
+  if (gold === null) {
+    return (
+      <span
+        className="text-ink-faint"
+        title={`${row.timeline_games} games with a timeline, too few to average`}
+      >
+        –
+      </span>
+    )
+  }
+  return (
+    <span
+      className={gold >= 0 ? 'text-win' : 'text-loss'}
+      title={`Average gold lead at 14 minutes over ${row.timeline_games} games with a timeline`}
+    >
+      {gold >= 0 ? '+' : ''}
+      {Math.round(gold).toLocaleString()}
+    </span>
+  )
+}
+
+function ChampionCell({ row, showRole }: { row: ChampionMetaRow; showRole: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-3">
+      {row.champion.icon_url && (
+        <img
+          src={row.champion.icon_url}
+          alt=""
+          className="size-10 shrink-0 rounded-sm ring-1 ring-line transition-[box-shadow] group-hover:ring-gold"
+          loading="lazy"
+        />
+      )}
+      <span className="min-w-0">
+        <span className="display block truncate text-[17px] font-600 text-ink transition-colors group-hover:text-gold-bright">
+          {row.champion.name}
+        </span>
+        {showRole && (
+          <span className="flex items-center gap-1 text-[11px] text-ink-faint">
+            <PositionIcon position={row.position} className="size-[13px]" />
+            {positionLabel(row.position)}
+          </span>
+        )}
+      </span>
+    </span>
+  )
+}
+
+const COLUMNS: { key: SortKey; label: string; hint: string }[] = [
+  {
+    key: 'confidence_win_rate',
+    label: 'Win rate',
+    hint: 'Ranked by the low end of the range the sample supports',
+  },
+  { key: 'pick_rate', label: 'Pick', hint: 'Share of games this champion was picked' },
+  { key: 'ban_rate', label: 'Ban', hint: 'Share of games this champion was banned' },
+  { key: 'games', label: 'Games', hint: 'Sample size' },
+  { key: 'gold', label: 'Gold @14', hint: 'Average gold lead at 14 minutes' },
+]
+
+function Table({
+  rows,
+  sort,
+  onSort,
+  showRole,
+}: {
+  rows: { row: ChampionMetaRow; place: number }[]
+  sort: SortKey
+  onSort: (key: SortKey) => void
+  showRole: boolean
+}) {
+  return (
+    <div className="mt-3 hidden overflow-x-auto md:block">
+      <table className="w-full min-w-[720px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-line text-xs text-ink-faint">
+            <th className="w-9 py-2.5 text-left font-500">#</th>
+            <th className="w-12 py-2.5 text-left font-500">Tier</th>
+            <th className="py-2.5 text-left font-500">Champion</th>
+            {COLUMNS.map((c) => (
+              <th
+                key={c.key}
+                aria-sort={sort === c.key ? 'descending' : 'none'}
+                className="py-2.5 text-right font-500"
+              >
+                <button
+                  onClick={() => onSort(c.key)}
+                  title={c.hint}
+                  className={`border-b-2 pb-0.5 transition-colors ${
+                    sort === c.key
+                      ? 'border-gold text-gold-bright'
+                      : 'border-transparent hover:text-ink'
+                  }`}
+                >
+                  {c.label}
+                </button>
+              </th>
+            ))}
+            <th className="py-2.5 text-right font-500">KDA</th>
+            <th className="py-2.5 text-right font-500">CS/m</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ row, place }) => (
+            <tr
+              key={`${row.champion.id}-${row.position}`}
+              className="border-b border-line-soft transition-colors hover:bg-raised/40"
+            >
+              <td className="tnum py-2.5 text-xs text-ink-faint">{place}</td>
+              <td className="py-2.5">
+                <TierBadge tier={row.tier} />
+              </td>
+              <td className="py-2.5">
+                <Link
+                  to={`/champions/${row.champion.id}?position=${row.position}`}
+                  className="group block"
+                >
+                  <ChampionCell row={row} showRole={showRole} />
+                </Link>
+              </td>
+              <td className="py-2.5 text-right">
+                <WinRateRange
+                  rate={row.win_rate}
+                  low={row.confidence_win_rate}
+                  high={row.confidence_high}
+                  games={row.games}
+                />
+              </td>
+              <td className="tnum py-2.5 text-right text-ink-dim">{pct(row.pick_rate, 1)}</td>
+              <td className="tnum py-2.5 text-right text-ink-dim">{pct(row.ban_rate, 1)}</td>
+              <td className="tnum py-2.5 text-right text-ink-faint">{compact(row.games)}</td>
+              <td className="tnum py-2.5 text-right">
+                <Gold row={row} />
+              </td>
+              <td className="tnum py-2.5 text-right text-ink-dim">{row.avg_kda.toFixed(2)}</td>
+              <td className="tnum py-2.5 text-right text-ink-dim">
+                {row.avg_cs_per_min.toFixed(1)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+/**
+ * The phone layout: one card per champion.
+ *
+ * The table needed 720px, so at 390px its win rate column sat off-screen and a
+ * reader saw names and tiers but no number without scrolling sideways. A card
+ * puts the tier, the champion and the win rate range in one row, with the rest
+ * on a line beneath.
+ */
+function Cards({
+  rows,
+  showRole,
+}: {
+  rows: { row: ChampionMetaRow; place: number }[]
+  showRole: boolean
+}) {
+  return (
+    <ul className="mt-3 md:hidden">
+      {rows.map(({ row, place }) => (
+        <li key={`${row.champion.id}-${row.position}`} className="border-b border-line-soft">
+          <Link
+            to={`/champions/${row.champion.id}?position=${row.position}`}
+            className="group block py-3"
+          >
+            <span className="grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5">
+              <span className="tnum text-xs text-ink-faint">{place}</span>
+              <TierBadge tier={row.tier} />
+              <ChampionCell row={row} showRole={showRole} />
+              <WinRateRange
+                rate={row.win_rate}
+                low={row.confidence_win_rate}
+                high={row.confidence_high}
+                games={row.games}
+              />
+            </span>
+            <span className="tnum mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-[4.5rem] text-[11px] text-ink-faint">
+              <span>{compact(row.games)} games</span>
+              <span>Pick {pct(row.pick_rate, 1)}</span>
+              <span>Ban {pct(row.ban_rate, 1)}</span>
+              <span>
+                Gold @14 <Gold row={row} />
+              </span>
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
   )
 }

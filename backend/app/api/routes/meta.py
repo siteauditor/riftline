@@ -19,8 +19,10 @@ from app.services.aggregate import (
     POSITIONS,
     available_brackets,
     available_slices,
+    lobby_rank_mix,
     tier_for,
     wilson_lower_bound,
+    wilson_upper_bound,
 )
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
@@ -45,6 +47,9 @@ class ChampionMetaRow(BaseModel):
     win_rate: float
     # Defensible win rate at this sample size; what the list is ordered by.
     confidence_win_rate: float
+    # The top of the same interval. With the low end it is the range the sample
+    # supports, which is what the page draws.
+    confidence_high: float = 1.0
     pick_rate: float
     ban_rate: float
     # None when the slice has too few champions for percentile banding to mean
@@ -54,6 +59,27 @@ class ChampionMetaRow(BaseModel):
     avg_cs_per_min: float
     avg_damage: float
     avg_vision: float
+    # Over `timeline_games` only, the games whose timeline we hold.
+    avg_gold_diff_14: float | None = None
+    timeline_games: int = 0
+
+
+class LobbyRankBucket(BaseModel):
+    tier: str
+    games: int
+
+
+class LobbyRanksOut(BaseModel):
+    """How the games behind this slice were ranked, by measured lobby median."""
+
+    total: int
+    measured: int
+    # Highest first. MASTER+ merges the apex tiers, which cannot be told apart
+    # from a points value alone.
+    buckets: list[LobbyRankBucket] = Field(default_factory=list)
+    # Epoch ms of the newest measurement. Riot keeps no historical rank, so this
+    # is where those players stood then, not when they played.
+    as_of: int | None = None
 
 
 class MetaResponse(BaseModel):
@@ -64,6 +90,7 @@ class MetaResponse(BaseModel):
     sample_matches: int
     min_games: int
     rows: list[ChampionMetaRow] = Field(default_factory=list)
+    lobby_ranks: LobbyRanksOut | None = None
 
 
 class CorpusResponse(BaseModel):
@@ -79,14 +106,22 @@ class CorpusResponse(BaseModel):
 
 
 def assign_tiers(rows: list[ChampionMetaRow]) -> None:
-    """Stamp each row with its percentile tier, or leave it unranked.
+    """Stamp each row with its percentile tier within its own role.
 
-    See ``tier_for``: below MIN_ROWS_FOR_TIERS a percentile says more about the
-    length of the list than about the champions in it.
+    Rows arrive sorted best first. Banded per role rather than across the whole
+    list: pooled, "All roles" at 20+ games on 16.18 gave about 19 S rows spread
+    unevenly over the roles, when a reader takes S to mean the top of that role.
+
+    See ``tier_for``: below MIN_ROWS_FOR_TIERS in a role a percentile says more
+    about the length of the list than about the champions in it.
     """
-    total = len(rows)
-    for index, row in enumerate(rows):
-        row.tier = tier_for(index, total)
+    by_role: dict[str, list[ChampionMetaRow]] = {}
+    for row in rows:
+        by_role.setdefault(row.position, []).append(row)
+    for group in by_role.values():
+        total = len(group)
+        for index, row in enumerate(group):
+            row.tier = tier_for(index, total)
 
 
 @router.get("/corpus", response_model=CorpusResponse)
@@ -170,6 +205,7 @@ async def get_champion_meta(
             wins=s.wins,
             win_rate=s.wins / s.games if s.games else 0.0,
             confidence_win_rate=wilson_lower_bound(s.wins, s.games),
+            confidence_high=wilson_upper_bound(s.wins, s.games),
             pick_rate=s.games / s.pool_games if s.pool_games else 0.0,
             ban_rate=s.bans / s.pool_games if s.pool_games else 0.0,
             tier=None,
@@ -177,12 +213,15 @@ async def get_champion_meta(
             avg_cs_per_min=s.avg_cs_per_min,
             avg_damage=s.avg_damage,
             avg_vision=s.avg_vision,
+            avg_gold_diff_14=s.avg_gold_diff_14,
+            timeline_games=s.timeline_games,
         )
         for s in stats
     ]
 
     rows.sort(key=lambda r: r.confidence_win_rate, reverse=True)
     assign_tiers(rows)
+    mix = await lobby_rank_mix(db, patch, queue_id, bracket)
 
     return MetaResponse(
         patch=patch,
@@ -192,4 +231,10 @@ async def get_champion_meta(
         sample_matches=sample,
         min_games=min_games,
         rows=rows,
+        lobby_ranks=LobbyRanksOut(
+            total=mix.total,
+            measured=mix.measured,
+            buckets=[LobbyRankBucket(tier=t, games=n) for t, n in mix.buckets],
+            as_of=epoch_ms(mix.as_of),
+        ),
     )
