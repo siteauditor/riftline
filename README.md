@@ -206,10 +206,21 @@ region. On 16.18, 95% were Master+ lobbies. That replaced the "Crawled from" fil
 there, which recorded where the crawler started rather than a rank, and filtered
 almost nothing (Challenger was 1,403 of 1,593 games).
 
-**Draft suggestions explain themselves.** Every suggestion returns its baseline, its
-head-to-head record and sample size, and the mastery weighting. Matchup records are
-shrunk toward the champion's own baseline in proportion to sample size, so a 4-game
-75% matchup does not outrank a 400-game 53% one.
+**Draft suggestions are ranked by what the records support.** Every suggestion returns
+its baseline, every record behind it with its sample, and the mastery weighting. Each
+record is first shrunk toward the champion's own baseline in proportion to sample size,
+then gives up its own margin of error, and only the remainder counts toward the
+ranking: measured on 2026-09-21, a 10-2 lane record over twelve games was lifting a
+50.7% pick to 60.0% and putting it first, and now argues for about three points. The
+unrestrained figure is still returned as `adjusted_win_rate`, the honest "if that record
+holds" number.
+
+The board is read whole. Besides the lane opponent (`MatchupStat`, scope LANE), the
+advisor reads each other enemy pick (scope TEAM, 1,838 champion pairs with ten or more
+games on 16.18 against 288 in lane) and each ally already locked in (`SynergyStat`).
+The whole board may move a pick by at most `CONTEXT_LIFT_CAP`, so nine records pulling
+one way cannot stack into a number no sample supports. The same scoring, read from the
+other side, ranks the champions worth banning.
 
 ---
 

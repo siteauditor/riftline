@@ -10,7 +10,15 @@ from app.api.schemas import ChampionRef
 from app.riot.errors import RiotApiError
 from app.riot.routing import UnknownPlatform
 from app.services.aggregate import ALL_BRACKETS, available_slices
-from app.services.draft import DraftAdvisor, DraftContext
+from app.services.draft import (
+    ALLY_SHRINKAGE,
+    COMFORT_MAX_BONUS,
+    CONTEXT_LIFT_CAP,
+    MATCHUP_SHRINKAGE,
+    TEAM_SHRINKAGE,
+    DraftAdvisor,
+    DraftContext,
+)
 from app.services.players import PlayerNotFound
 
 router = APIRouter(prefix="/api/draft", tags=["draft"])
@@ -39,25 +47,78 @@ class DraftRequest(BaseModel):
     comfort_weight: float = Field(default=0.15, ge=0.0, le=1.0)
 
 
+class EvidenceOut(BaseModel):
+    """One record behind a suggestion, with the sample it rests on."""
+
+    # "lane", "enemy" or "ally".
+    kind: str
+    champion: ChampionRef
+    games: int
+    wins: int
+    win_rate: float
+    # What the record claims, and the part its own sample supports. The list is
+    # ranked on the second one.
+    lift: float
+    credible_lift: float
+    # Lane only, and only once enough of those games have a timeline.
+    gold_diff_14: float | None = None
+    laning_score: float | None = None
+    timeline_games: int = 0
+
+
 class SuggestionOut(BaseModel):
     champion: ChampionRef
+    # Baseline plus what the board supports plus comfort: the sort key.
     score: float
     base_win_rate: float
+    # Baseline plus everything the records claim, uncapped: "if they hold".
     adjusted_win_rate: float
     games: int
     matchup_win_rate: float | None = None
     matchup_games: int = 0
     mastery_points: int = 0
     comfort: float = 0.0
+    # The two parts of the score that are not the baseline.
+    context_lift: float = 0.0
+    comfort_bonus: float = 0.0
+    evidence: list[EvidenceOut] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+
+
+class BanCandidateOut(BaseModel):
+    champion: ChampionRef
+    position: str
+    base_win_rate: float
+    games: int
+    score: float
+    reasons: list[str] = Field(default_factory=list)
+
+
+class DraftModelOut(BaseModel):
+    """The constants behind the score, so the page can state them."""
+
+    comfort_weight: float
+    comfort_max_bonus: float
+    lane_shrinkage: float
+    team_shrinkage: float
+    ally_shrinkage: float
+    context_lift_cap: float
 
 
 class DraftResponse(BaseModel):
     patch: str
     position: str
     enemy_laner: ChampionRef | None = None
+    allies: list[ChampionRef] = Field(default_factory=list)
+    enemies: list[ChampionRef] = Field(default_factory=list)
     personalised: bool = False
     suggestions: list[SuggestionOut] = Field(default_factory=list)
+    # Who to deny. False when no ally is locked in yet: then these are simply
+    # the patch's strongest picks, which the page has to say rather than imply
+    # it read the draft.
+    bans_read_the_draft: bool = False
+    ban_candidates: list[BanCandidateOut] = Field(default_factory=list)
+    model: DraftModelOut
 
 
 @router.post("/suggest", response_model=DraftResponse)
@@ -109,7 +170,9 @@ async def suggest(
         min_games=body.min_games,
     )
 
-    suggestions = await DraftAdvisor(db).suggest(ctx)
+    advisor = DraftAdvisor(db)
+    suggestions = await advisor.suggest(ctx)
+    bans = await advisor.ban_candidates(ctx)
     if not suggestions:
         raise HTTPException(
             404,
@@ -117,26 +180,23 @@ async def suggest(
             "Ingest more matches or lower min_games.",
         )
 
+    def champion(champion_id: int) -> ChampionRef:
+        return ChampionRef(
+            id=champion_id,
+            name=sd.champion_name(champion_id),
+            icon_url=sd.champion_icon(champion_id),
+        )
+
     return DraftResponse(
         patch=patch,
         position=position,
-        enemy_laner=(
-            ChampionRef(
-                id=body.enemy_laner,
-                name=sd.champion_name(body.enemy_laner),
-                icon_url=sd.champion_icon(body.enemy_laner),
-            )
-            if body.enemy_laner
-            else None
-        ),
+        enemy_laner=champion(body.enemy_laner) if body.enemy_laner else None,
+        allies=[champion(c) for c in dict.fromkeys(body.allies)],
+        enemies=[champion(c) for c in dict.fromkeys(body.enemies)],
         personalised=puuid is not None,
         suggestions=[
             SuggestionOut(
-                champion=ChampionRef(
-                    id=s.champion_id,
-                    name=sd.champion_name(s.champion_id),
-                    icon_url=sd.champion_icon(s.champion_id),
-                ),
+                champion=champion(s.champion_id),
                 score=s.score,
                 base_win_rate=s.base_win_rate,
                 adjusted_win_rate=s.adjusted_win_rate,
@@ -145,8 +205,45 @@ async def suggest(
                 matchup_games=s.matchup_games,
                 mastery_points=s.mastery_points,
                 comfort=s.comfort,
+                context_lift=s.context_lift,
+                comfort_bonus=s.comfort_bonus,
+                evidence=[
+                    EvidenceOut(
+                        kind=e.kind,
+                        champion=champion(e.champion_id),
+                        games=e.games,
+                        wins=e.wins,
+                        win_rate=e.win_rate,
+                        lift=e.lift,
+                        credible_lift=e.credible_lift,
+                        gold_diff_14=e.gold_diff_14,
+                        laning_score=e.laning_score,
+                        timeline_games=e.timeline_games,
+                    )
+                    for e in s.evidence
+                ],
                 reasons=s.reasons,
             )
             for s in suggestions
         ],
+        bans_read_the_draft=bool(body.allies),
+        ban_candidates=[
+            BanCandidateOut(
+                champion=champion(c.champion_id),
+                position=c.position,
+                base_win_rate=c.base_win_rate,
+                games=c.games,
+                score=c.score,
+                reasons=c.reasons,
+            )
+            for c in bans
+        ],
+        model=DraftModelOut(
+            comfort_weight=body.comfort_weight,
+            comfort_max_bonus=COMFORT_MAX_BONUS,
+            lane_shrinkage=MATCHUP_SHRINKAGE,
+            team_shrinkage=TEAM_SHRINKAGE,
+            ally_shrinkage=ALLY_SHRINKAGE,
+            context_lift_cap=CONTEXT_LIFT_CAP,
+        ),
     )

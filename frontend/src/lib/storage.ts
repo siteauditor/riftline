@@ -45,6 +45,23 @@ export function rememberRegion(id: string) {
   if (PLATFORMS.some((p) => p.id === id)) writeRaw(REGION_KEY, id)
 }
 
+// --- the Riot ID the draft board weighs by ------------------------------------
+
+const RIOT_ID_KEY = 'riftline.riotId'
+
+/**
+ * Kept here rather than in the URL: the rest of the draft board is in the
+ * address so a draft can be shared, and a shared link should not carry the
+ * sharer's account with it.
+ */
+export function lastRiotId(): string | null {
+  return readRaw(RIOT_ID_KEY)
+}
+
+export function rememberRiotId(value: string) {
+  writeRaw(RIOT_ID_KEY, value.trim() || null)
+}
+
 // --- recent profiles ----------------------------------------------------------
 
 export interface RecentSearch {

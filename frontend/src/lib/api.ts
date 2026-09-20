@@ -767,25 +767,70 @@ export interface SliceQuery {
   minGames?: number
 }
 
+/** One record behind a suggestion, with the sample it rests on. */
+export interface DraftEvidence {
+  kind: 'lane' | 'enemy' | 'ally'
+  champion: ChampionRef
+  games: number
+  wins: number
+  win_rate: number
+  /** What the record claims, and the part its own sample supports. */
+  lift: number
+  credible_lift: number
+  gold_diff_14: number | null
+  laning_score: number | null
+  timeline_games: number
+}
+
 export interface DraftSuggestion {
   champion: ChampionRef
+  /** Baseline plus what the board supports plus comfort: the sort key. */
   score: number
   base_win_rate: number
+  /** Baseline plus everything the records claim, uncapped: "if they hold". */
   adjusted_win_rate: number
   games: number
   matchup_win_rate: number | null
   matchup_games: number
   mastery_points: number
   comfort: number
+  context_lift: number
+  comfort_bonus: number
+  evidence: DraftEvidence[]
   reasons: string[]
+}
+
+export interface DraftBanCandidate {
+  champion: ChampionRef
+  position: string
+  base_win_rate: number
+  games: number
+  score: number
+  reasons: string[]
+}
+
+/** The constants behind the score, so the page states them rather than guessing. */
+export interface DraftModel {
+  comfort_weight: number
+  comfort_max_bonus: number
+  lane_shrinkage: number
+  team_shrinkage: number
+  ally_shrinkage: number
+  context_lift_cap: number
 }
 
 export interface DraftResponse {
   patch: string
   position: string
   enemy_laner: ChampionRef | null
+  allies: ChampionRef[]
+  enemies: ChampionRef[]
   personalised: boolean
   suggestions: DraftSuggestion[]
+  /** False when no ally is locked in: then the bans are just the patch's best. */
+  bans_read_the_draft: boolean
+  ban_candidates: DraftBanCandidate[]
+  model: DraftModel
 }
 
 export interface DraftRequest {

@@ -1,34 +1,79 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import ChampionPicker from '../components/ChampionPicker'
 import PositionIcon from '../components/PositionIcon'
-import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
-import { api, PLATFORMS, POSITIONS, type DraftResponse } from '../lib/api'
-import { compact, parseRiotId, pct } from '../lib/format'
+import { EmptyState, ErrorView } from '../components/StateViews'
+import {
+  api,
+  PLATFORMS,
+  POSITIONS,
+  type ChampionStatic,
+  type DraftEvidence,
+  type DraftResponse,
+  type DraftSuggestion,
+} from '../lib/api'
+import { compact, parseRiotId, pct, positionLabel } from '../lib/format'
+import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
+import { useDebounced } from '../lib/useDebounced'
+
+const COMFORT_LEVELS = [
+  { value: 0, label: 'Off' },
+  { value: 0.15, label: 'Light' },
+  { value: 0.4, label: 'Strong' },
+]
+
+// Long enough that typing a Riot ID is one request, short enough that adding a
+// champion re-ranks while the hand is still on the mouse.
+const RERANK_MS = 250
 
 /**
  * Draft assistant.
  *
- * Every suggestion shows its reasoning. A draft tool that just says "pick
- * Malphite" is one nobody trusts when it matters, so the baseline, the matchup
- * sample and the mastery weighting are all visible on the card.
+ * Every suggestion shows its reasoning, and the list is ordered by what the
+ * records actually support rather than what they claim: measured on the live
+ * API on 2026-09-21, a 10-2 lane record over twelve games was lifting a pick
+ * from 50.7% to 60.0% and putting it top. The page therefore shows both the
+ * supported score it ranks on and the unrestrained "if that holds" figure.
+ *
+ * The board lives in the URL so a draft can be shared or reloaded. The Riot ID
+ * does not: it identifies a person, so it stays in this browser.
  */
 export default function Draft() {
-  const [position, setPosition] = useState('MIDDLE')
-  const [enemyLaner, setEnemyLaner] = useState<number | null>(null)
-  const [bans, setBans] = useState<number[]>([])
-  const [banInput, setBanInput] = useState<number | null>(null)
-  const [riotId, setRiotId] = useState('')
-  const [platform, setPlatform] = useState('euw1')
-  // Same escape hatch the tier list has. Without it a thin corpus is a dead
-  // end: the request 404s and there is nothing the user can adjust.
-  const [minGames, setMinGames] = useState(20)
+  const [search, setSearch] = useSearchParams()
+  const [platform, setPlatform] = useState(() => lastRegion() ?? 'euw1')
+  const [riotId, setRiotId] = useState(() => lastRiotId() ?? '')
 
-  const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
+  const ids = (key: string): number[] =>
+    (search.get(key) ?? '')
+      .split(',')
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0)
 
-  // Champion ids are Riot's identifiers, not something a player recognises.
-  // The ban chips resolve them to names and portraits.
+  const position = (search.get('role') ?? 'MIDDLE').toUpperCase()
+  const allies = ids('allies')
+  const enemies = ids('enemies')
+  const bans = ids('bans')
+  const laneId = Number(search.get('lane')) || null
+  const lane = laneId && enemies.includes(laneId) ? laneId : null
+  const minGames = Math.max(1, Number(search.get('min')) || 20)
+  const comfort = COMFORT_LEVELS.some((c) => c.value === Number(search.get('comfort')))
+    ? Number(search.get('comfort'))
+    : 0.15
+
+  function set(patch: Record<string, string | null>) {
+    const next = new URLSearchParams(search)
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === '') next.delete(key)
+      else next.set(key, value)
+    }
+    setSearch(next, { replace: true })
+  }
+
+  const setIds = (key: string, list: number[]) =>
+    set({ [key]: list.length ? list.join(',') : null })
+
   const { data: championData } = useQuery({
     queryKey: ['champions'],
     queryFn: api.champions,
@@ -39,27 +84,38 @@ export default function Draft() {
     [championData],
   )
 
-  const suggest = useMutation<DraftResponse, unknown, void>({
-    mutationFn: () => {
-      const parsed = parseRiotId(riotId)
-      return api.draft({
-        position,
-        enemy_laner: enemyLaner,
-        bans,
-        min_games: minGames,
+  // Settled, so dragging a slider or typing an ID is not one request per key.
+  const settledRiotId = useDebounced(riotId, RERANK_MS)
+  const board = useDebounced(
+    { position, allies, enemies, lane, bans, minGames, comfort },
+    RERANK_MS,
+  )
+  const parsed = parseRiotId(settledRiotId)
+
+  const draft = useQuery({
+    queryKey: ['draft', board, platform, parsed?.name ?? '', parsed?.tag ?? ''],
+    queryFn: () =>
+      api.draft({
+        position: board.position,
+        allies: board.allies,
+        enemies: board.enemies,
+        bans: board.bans,
+        enemy_laner: board.lane,
+        min_games: board.minGames,
+        comfort_weight: board.comfort,
         platform: parsed ? platform : null,
         game_name: parsed?.name ?? null,
         tag_line: parsed?.tag ?? null,
-      })
-    },
+      }),
+    // The previous ranking stays on screen while the next one loads, so adding
+    // a champion never blanks the page.
+    placeholderData: keepPreviousData,
+    retry: false,
   })
 
+  const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
   const empty = corpus.data && corpus.data.total_matches === 0
-
-  function addBan(id: number | null) {
-    if (id && !bans.includes(id)) setBans([...bans, id])
-    setBanInput(null)
-  }
+  const boardIsSet = allies.length + enemies.length + bans.length > 0 || lane !== null
 
   return (
     <div className="mx-auto max-w-[1280px] px-4 py-6">
@@ -68,9 +124,9 @@ export default function Draft() {
           Draft assistant
         </h1>
         <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-dim">
-          Pick your role and the champion you're up against. Suggestions weigh the
-          champion's baseline, the head-to-head record, and, if you add your Riot ID,
-          what you can actually play.
+          Pick your role, then fill in the draft as it happens. Suggestions are ranked by
+          what the records can support, not by what a handful of games claims, and every
+          row shows where its number came from.
         </p>
       </header>
 
@@ -83,7 +139,7 @@ export default function Draft() {
         </div>
       ) : (
         <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
-          {/* Controls */}
+          {/* The board */}
           <aside className="space-y-4">
             <div>
               <span className="mb-1 block text-xs text-ink-faint">Your role</span>
@@ -91,7 +147,7 @@ export default function Draft() {
                 {POSITIONS.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => setPosition(p.id)}
+                    onClick={() => set({ role: p.id })}
                     aria-pressed={position === p.id}
                     className={`flex items-center gap-1 border-b-2 px-1.5 pb-1.5 pt-1 font-display text-sm font-600 transition-colors ${
                       position === p.id
@@ -106,43 +162,38 @@ export default function Draft() {
               </div>
             </div>
 
-            <ChampionPicker
-              label="Enemy in your lane"
-              value={enemyLaner}
-              onChange={setEnemyLaner}
-              placeholder="Optional"
+            <Slot
+              label="Your team"
+              placeholder="Add an ally"
+              ids={allies}
+              championById={championById}
+              onAdd={(id) => setIds('allies', [...allies, id])}
+              onRemove={(id) => setIds('allies', allies.filter((c) => c !== id))}
             />
 
-            <div>
-              <ChampionPicker
-                label="Unavailable (banned or picked)"
-                value={banInput}
-                onChange={addBan}
-                placeholder="Add a champion"
-              />
-              {bans.length > 0 && (
-                <ul className="mt-2 flex flex-wrap gap-1">
-                  {bans.map((id) => {
-                    const champion = championById.get(id)
-                    return (
-                      <li key={id}>
-                        <button
-                          onClick={() => setBans(bans.filter((b) => b !== id))}
-                          className="flex items-center gap-1.5 rounded-sm border border-line bg-raised py-1 pl-1 pr-2 text-xs text-ink-dim transition-colors hover:border-loss hover:text-loss"
-                          title={`Remove ${champion?.name ?? id}`}
-                        >
-                          {champion?.icon_url && (
-                            <img src={champion.icon_url} alt="" className="size-4 rounded-sm" />
-                          )}
-                          {champion?.name ?? `Champion ${id}`}
-                          <span aria-hidden>✕</span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
+            <Slot
+              label="Enemy team"
+              placeholder="Add an enemy"
+              ids={enemies}
+              championById={championById}
+              onAdd={(id) => setIds('enemies', [...enemies, id])}
+              onRemove={(id) => {
+                setIds('enemies', enemies.filter((c) => c !== id))
+                if (lane === id) set({ lane: null })
+              }}
+              markLabel="lane"
+              marked={lane}
+              onMark={(id) => set({ lane: lane === id ? null : String(id) })}
+            />
+
+            <Slot
+              label="Banned"
+              placeholder="Add a champion"
+              ids={bans}
+              championById={championById}
+              onAdd={(id) => setIds('bans', [...bans, id])}
+              onRemove={(id) => setIds('bans', bans.filter((c) => c !== id))}
+            />
 
             <div>
               <span className="mb-1 block text-xs text-ink-faint">
@@ -151,7 +202,10 @@ export default function Draft() {
               <div className="flex gap-1">
                 <select
                   value={platform}
-                  onChange={(e) => setPlatform(e.target.value)}
+                  onChange={(e) => {
+                    setPlatform(e.target.value)
+                    rememberRegion(e.target.value)
+                  }}
                   className="control h-10 shrink-0 text-sm"
                 >
                   {PLATFORMS.map((p) => (
@@ -162,123 +216,367 @@ export default function Draft() {
                 </select>
                 <input
                   value={riotId}
-                  onChange={(e) => setRiotId(e.target.value)}
+                  onChange={(e) => {
+                    setRiotId(e.target.value)
+                    rememberRiotId(e.target.value)
+                  }}
                   placeholder="Caps#EUW"
                   className="control h-10 min-w-0 flex-1 px-3 text-sm placeholder:text-ink-faint"
                 />
               </div>
+              <p className="mt-1 text-[11px] text-ink-faint">
+                Remembered on this device, and kept out of the link.
+              </p>
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-ink-dim">
+            <label className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-xs text-ink-faint">Weigh what you can play</span>
+              <select
+                value={comfort}
+                onChange={(e) => set({ comfort: e.target.value })}
+                className="control"
+                disabled={!parsed}
+                title={
+                  parsed
+                    ? 'How much mastery counts toward the score'
+                    : 'Add your Riot ID to weigh your mastery'
+                }
+              >
+                {COMFORT_LEVELS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex items-center justify-between gap-2 text-sm text-ink-dim">
               <span className="text-xs text-ink-faint">Min games per champion</span>
               <input
                 type="number"
                 min={1}
                 value={minGames}
-                onChange={(e) => setMinGames(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(e) => set({ min: String(Math.max(1, Number(e.target.value) || 1)) })}
                 className="control tnum w-16"
               />
             </label>
 
-            <button
-              onClick={() => suggest.mutate()}
-              disabled={suggest.isPending}
-              className="w-full rounded-sm bg-gold py-2.5 font-display text-sm font-700 tracking-wide text-deep transition-colors hover:bg-gold-bright disabled:opacity-60"
-            >
-              {suggest.isPending ? 'Working…' : 'Suggest picks'}
-            </button>
+            {boardIsSet && (
+              <button
+                onClick={() => set({ allies: null, enemies: null, bans: null, lane: null })}
+                className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
+              >
+                Clear the board
+              </button>
+            )}
           </aside>
 
           {/* Results */}
           <div className="min-w-0">
-            {suggest.isPending && <Spinner label="Scoring champions…" />}
-
-            {suggest.isError && (
-              <ErrorView error={suggest.error} onRetry={() => suggest.mutate()} />
+            {draft.isError && (
+              <ErrorView error={draft.error} onRetry={() => draft.refetch()} />
             )}
 
-            {suggest.isSuccess && (
-              <>
-                <div className="flex flex-wrap items-baseline gap-x-3 text-xs text-ink-faint">
-                  <span>Patch {suggest.data.patch}</span>
-                  {suggest.data.enemy_laner && (
-                    <span>against {suggest.data.enemy_laner.name}</span>
-                  )}
-                  <span>
-                    {suggest.data.personalised
-                      ? 'weighted by your mastery'
-                      : 'not personalised'}
-                  </span>
-                </div>
+            {draft.isLoading && <SuggestionSkeleton />}
 
-                <ol className="mt-3 space-y-1.5">
-                  {suggest.data.suggestions.map((s, i) => {
-                    const delta = s.adjusted_win_rate - s.base_win_rate
-                    return (
-                      <li
-                        key={s.champion.id}
-                        className="flex gap-3 border-b border-line-soft px-3 py-2.5 transition-colors hover:bg-raised/30"
-                      >
-                        <span className="tnum w-5 shrink-0 pt-1 text-xs text-ink-faint">
-                          {i + 1}
-                        </span>
-                        {s.champion.icon_url && (
-                          <img
-                            src={s.champion.icon_url}
-                            alt=""
-                            className="size-10 shrink-0 rounded-sm"
-                            loading="lazy"
-                          />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-baseline gap-x-2">
-                            <p className="font-display text-sm font-700 text-ink">
-                              {s.champion.name}
-                            </p>
-                            <p className="tnum text-sm font-600 text-gold-bright">
-                              {pct(s.adjusted_win_rate, 1)}
-                            </p>
-                            {Math.abs(delta) > 0.001 && (
-                              <p
-                                className="tnum text-xs"
-                                style={{
-                                  color:
-                                    delta > 0 ? 'var(--color-win)' : 'var(--color-loss)',
-                                }}
-                              >
-                                {delta > 0 ? '+' : ''}
-                                {(delta * 100).toFixed(1)} vs baseline
-                              </p>
-                            )}
-                          </div>
-                          <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
-                            {s.reasons.map((r, j) => (
-                              <li key={j}>{r}</li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="shrink-0 text-right text-xs text-ink-faint">
-                          <p className="tnum">{compact(s.games)} games</p>
-                          {s.mastery_points > 0 && (
-                            <p className="tnum">{compact(s.mastery_points)} pts</p>
-                          )}
-                        </div>
-                      </li>
-                    )
-                  })}
-                </ol>
-              </>
-            )}
-
-            {suggest.isIdle && (
-              <EmptyState
-                title="Set the lane, then ask"
-                body="Choose your role and, if the enemy has already locked in, who you're facing. Adding your Riot ID biases the list toward champions you've actually played."
-              />
-            )}
+            {draft.data && <Results data={draft.data} stale={draft.isPlaceholderData} />}
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+/** One side of the board: a picker and the champions already in it. */
+function Slot({
+  label,
+  placeholder,
+  ids,
+  championById,
+  onAdd,
+  onRemove,
+  markLabel,
+  marked,
+  onMark,
+}: {
+  label: string
+  placeholder: string
+  ids: number[]
+  championById: Map<number, ChampionStatic>
+  onAdd: (id: number) => void
+  onRemove: (id: number) => void
+  markLabel?: string
+  marked?: number | null
+  onMark?: (id: number) => void
+}) {
+  return (
+    <div>
+      <ChampionPicker
+        label={label}
+        value={null}
+        onChange={(id) => id && !ids.includes(id) && onAdd(id)}
+        placeholder={placeholder}
+      />
+      {ids.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1">
+          {ids.map((id) => {
+            const champion = championById.get(id)
+            const isMarked = marked === id
+            return (
+              <li
+                key={id}
+                className={`flex items-center rounded-sm border bg-raised text-xs ${
+                  isMarked ? 'border-gold text-gold-bright' : 'border-line text-ink-dim'
+                }`}
+              >
+                <button
+                  onClick={() => onRemove(id)}
+                  className="flex items-center gap-1.5 py-1 pl-1 pr-1.5 transition-colors hover:text-loss"
+                  title={`Remove ${champion?.name ?? id}`}
+                >
+                  {champion?.icon_url && (
+                    <img src={champion.icon_url} alt="" className="size-4 rounded-sm" />
+                  )}
+                  {champion?.name ?? `Champion ${id}`}
+                  <span aria-hidden>✕</span>
+                </button>
+                {onMark && (
+                  <button
+                    onClick={() => onMark(id)}
+                    aria-pressed={isMarked}
+                    title={
+                      isMarked
+                        ? 'Counted as your lane opponent'
+                        : `Mark ${champion?.name ?? id} as your lane opponent`
+                    }
+                    className={`border-l px-1.5 py-1 transition-colors ${
+                      isMarked
+                        ? 'border-gold/40 text-gold-bright'
+                        : 'border-line text-ink-faint hover:text-ink'
+                    }`}
+                  >
+                    {isMarked ? `in my ${markLabel}` : markLabel}
+                  </button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function SuggestionSkeleton() {
+  return (
+    <ul className="skeleton-breathing space-y-1.5" aria-hidden>
+      {Array.from({ length: 8 }).map((_, i) => (
+        <li key={i} className="flex items-center gap-3 border-b border-line-soft px-3 py-2.5">
+          <span className="skeleton size-10 shrink-0" />
+          <span className="flex-1 space-y-1.5">
+            <span className="skeleton block h-4 w-32" />
+            <span className="skeleton block h-3 w-52 max-w-full" />
+          </span>
+          <span className="skeleton h-7 w-14" />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function Results({ data, stale }: { data: DraftResponse; stale: boolean }) {
+  return (
+    <div className={stale ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+      <div className="flex flex-wrap items-baseline gap-x-3 text-xs text-ink-faint">
+        <span>Patch {data.patch}</span>
+        <span>{positionLabel(data.position)}</span>
+        {data.enemy_laner && <span>against {data.enemy_laner.name}</span>}
+        {data.enemies.length > 0 && (
+          <span>
+            {data.enemies.length} enemy {data.enemies.length === 1 ? 'pick' : 'picks'} read
+          </span>
+        )}
+        {data.allies.length > 0 && (
+          <span>
+            {data.allies.length} {data.allies.length === 1 ? 'ally' : 'allies'} read
+          </span>
+        )}
+        <span>{data.personalised ? 'weighted by your mastery' : 'not personalised'}</span>
+      </div>
+
+      <ol className="mt-3">
+        {data.suggestions.map((s, i) => (
+          <SuggestionRow key={s.champion.id} suggestion={s} place={i + 1} />
+        ))}
+      </ol>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <Bans data={data} />
+        <HowScored data={data} />
+      </div>
+    </div>
+  )
+}
+
+function SuggestionRow({ suggestion: s, place }: { suggestion: DraftSuggestion; place: number }) {
+  const part = (kind: DraftEvidence['kind']) =>
+    s.evidence.filter((e) => e.kind === kind).reduce((sum, e) => sum + e.credible_lift, 0)
+  const parts = [
+    { label: 'Baseline', value: s.base_win_rate, absolute: true, title: `over ${s.games} games` },
+    { label: 'Lane', value: part('lane'), title: sampleTitle(s, 'lane') },
+    { label: 'Enemy team', value: part('enemy'), title: sampleTitle(s, 'enemy') },
+    { label: 'Allies', value: part('ally'), title: sampleTitle(s, 'ally') },
+    { label: 'Comfort', value: s.comfort_bonus, title: `${compact(s.mastery_points)} mastery points` },
+  ].filter((p) => p.absolute || Math.abs(p.value) >= 0.0005)
+  // The cap can bite when several records pull the same way, and then the parts
+  // do not add up to the total. Saying so beats letting the reader check.
+  const uncapped = part('lane') + part('enemy') + part('ally')
+  const capped = Math.abs(uncapped - s.context_lift) > 0.0005
+
+  return (
+    <li className="border-b border-line-soft px-1 py-2.5 transition-colors hover:bg-raised/30">
+      <div className="flex gap-3">
+        <span className="tnum w-5 shrink-0 pt-1 text-xs text-ink-faint">{place}</span>
+        {s.champion.icon_url && (
+          <img
+            src={s.champion.icon_url}
+            alt=""
+            className="size-10 shrink-0 rounded-sm"
+            loading="lazy"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <p className="font-display text-sm font-700 text-ink">{s.champion.name}</p>
+            <p
+              className="tnum text-sm font-600 text-gold-bright"
+              title="Baseline plus what the records support, plus comfort. What this list is ranked by."
+            >
+              {pct(s.score, 1)}
+            </p>
+            {Math.abs(s.adjusted_win_rate - s.score) > 0.001 && (
+              <p
+                className="tnum text-xs text-ink-faint"
+                title="Baseline plus everything those records claim, before their own uncertainty is taken off."
+              >
+                {pct(s.adjusted_win_rate, 1)} if the records hold
+              </p>
+            )}
+          </div>
+          <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
+            {s.reasons.map((r, j) => (
+              <li key={j}>{r}</li>
+            ))}
+          </ul>
+          <p className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px]">
+            {parts.map((p) => (
+              <span key={p.label} title={p.title} className="text-ink-faint">
+                {p.label}{' '}
+                <span
+                  className="tnum"
+                  style={{
+                    color: p.absolute
+                      ? 'var(--color-ink)'
+                      : p.value > 0
+                        ? 'var(--color-win)'
+                        : 'var(--color-loss)',
+                  }}
+                >
+                  {p.absolute
+                    ? pct(p.value, 1)
+                    : `${p.value > 0 ? '+' : ''}${(p.value * 100).toFixed(1)}`}
+                </span>
+              </span>
+            ))}
+            {capped && <span className="text-ink-faint">capped</span>}
+          </p>
+        </div>
+        <div className="shrink-0 text-right text-xs text-ink-faint">
+          <p className="tnum">{compact(s.games)} games</p>
+          {s.mastery_points > 0 && <p className="tnum">{compact(s.mastery_points)} pts</p>}
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function sampleTitle(s: DraftSuggestion, kind: DraftEvidence['kind']): string {
+  const rows = s.evidence.filter((e) => e.kind === kind)
+  if (rows.length === 0) return 'no records'
+  return rows
+    .map(
+      (e) =>
+        `${e.champion.name}: ${(e.win_rate * 100).toFixed(0)}% over ${e.games} games, ` +
+        `claims ${(e.lift * 100).toFixed(1)}, supports ${(e.credible_lift * 100).toFixed(1)}`,
+    )
+    .join(' | ')
+}
+
+function Bans({ data }: { data: DraftResponse }) {
+  if (data.ban_candidates.length === 0) return null
+  return (
+    <section>
+      <h2 className="display text-sm font-600 text-ink-dim">Worth banning</h2>
+      <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
+        {data.bans_read_the_draft
+          ? 'Strongest against the champions your team has locked in.'
+          : 'Nothing is locked in yet, so these are simply the patch’s strongest picks.'}
+      </p>
+      <ol className="mt-2">
+        {data.ban_candidates.map((c) => (
+          <li
+            key={c.champion.id}
+            className="flex items-center gap-2.5 border-b border-line-soft py-2"
+          >
+            {c.champion.icon_url && (
+              <img src={c.champion.icon_url} alt="" className="size-8 rounded-sm" loading="lazy" />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-sm font-600 text-ink">
+                {c.champion.name}
+                <span className="ml-1.5 text-[11px] text-ink-faint">
+                  {positionLabel(c.position)}
+                </span>
+              </p>
+              <p className="text-[11px] leading-snug text-ink-faint">{c.reasons.join('. ')}</p>
+            </div>
+            <span className="tnum shrink-0 text-sm font-600 text-loss">{pct(c.score, 1)}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+function HowScored({ data }: { data: DraftResponse }) {
+  const m = data.model
+  return (
+    <details className="rounded-sm border border-line bg-panel px-4 py-3 text-xs leading-relaxed text-ink-dim">
+      <summary className="cursor-pointer text-ink">How this is scored</summary>
+      <p className="mt-2">
+        Every champion starts at the win rate its own sample can defend in this role on
+        patch {data.patch}. Each record on the board, your lane, each enemy pick and each
+        ally, moves that number toward what it shows, by{' '}
+        <span className="tnum text-ink">games / (games + k)</span> of the distance: k is{' '}
+        <span className="tnum text-ink">{m.lane_shrinkage}</span> in lane,{' '}
+        <span className="tnum text-ink">{m.team_shrinkage}</span> for the enemy team and{' '}
+        <span className="tnum text-ink">{m.ally_shrinkage}</span> for allies.
+      </p>
+      <p className="mt-2">
+        Each record then gives up its own margin of error, so a 10-2 over twelve games
+        argues for a few points rather than nine, and a 55% over twenty argues for
+        nothing. The board as a whole cannot move a pick more than{' '}
+        <span className="tnum text-ink">{(m.context_lift_cap * 100).toFixed(0)} points</span>.
+      </p>
+      <p className="mt-2">
+        Mastery is a preference, not evidence: at the strongest setting a fully mastered
+        champion gains{' '}
+        <span className="tnum text-ink">
+          {(m.comfort_max_bonus * 100).toFixed(1)} points
+        </span>
+        , scaled by the weight you choose (now{' '}
+        <span className="tnum text-ink">{m.comfort_weight}</span>).
+      </p>
+    </details>
   )
 }

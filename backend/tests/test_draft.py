@@ -10,9 +10,16 @@ from __future__ import annotations
 import pytest
 
 from app.db.base import SessionLocal
-from app.db.models import ChampionStat, MatchupStat
+from app.db.models import ChampionStat, MatchupStat, SynergyStat
 from app.services.aggregate import ALL_BRACKETS
-from app.services.draft import MATCHUP_SHRINKAGE, DraftAdvisor, DraftContext
+from app.services.draft import (
+    CONTEXT_LIFT_CAP,
+    MATCHUP_SHRINKAGE,
+    MIN_TIMELINE_GAMES,
+    DraftAdvisor,
+    DraftContext,
+    credible_lift,
+)
 
 PATCH = "D1.00"
 POSITION = "BOTTOM"
@@ -34,17 +41,39 @@ async def seed_stat(champion_id, games, wins, *, patch=PATCH, bracket=ALL_BRACKE
 
 
 async def seed_matchup(champion_id, enemy_id, games, wins, *,
-                       patch=PATCH, bracket=ALL_BRACKETS, scope="LANE"):
+                       patch=PATCH, bracket=ALL_BRACKETS, scope="LANE",
+                       timeline_games=0, gold_diff=None):
     async with SessionLocal() as session:
         session.add(
             MatchupStat(
                 patch=patch, queue_id=420, rank_bracket=bracket, scope=scope,
                 team_position=POSITION, champion_id=champion_id,
                 enemy_champion_id=enemy_id, games=games, wins=wins,
-                timeline_games=0,
+                timeline_games=timeline_games, avg_gold_diff_14=gold_diff,
+                avg_laning_score=0.53 if timeline_games else None,
             )
         )
         await session.commit()
+
+
+async def seed_synergy(champion_id, ally_id, games, wins, *, patch=PATCH,
+                       ally_position="UTILITY"):
+    async with SessionLocal() as session:
+        session.add(
+            SynergyStat(
+                patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS,
+                team_position=POSITION, champion_id=champion_id,
+                ally_position=ally_position, ally_champion_id=ally_id,
+                games=games, wins=wins,
+            )
+        )
+        await session.commit()
+
+
+async def bans(**kw):
+    ctx = DraftContext(position=POSITION, patch=kw.pop("patch", PATCH), min_games=1, **kw)
+    async with SessionLocal() as session:
+        return await DraftAdvisor(session).ban_candidates(ctx)
 
 
 async def suggest(**kw):
@@ -153,3 +182,133 @@ async def test_an_adjusted_pick_still_shows_what_the_baseline_was():
     assert pick.reasons[0] == (
         f"{pick.base_win_rate * 100:.1f}% baseline over 200 games"
     )
+
+
+# ------------------------------------------------- what the evidence supports
+
+
+def test_a_record_gives_up_what_its_own_sample_cannot_support():
+    """The measured case: a 10-2 lane record claimed +11 points and now argues
+    about +5 of them, while a 55% over twenty games argues for nothing."""
+    claimed, supported = credible_lift(10 / 12, 0.4313, 12, MATCHUP_SHRINKAGE)
+    assert 0 < supported < claimed / 2
+
+    claimed, supported = credible_lift(0.55, 0.505, 20, MATCHUP_SHRINKAGE)
+    assert claimed > 0
+    assert supported == 0.0
+
+
+async def test_a_thin_lane_record_no_longer_outranks_a_bigger_baseline():
+    """Live on 2026-09-21 this list put Yone first on a 10-2 over twelve games,
+    ahead of champions with hundreds behind them."""
+    patch = "D11.00"
+    await seed_stat(570, 200, 100, patch=patch)   # even, with a hot lane record
+    await seed_matchup(570, 997, games=12, wins=10, patch=patch)
+    await seed_stat(571, 300, 165, patch=patch)   # 55% over three hundred games
+
+    picks = await suggest(patch=patch, enemy_laner=997)
+
+    assert [p.champion_id for p in picks] == [571, 570]
+    thin = next(p for p in picks if p.champion_id == 570)
+    lane = thin.evidence[0]
+    # It still argues for the pick, but for a fraction of what it claims.
+    assert 0 < thin.context_lift < (lane.win_rate - thin.base_win_rate) / 3
+    # The unrestrained reading is still there to show.
+    assert thin.adjusted_win_rate > thin.score
+
+
+async def test_the_lane_opponent_is_not_counted_twice():
+    patch = "D12.00"
+    await seed_stat(572, 200, 100, patch=patch)
+    await seed_matchup(572, 996, games=20, wins=15, patch=patch)
+    await seed_matchup(572, 996, games=60, wins=60, patch=patch, scope="TEAM")
+
+    pick = (await suggest(patch=patch, enemy_laner=996, enemies=[996]))[0]
+
+    assert [e.kind for e in pick.evidence] == ["lane"]
+
+
+async def test_the_enemy_team_and_the_allies_each_move_a_pick():
+    patch = "D13.00"
+    await seed_stat(573, 200, 100, patch=patch)
+    await seed_matchup(573, 995, games=50, wins=40, patch=patch, scope="TEAM")
+    await seed_synergy(573, 994, games=50, wins=40, patch=patch)
+
+    pick = (await suggest(patch=patch, enemies=[995], allies=[994]))[0]
+
+    kinds = {e.kind: e for e in pick.evidence}
+    assert set(kinds) == {"enemy", "ally"}
+    assert kinds["enemy"].games == 50 and kinds["enemy"].credible_lift > 0
+    assert kinds["ally"].games == 50 and kinds["ally"].credible_lift > 0
+    assert pick.score > pick.base_win_rate
+
+
+async def test_a_champion_we_hold_no_rows_for_moves_nothing():
+    patch = "D14.00"
+    await seed_stat(574, 200, 100, patch=patch)
+
+    pick = (await suggest(patch=patch, enemies=[888], allies=[889]))[0]
+
+    assert pick.evidence == []
+    assert pick.score == pytest.approx(pick.base_win_rate)
+
+
+async def test_the_board_cannot_stack_past_the_cap():
+    """Four lopsided records pulling the same way is still only a draft."""
+    patch = "D15.00"
+    await seed_stat(575, 200, 100, patch=patch)
+    enemies = [990, 991, 992, 993]
+    for enemy in enemies:
+        await seed_matchup(575, enemy, games=100, wins=90, patch=patch, scope="TEAM")
+
+    pick = (await suggest(patch=patch, enemies=enemies))[0]
+
+    assert sum(e.credible_lift for e in pick.evidence) > CONTEXT_LIFT_CAP
+    assert pick.context_lift == pytest.approx(CONTEXT_LIFT_CAP)
+
+
+async def test_a_lane_shows_its_gold_lead_only_once_enough_games_have_timelines():
+    patch = "D16.00"
+    await seed_stat(576, 200, 100, patch=patch)
+    await seed_matchup(576, 987, games=30, wins=18, patch=patch,
+                       timeline_games=MIN_TIMELINE_GAMES - 1, gold_diff=400.0)
+    await seed_stat(577, 200, 100, patch=patch)
+    await seed_matchup(577, 987, games=30, wins=18, patch=patch,
+                       timeline_games=MIN_TIMELINE_GAMES, gold_diff=400.0)
+
+    picks = {p.champion_id: p for p in await suggest(patch=patch, enemy_laner=987)}
+
+    assert picks[576].evidence[0].gold_diff_14 is None
+    assert picks[577].evidence[0].gold_diff_14 == 400.0
+    assert any("gold by 14" in r for r in picks[577].reasons)
+    assert not any("gold by 14" in r for r in picks[576].reasons)
+
+
+async def test_bans_are_ranked_by_what_beats_the_allies_already_picked():
+    patch = "D17.00"
+    await seed_stat(580, 100, 60, patch=patch)
+    await seed_stat(581, 100, 60, patch=patch)
+    # 581 has a record against the ally we locked in; 580 has none.
+    await seed_matchup(581, 979, games=60, wins=48, patch=patch, scope="TEAM")
+
+    with_ally = await bans(patch=patch, allies=[979])
+    assert [c.champion_id for c in with_ally] == [581, 580]
+    assert with_ally[0].score > with_ally[0].base_win_rate
+    assert any("against one of your picks" in r for r in with_ally[0].reasons)
+
+    # With nothing locked in there is no draft to read, so this is just the
+    # patch's strongest, and neither candidate is lifted.
+    blind = await bans(patch=patch)
+    assert all(c.score == pytest.approx(c.base_win_rate) for c in blind)
+
+
+async def test_the_champion_you_are_facing_is_not_offered_as_a_pick():
+    """Seen locally on 2026-09-21: asking for mid into Ahri suggested Ahri."""
+    patch = "D18.00"
+    await seed_stat(585, 200, 110, patch=patch)   # the enemy laner
+    await seed_stat(586, 200, 100, patch=patch)
+
+    picks = await suggest(patch=patch, enemy_laner=585)
+
+    assert [p.champion_id for p in picks] == [586]
+    assert [c.champion_id for c in await bans(patch=patch, enemy_laner=585)] == [586]

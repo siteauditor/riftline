@@ -1,10 +1,11 @@
-import { useEffect, useId, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import RankBadge from './RankBadge'
 import { api, PLATFORMS } from '../lib/api'
 import { parseRiotId } from '../lib/format'
+import { useDebounced } from '../lib/useDebounced'
 import {
   foldRiotName,
   lastRegion,
@@ -36,15 +37,6 @@ interface Option {
 // so a whole name costs one request rather than one per letter.
 const MIN_CHARS = 2
 const DEBOUNCE_MS = 150
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), ms)
-    return () => clearTimeout(timer)
-  }, [value, ms])
-  return settled
-}
 
 /** The name half of what was typed, folded the way the server folds it. */
 function typedName(text: string): string {
