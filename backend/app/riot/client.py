@@ -19,6 +19,7 @@ import logging
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -31,7 +32,7 @@ from app.riot.errors import (
     RiotUnauthorized,
     RiotUnavailable,
 )
-from app.riot.limiter import RateLimiter
+from app.riot.limiter import RateLimiter, WaitTooLong
 from app.riot.routing import (
     Platform,
     Regional,
@@ -107,14 +108,31 @@ class RiotClient:
         ``allow_404`` returns ``None`` instead of raising, for the endpoints
         where "absent" is a normal answer (no live game, unranked player).
         """
-        path = template.format(**(path_params or {}))
+        # Every segment quoted, `/` included. A Riot ID is user input, and
+        # left raw a searched "abc?x#EUW" became a query string and a lookup
+        # of "abc" instead of the 404 the player is owed.
+        path = template.format(
+            **{k: quote(str(v), safe="") for k, v in (path_params or {}).items()}
+        )
         url = f"{host}{path}"
         # Limits are per-region as well as per-method, so the host is part of the key.
         method_key = f"{host.split('//')[-1].split('.')[0]}:{template}"
 
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
-            await self.limiter.acquire(method_key)
+            try:
+                await self.limiter.acquire(method_key)
+            except WaitTooLong as exc:
+                # The caller has a deadline and the key has no slot before it.
+                # Said as a rate limit, which it is, so the page shows its
+                # countdown instead of a request hanging past the edge timeout.
+                raise RiotRateLimited(
+                    "Riot's rate limit is busy; try again shortly.",
+                    retry_after=exc.retry_after,
+                    scope="local",
+                    status=429,
+                    url=url,
+                ) from None
             try:
                 response = await self._http.get(url, params=dict(params or {}))
             except httpx.TimeoutException as exc:

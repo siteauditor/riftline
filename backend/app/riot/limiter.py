@@ -22,10 +22,29 @@ import asyncio
 import time
 from collections import deque
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 # Application limits for a Riot development key.
 DEV_KEY_LIMITS: list[tuple[int, float]] = [(20, 1.0), (100, 120.0)]
+
+# The moment, on the monotonic clock, after which the current caller would
+# rather be told "not now" than keep waiting for a slot. Unset, a caller waits
+# as long as the key needs, which is right for the ingest CLI. A web request
+# sets it (see `RiotWaitBudget` in app/main.py), because the visitor is behind
+# Cloudflare, which abandons an origin after 100 seconds: measured on
+# 2026-09-22, a leaderboard page waited 102 to 108 seconds for the limiter
+# while the key's two-minute budget refilled, which in production is a 524
+# instead of a page.
+wait_deadline: ContextVar[float | None] = ContextVar("riot_wait_deadline", default=None)
+
+
+class WaitTooLong(Exception):
+    """A slot would free only after the caller's deadline. Nothing was reserved."""
+
+    def __init__(self, retry_after: float) -> None:
+        super().__init__(f"next slot in {retry_after:.1f}s, past the caller's deadline")
+        self.retry_after = retry_after
 
 
 def parse_limit_header(value: str | None) -> list[tuple[int, float]]:
@@ -140,7 +159,13 @@ class RateLimiter:
         return wait
 
     async def acquire(self, method_key: str) -> None:
-        """Block until a request to ``method_key`` may be sent, then reserve a slot."""
+        """Block until a request to ``method_key`` may be sent, then reserve a slot.
+
+        Raises :class:`WaitTooLong` instead of sleeping when the slot would
+        free after the caller's ``wait_deadline``. Checked on every pass, so a
+        wait that starts inside the deadline and is then lengthened by a 429
+        penalty gives up rather than overrunning it.
+        """
         while True:
             async with self._lock:
                 now = time.monotonic()
@@ -149,6 +174,9 @@ class RateLimiter:
                     for window in self._windows_for(method_key):
                         window.record(now)
                     return
+            deadline = wait_deadline.get()
+            if deadline is not None and now + wait > deadline:
+                raise WaitTooLong(wait)
             # Cap the nap so a long penalty still re-checks periodically, and so
             # a window that frees early is noticed promptly.
             await asyncio.sleep(min(wait, 5.0))

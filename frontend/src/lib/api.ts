@@ -1166,9 +1166,27 @@ export class ApiError extends Error {
     else if (extra.hint === 'expired_api_key') this.kind = 'expired_key'
     else if (status === 410) this.kind = 'gone'
     else if (extra.hint === 'endpoint_unavailable') this.kind = 'unavailable'
-    else if (status === 502 || status === 503) this.kind = 'upstream'
+    // 504 from nginx and 524 from Cloudflare are a slow origin, not a bug in
+    // the page: the same honest "try again" as a Riot outage.
+    else if ([502, 503, 504, 524].includes(status)) this.kind = 'upstream'
     else this.kind = 'unknown'
   }
+}
+
+/**
+ * The server's own words for a failure. Usually a string, but a request
+ * FastAPI rejects as malformed (422) carries a list of field errors, which
+ * printed as "[object Object]" when handed to `Error` as it was.
+ */
+function errorDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((d) => (d && typeof d === 'object' && 'msg' in d ? String(d.msg) : null))
+      .filter(Boolean)
+    return messages.length ? messages.join('; ') : null
+  }
+  return null
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -1178,10 +1196,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     let extra: Record<string, unknown> = {}
     try {
       const body = await response.json()
-      if (body?.detail) detail = body.detail
+      detail = errorDetail(body?.detail) ?? detail
       extra = body ?? {}
     } catch {
-      // Non-JSON error body; the status alone will have to do.
+      // Non-JSON error body (an edge timeout page, say); the status alone
+      // will have to do.
     }
     throw new ApiError(response.status, detail, extra)
   }

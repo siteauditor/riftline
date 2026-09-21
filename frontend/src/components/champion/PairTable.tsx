@@ -39,7 +39,10 @@ export default function PairTable({ title, hint, rows, showPosition, showGold }:
   }
 
   return (
-    <section>
+    // `min-w-0`: this sits in a grid on the Counters tab, and a grid item's
+    // automatic minimum is its content's, so the table's 380px floor widened
+    // the page on a phone instead of scrolling inside the wrapper below.
+    <section className="min-w-0">
       <div className="mb-2">
         <h3 className="display text-base font-600 text-ink">{title}</h3>
         {hint && <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">{hint}</p>}

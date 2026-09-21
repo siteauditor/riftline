@@ -294,3 +294,83 @@ async def test_concurrent_callers_share_one_budget():
         elapsed = time.monotonic() - start
     # 10 requests through a 5-per-0.5s window needs at least one window rollover.
     assert elapsed >= 0.45
+
+
+# ----------------------------------------------------------- waiting budget
+
+
+async def test_a_caller_with_a_deadline_is_told_rather_than_kept_waiting():
+    """Measured on 2026-09-22: with the key's budget spent, a leaderboard page
+    waited 102 to 108 seconds on this limiter, and Cloudflare abandons an
+    origin at 100. A web request now carries a deadline and gets an answer."""
+    from app.riot.limiter import WaitTooLong, wait_deadline
+
+    limiter = RateLimiter(app_limits=[(1000, 60.0)])
+    await limiter.penalize("application", 30.0)
+    token = wait_deadline.set(time.monotonic() + 1.0)
+    try:
+        start = time.monotonic()
+        with pytest.raises(WaitTooLong) as exc:
+            await limiter.acquire("m")
+        assert time.monotonic() - start < 0.2, "it must not sleep first and fail later"
+        assert exc.value.retry_after == pytest.approx(30.0, abs=0.5)
+    finally:
+        wait_deadline.reset(token)
+
+
+async def test_a_wait_that_fits_the_deadline_still_waits():
+    from app.riot.limiter import wait_deadline
+
+    limiter = RateLimiter(app_limits=[(1000, 60.0)])
+    await limiter.penalize("application", 0.2)
+    token = wait_deadline.set(time.monotonic() + 5.0)
+    try:
+        start = time.monotonic()
+        await limiter.acquire("m")
+        assert time.monotonic() - start >= 0.15
+    finally:
+        wait_deadline.reset(token)
+
+
+async def test_without_a_deadline_the_limiter_waits_for_the_key():
+    """The ingest CLI sets no deadline, and must keep waiting as it always has."""
+    limiter = RateLimiter(app_limits=[(1000, 60.0)])
+    await limiter.penalize("application", 0.3)
+    start = time.monotonic()
+    await limiter.acquire("m")
+    assert time.monotonic() - start >= 0.25
+
+
+@respx.mock
+async def test_a_missed_deadline_reaches_the_caller_as_a_rate_limit_and_sends_nothing():
+    from app.riot.limiter import wait_deadline
+
+    route = respx.get(url__regex=r".*").mock(return_value=httpx.Response(200, json={}))
+    async with _client() as c:
+        await c.limiter.penalize("application", 45.0)
+        token = wait_deadline.set(time.monotonic() + 2.0)
+        try:
+            with pytest.raises(RiotRateLimited) as exc:
+                await c.summoner_by_puuid("P1", "euw1")
+        finally:
+            wait_deadline.reset(token)
+    assert exc.value.scope == "local"
+    assert exc.value.retry_after == pytest.approx(45.0, abs=0.5)
+    assert route.call_count == 0, "nothing is sent when the answer is 'not now'"
+
+
+@respx.mock
+async def test_a_riot_id_is_quoted_segment_by_segment():
+    """A searched name is user input. Unquoted, "abc?x" became a query string
+    and the lookup asked Riot for the account "abc"."""
+    route = respx.get(url__regex=r".*by-riot-id/.*").mock(
+        return_value=httpx.Response(200, json={"puuid": "P1"})
+    )
+    async with _client() as c:
+        await c.account_by_riot_id("abc?x", "EUW", Regional.EUROPE)
+        await c.account_by_riot_id("Some Name", "EUW", Regional.EUROPE)
+        await c.account_by_riot_id("a/b", "EUW", Regional.EUROPE)
+    paths = [call.request.url.raw_path.decode() for call in route.calls]
+    assert paths[0].endswith("/by-riot-id/abc%3Fx/EUW")
+    assert paths[1].endswith("/by-riot-id/Some%20Name/EUW")
+    assert paths[2].endswith("/by-riot-id/a%2Fb/EUW")

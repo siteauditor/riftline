@@ -56,7 +56,10 @@ export default function RunePanel({ runes }: { runes: ChampionDetail['runes'] })
 function RuneRow({ entry }: { entry: FacetEntry }) {
   return (
     <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
-      <div className="flex shrink-0 flex-wrap gap-1">
+      {/* Allowed to shrink so it can wrap. A full page is eleven icons, 352px
+          on one line, and pinned at that width it pushed the figures 71px off
+          a 390px screen. */}
+      <div className="flex min-w-0 flex-1 flex-wrap gap-1">
         {entry.runes.map((rune, i) => (
           <span
             key={`${rune.id}-${i}`}

@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -34,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import IngestCursor, LadderEntry, Player, utcnow
 from app.riot.client import RiotClient
 from app.riot.errors import RiotApiError
+from app.riot.limiter import wait_deadline
 from app.riot.routing import Platform, resolve_platform
 from app.services.players import normalize_riot_name
 from app.services.ranks import RankCache, is_fresh
@@ -75,6 +77,14 @@ class LadderPosition:
 # block for four minutes on a development key.
 NAME_BUDGET_PER_REQUEST = 25
 NAME_CONCURRENCY = 4
+# And how long it may spend doing so. The count alone was not a bound on time:
+# with the key's two-minute budget spent, 25 names waited on the limiter for
+# 102 to 108 seconds (measured 2026-09-22). A name is a nicety; whatever lands
+# in time is kept, so the next view of the page starts better named.
+NAME_BUDGET_SECONDS = 4.0
+# How long refreshing a stale slice may wait for the limiter when a snapshot is
+# already held and could be served instead.
+REFRESH_WAIT_SECONDS = 5.0
 
 
 @dataclass(slots=True)
@@ -429,6 +439,20 @@ class LadderService:
                     resolved.id, queue_type, tier, division
                 )
                 if not is_fresh(age, self.ttl_for(tier)):
+                    # Holding a snapshot, a refresh may barely wait for the
+                    # limiter: a ladder a few minutes old beats a page that
+                    # hangs for the key. With nothing held there is no
+                    # alternative, and the request's own deadline applies.
+                    token = (
+                        wait_deadline.set(
+                            min(
+                                wait_deadline.get() or float("inf"),
+                                time.monotonic() + REFRESH_WAIT_SECONDS,
+                            )
+                        )
+                        if age is not None
+                        else None
+                    )
                     try:
                         await self.refresh(
                             resolved, queue_id=queue_id, tier=tier, division=division
@@ -442,6 +466,9 @@ class LadderService:
                         if age is None:
                             raise
                         log.warning("ladder refresh failed, serving stale: %s", exc)
+                    finally:
+                        if token is not None:
+                            wait_deadline.reset(token)
 
         base = select(LadderEntry).where(
             LadderEntry.platform == resolved.id,
@@ -562,7 +589,14 @@ class LadderService:
                 if name:
                     found[puuid] = (name, tag)
 
-        await asyncio.gather(*(one(p) for p in puuids))
+        try:
+            async with asyncio.timeout(NAME_BUDGET_SECONDS):
+                await asyncio.gather(*(one(p) for p in puuids))
+        except TimeoutError:
+            log.info(
+                "ladder name budget of %.0fs expired with %d of %d named",
+                NAME_BUDGET_SECONDS, len(found), len(puuids),
+            )
         if not found:
             return found
 

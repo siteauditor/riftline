@@ -17,6 +17,7 @@ from app.db.models import ChampionStat, Match
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
+    TIER_MIN_GAMES,
     available_brackets,
     available_slices,
     lobby_rank_mix,
@@ -151,7 +152,9 @@ async def get_champion_meta(
         ALL_BRACKETS,
         description="Crawl provenance, e.g. CHALLENGER. Not a measured lobby rank.",
     ),
-    min_games: int = Query(20, ge=1, description="Drop champions below this sample size."),
+    min_games: int = Query(
+        TIER_MIN_GAMES, ge=1, description="Drop champions below this sample size."
+    ),
 ) -> MetaResponse:
     if position:
         position = position.upper()

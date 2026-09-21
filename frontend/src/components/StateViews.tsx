@@ -172,6 +172,10 @@ export function ErrorView({
     // to regenerate it would send them after the wrong problem.
     title = 'Not available'
     body = api.message
+  } else if (api?.kind === 'upstream' && (api.status === 504 || api.status === 524)) {
+    // A gateway gave up waiting for us. Blaming Riot here would be a guess.
+    title = 'That took too long'
+    body = 'The server did not answer in time. Try again in a moment.'
   } else if (api?.kind === 'upstream') {
     title = "Riot's API isn't responding"
     body = "This is on Riot's side. It usually clears within a few minutes."

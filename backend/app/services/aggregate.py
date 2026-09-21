@@ -95,6 +95,13 @@ def wilson_upper_bound(wins: int, games: int, z: float = WILSON_Z) -> float:
 # the champions in it: with one row, that row is automatically "the top 10%".
 MIN_ROWS_FOR_TIERS = 10
 
+# The sample a champion needs in a role to be banded at all, and so the field a
+# letter is relative to. One number for every page that shows a letter: the
+# champion page used its own facet floor of 5, the tier list 20, and measured on
+# 2026-09-22 that gave 82 of 174 tier list rows a different letter on the page
+# one click away (Thresh A on the list, S on his own page).
+TIER_MIN_GAMES = 20
+
 # Percentile bands, not fixed win-rate thresholds. Win rates cluster tightly
 # around 50% by design, so "above 52%" means different things on different
 # patches, whereas "top 10% of this patch" always means the same.

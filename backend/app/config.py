@@ -25,6 +25,12 @@ class Settings(BaseSettings):
 
     riot_timeout_seconds: float = Field(default=10.0, alias="RIOT_TIMEOUT_SECONDS")
     riot_max_retries: int = Field(default=3, alias="RIOT_MAX_RETRIES")
+    # How long one web request may spend waiting on the rate limiter, counted
+    # from when it arrived. Past that it answers 429 with a Retry-After rather
+    # than waiting on. Cloudflare abandons an origin at 100 seconds, and a
+    # request also spends time on the calls themselves, so this sits well
+    # inside that. The ingest CLI has no such limit and waits for the key.
+    riot_wait_budget_seconds: float = Field(default=40.0, alias="RIOT_WAIT_BUDGET_SECONDS")
 
     # --- Storage ------------------------------------------------------------
     # SQLite by default so the project runs with no external services. The

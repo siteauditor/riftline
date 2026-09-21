@@ -38,6 +38,7 @@ from app.db.models import (
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
+    TIER_MIN_GAMES,
     available_slices,
     tier_for,
     wilson_lower_bound,
@@ -551,14 +552,17 @@ async def get_champion(
     position = stat.team_position
 
     # Tier is this champion's standing among everyone in the same role, so it
-    # has to be computed against the field rather than in isolation.
+    # has to be computed against the field rather than in isolation. The field
+    # is the tier list's, not this page's `min_games`, which filters builds and
+    # matchups: ranked against a looser field the same champion carried a
+    # different letter here than one click away on the tier list.
     peers = list(
         (
             await db.execute(
                 select(ChampionStat.champion_id, ChampionStat.wins, ChampionStat.games).where(
                     *slice_where,
                     ChampionStat.team_position == position,
-                    ChampionStat.games >= min_games,
+                    ChampionStat.games >= TIER_MIN_GAMES,
                 )
             )
         ).all()

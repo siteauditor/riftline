@@ -505,3 +505,48 @@ async def test_a_board_of_two_is_withheld(client):
     body = (await client.get(f"/api/champions/{THIN_BOARD}/players")).json()
     assert body["qualified"] == 2
     assert body["players"] == []
+
+
+# ------------------------------------------------------------- tier letters
+
+
+async def test_a_champion_carries_the_same_letter_as_on_the_tier_list(client):
+    """Measured on 2026-09-22: the champion page ranked against its own facet
+    floor of 5 games, the tier list against 20, and 82 of 174 rows showed a
+    different letter one click apart."""
+    from app.db.models import ChampionStat
+    from app.services.aggregate import TIER_MIN_GAMES
+
+    patch, queue = "T7.77", 4777
+    # Twelve champions over the floor, spread from strong to weak, and three
+    # under it that the looser field used to rank above some of them.
+    field = [(9400 + i, 200 - i * 10, 0.62 - i * 0.02) for i in range(12)]
+    thin = [(9450 + i, 8, 0.75) for i in range(3)]
+    async with SessionLocal() as session:
+        for champion_id, games, rate in field + thin:
+            session.add(
+                ChampionStat(
+                    patch=patch, queue_id=queue, rank_bracket=ALL_BRACKETS,
+                    champion_id=champion_id, team_position="MIDDLE",
+                    games=games, wins=round(games * rate), pool_games=1000, bans=0,
+                    avg_kills=5, avg_deaths=5, avg_assists=5, avg_cs_per_min=7,
+                    avg_gold=11000, avg_damage=20000, avg_vision=20, timeline_games=0,
+                )
+            )
+        await session.commit()
+
+    meta = (
+        await client.get(f"/api/meta/champions?patch={patch}&queue_id={queue}&position=MIDDLE")
+    ).json()
+    listed = {r["champion"]["id"]: r["tier"] for r in meta["rows"]}
+    assert len(listed) == len(field), "the list shows the champions over its floor"
+
+    for champion_id, _, _ in field + thin:
+        page = (
+            await client.get(
+                f"/api/champions/{champion_id}?patch={patch}&queue_id={queue}"
+                "&position=MIDDLE&min_games=5"
+            )
+        ).json()
+        assert page["overview"]["tier"] == listed.get(champion_id), champion_id
+    assert meta["min_games"] == TIER_MIN_GAMES

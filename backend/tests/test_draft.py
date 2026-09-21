@@ -7,7 +7,9 @@ to contain.
 
 from __future__ import annotations
 
+import httpx
 import pytest
+import respx
 
 from app.db.base import SessionLocal
 from app.db.models import ChampionStat, MatchupStat, SynergyStat
@@ -312,3 +314,55 @@ async def test_the_champion_you_are_facing_is_not_offered_as_a_pick():
 
     assert [p.champion_id for p in picks] == [586]
     assert [c.champion_id for c in await bans(patch=patch, enemy_laner=585)] == [586]
+
+
+# ------------------------------------------------------------ personalisation
+
+
+@respx.mock
+async def test_personalisation_reads_mastery_on_the_shard_the_account_is_on(client):
+    """champion-mastery-v4 answers 200 with an empty list on the wrong shard.
+    The draft asked the shard in the request, so an OCE Riot ID whose account
+    lives on SG2 was reported as personalised with no mastery behind it."""
+    patch = "D9.00"
+    await seed_stat(701, 100, 55, patch=patch)
+    await seed_stat(702, 100, 55, patch=patch)
+    puuid = "draft-oce-sg2".ljust(78, "0")
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": puuid, "gameName": "Drafter", "tagLine": "OCE"}
+        )
+    )
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=["SG2_7400000001"])
+    )
+    wrong_shard = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    right_shard = respx.get(
+        url__regex=r".*sg2\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"championId": 702, "championLevel": 30, "championPoints": 400_000}],
+        )
+    )
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json={
+            "position": POSITION, "patch": patch, "min_games": 1,
+            "platform": "oc1", "game_name": "Drafter", "tag_line": "OCE",
+        },
+    )
+
+    assert response.status_code == 200, response.text[:300]
+    assert right_shard.called
+    assert not wrong_shard.called
+    body = response.json()
+    assert body["personalised"] is True
+    by_id = {s["champion"]["id"]: s for s in body["suggestions"]}
+    assert by_id[702]["mastery_points"] == 400_000, "the mastery behind the word"

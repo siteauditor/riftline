@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -32,7 +33,7 @@ from app.riot.errors import (
     RiotUnauthorized,
     RiotUnavailable,
 )
-from app.riot.limiter import RateLimiter
+from app.riot.limiter import RateLimiter, wait_deadline
 from app.riot.routing import UnknownPlatform
 from app.services.players import PlayerNotFound
 from app.services.static_data import static_data
@@ -43,6 +44,30 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("app")
+
+
+class RiotWaitBudget:
+    """Give every HTTP request a deadline for waiting on the Riot rate limiter.
+
+    Plain ASGI rather than ``@app.middleware``: the deadline lives in a context
+    variable, and this sets it in the very task that runs the route, with
+    nothing between them that could run the app somewhere else. The ingest CLI
+    never passes through here, so it keeps waiting as long as the key needs.
+    """
+
+    def __init__(self, app, seconds: float) -> None:
+        self.app = app
+        self.seconds = seconds
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        token = wait_deadline.set(time.monotonic() + self.seconds)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            wait_deadline.reset(token)
 
 
 @asynccontextmanager
@@ -91,6 +116,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RiotWaitBudget, seconds=settings.riot_wait_budget_seconds)
 
     # --- error translation -------------------------------------------------
     # Riot's failure modes are turned into honest HTTP status codes here, once,

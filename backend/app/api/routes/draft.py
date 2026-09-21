@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import DbDep, PlayerServiceDep, StaticDep
 from app.api.schemas import ChampionRef
 from app.riot.errors import RiotApiError
-from app.riot.routing import UnknownPlatform
+from app.riot.routing import UnknownPlatform, resolve_platform
 from app.services.aggregate import ALL_BRACKETS, available_slices
 from app.services.draft import (
     ALLY_SHRINKAGE,
@@ -149,7 +149,14 @@ async def suggest(
     if body.platform and body.game_name and body.tag_line:
         try:
             player = await players.resolve(body.platform, body.game_name, body.tag_line)
-            await players.masteries(player, body.platform)
+            # The home shard, as the mastery page reads it. champion-mastery-v4
+            # answers 200 with an empty list on any other, so an OCE Riot ID
+            # whose account is on SG2 came back "personalised" with no mastery
+            # behind it, and stamped that empty answer as fresh.
+            home = await players.effective_platform(
+                player, resolve_platform(body.platform)
+            )
+            await players.masteries(player, home.id)
             puuid = player.puuid
         except (PlayerNotFound, UnknownPlatform, RiotApiError):
             # Personalisation is a bonus. A bad Riot ID, an expired key or a

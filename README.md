@@ -62,6 +62,16 @@ to 0.83 requests per second sustained.
 Nothing in the code changes when you get a production key. Set `APP_RATE_LIMITS` in
 `.env` to whatever Riot grants you and the limiter adapts.
 
+**A web request never waits on the limiter for long.** The limiter is shared,
+and when the two-minute window is spent (by traffic, or by the nightly ingest,
+which runs on the same key) a request that needs a slot used to sit until one
+freed: a leaderboard page was measured waiting 102 to 108 seconds, and
+Cloudflare abandons an origin at 100. Each web request now has a waiting budget
+(`RIOT_WAIT_BUDGET_SECONDS`, 40 by default). A call that could only go out past
+it answers 429 with a `Retry-After` at once, which the page shows as a
+countdown, while a ladder serves the snapshot it holds and the names it already
+knows. The ingest CLI has no budget and still waits for the key.
+
 ### Spectator-V5
 
 Riot announced in **October 2025** that Spectator-V5 is being deactivated, to stop

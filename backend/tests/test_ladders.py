@@ -350,3 +350,56 @@ async def test_a_player_returned_on_two_pages_is_stored_once():
             )
         )).scalars())
     assert len({r.puuid for r in rows}) == len(rows) == 2
+
+
+# ------------------------------------------------------------ time budgets
+
+
+@respx.mock
+async def test_naming_stops_at_its_time_budget_and_keeps_what_landed(monkeypatch):
+    """The count bound alone did not bound time: with the key's budget spent,
+    25 names waited on the limiter for over 100 seconds (2026-09-22)."""
+    import asyncio
+    import time
+
+    monkeypatch.setattr("app.services.ladders.NAME_BUDGET_SECONDS", 0.5)
+    fast = [f"LAD-fast{i}".ljust(78, "q") for i in range(3)]
+    slow = [f"LAD-slow{i}".ljust(78, "q") for i in range(5)]
+    mock_apex([apex_entry(p, 900 - i) for i, p in enumerate(fast + slow)])
+
+    async def account(request):
+        if "LAD-slow" in str(request.url):
+            await asyncio.sleep(10)
+        return httpx.Response(200, json={"gameName": "Quick", "tagLine": "Q1"})
+
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-puuid/.*").mock(side_effect=account)
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+        start = time.monotonic()
+        page = await service(session).page(PLATFORM, tier="CHALLENGER")
+        elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0, f"a ladder page waited {elapsed:.1f}s for names"
+    assert page.named_on_page == len(fast)
+    assert len(page.rows) == len(fast) + len(slow)
+
+
+@respx.mock
+async def test_a_busy_key_serves_the_ladder_we_hold_instead_of_waiting():
+    import time
+
+    puuid = "LAD-held".ljust(78, "q")
+    mock_apex([apex_entry(puuid, 950)])
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+
+        busy = service(session)
+        # A minute until the next slot: the refresh this stale slice wants
+        # would otherwise sit out the whole of it.
+        await busy.client.limiter.penalize("application", 60.0)
+        start = time.monotonic()
+        page = await busy.page(PLATFORM, tier="CHALLENGER", resolve_names=False)
+        elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0, f"waited {elapsed:.1f}s for a refresh it could skip"
+    assert [r.puuid for r in page.rows][:1] == [puuid]
