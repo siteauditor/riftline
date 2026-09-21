@@ -68,6 +68,7 @@ ADDITIVE: dict[str, list[tuple[str, str]]] = {
         # SQLite stores JSON as TEXT; SQLAlchemy's JSON type handles the coding.
         ("skill_order", "TEXT"),
         ("build_order", "TEXT"),
+        ("build_times", "TEXT"),
         # Lifted out of `matches.raw` by `scripts.ingest score`.
         ("time_dead", "INTEGER"),
         ("turret_takedowns", "INTEGER"),

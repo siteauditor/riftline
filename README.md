@@ -435,6 +435,49 @@ skin counts appear on a champion at 20 sightings, and the home page's "Most
 worn skins" appears once 3 skins have 5 sightings each. Until then both say
 nothing, which is the honest state of a table that started empty.
 
+## The item guide
+
+`/items` lists everything sold on Summoner's Rift in sections (finished items,
+boots, starters, support items, components, consumables, trinkets), and
+`/items/{id}` is a page per item: what it gives, what it is built from and
+into, when it is bought, who buys it, and how it does. Every item icon on the
+site links to its page. `GET /api/items` and `GET /api/items/{id}` serve it and
+make no Riot calls.
+
+What an item **is** comes from Riot's item file, with three corrections:
+
+- **Other modes' copies are left out.** Riot marks copies from other modes
+  (ids 322065 and up) as Summoner's Rift items: 33 of the 138 "finished items"
+  the build rules found never appear in a ranked game. Every real one has an id
+  under 10,000.
+- **Stats are read from the description**, because the file's `stats` object
+  understates 98 of 138 finished items: it has no ability haste, no lethality
+  and no crit damage. Passives and actives are the description's named blocks,
+  with Riot's markup stripped server side; a heading is a tag that opens a
+  line, because Riot also wraps keywords such as "Glory" mid-sentence.
+- **Grown items count as the item that was bought.** Seraph's Embrace,
+  Muramana and Fimbulwinter cannot be bought, so the build rules filed them as
+  "other" and the champion Build tab dropped them: Muramana from 204 of 241
+  Ezreal games. `ItemTaxonomy.canonical` follows Riot's own `specialRecipe` link
+  back to the bought item, so builds, the guide and every count use it.
+
+How an item is **used** is measured nightly by `aggregate` into `item_stats` and
+`item_champion_stats`, on three separate bases: held at the end of a game
+(final inventories), bought (first purchase in a timeline's purchase order,
+with its minute), and, for finished items, **against the same slot**. That last
+one exists because a raw item win rate mostly measures how late an item is
+bought: win rate rises from 28% for players who finished no items to 62% for
+six. So every purchase of an item as a player's k-th finished item is scored
+against the same champion's k-th items in the slice, and the figure is the
+average of (won minus that baseline). Zhonya's Hourglass, 55% raw, is within
+two points of zero against its slot. Figures are withheld below 30 purchases in
+a slot and 20 on one champion.
+
+Purchase times need `build_times`, a column beside `build_order` written with
+every timeline and filled for older ones by `scripts.ingest buytimes`, which
+reads the raw timelines already on disk. The nightly job runs it before
+`aggregate`.
+
 ## Play style
 
 `/api/summoner/{platform}/{name}/{tag}/analytics` returns role share, champion

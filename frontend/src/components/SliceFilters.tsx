@@ -27,6 +27,10 @@ interface Props {
    * list says how its games were really ranked instead.
    */
   hideBracket?: boolean
+  /** Leave out the role row, for a page that is not about one role (an item). */
+  hideRoles?: boolean
+  /** Leave out "Min games", for a page whose floors are its own. */
+  hideMinGames?: boolean
 }
 
 const QUEUES = [
@@ -49,6 +53,8 @@ export default function SliceFilters({
   allowAllPositions = false,
   summary,
   hideBracket = false,
+  hideRoles = false,
+  hideMinGames = false,
 }: Props) {
   const { data: corpus } = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
 
@@ -59,31 +65,33 @@ export default function SliceFilters({
 
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-line-soft pb-3 text-sm">
-      <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
-        <span className="mr-1 text-xs text-ink-faint">Role</span>
-        {allowAllPositions && (
-          <Chip
-            active={value.position === null}
-            onClick={() => onChange({ position: null })}
-          >
-            <PositionIcon position="ALL" className="size-4" />
-            All
-          </Chip>
-        )}
-        {roles.map((role) => (
-          <Chip
-            key={role.id}
-            active={value.position === role.id}
-            onClick={() => onChange({ position: role.id })}
-          >
-            <PositionIcon position={role.id} className="size-4" />
-            {role.label}
-            {role.hint && (
-              <span className="tnum ml-0.5 text-xs text-ink-faint">{role.hint}</span>
-            )}
-          </Chip>
-        ))}
-      </div>
+      {!hideRoles && (
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+          <span className="mr-1 text-xs text-ink-faint">Role</span>
+          {allowAllPositions && (
+            <Chip
+              active={value.position === null}
+              onClick={() => onChange({ position: null })}
+            >
+              <PositionIcon position="ALL" className="size-4" />
+              All
+            </Chip>
+          )}
+          {roles.map((role) => (
+            <Chip
+              key={role.id}
+              active={value.position === role.id}
+              onClick={() => onChange({ position: role.id })}
+            >
+              <PositionIcon position={role.id} className="size-4" />
+              {role.label}
+              {role.hint && (
+                <span className="tnum ml-0.5 text-xs text-ink-faint">{role.hint}</span>
+              )}
+            </Chip>
+          ))}
+        </div>
+      )}
 
       {patches.length > 1 && (
         <Select
@@ -114,16 +122,18 @@ export default function SliceFilters({
         />
       )}
 
-      <label className="flex items-center gap-2 text-ink-dim">
-        <span className="text-xs text-ink-faint">Min games</span>
-        <input
-          type="number"
-          min={1}
-          value={value.minGames}
-          onChange={(e) => onChange({ minGames: Math.max(1, Number(e.target.value) || 1) })}
-          className="control tnum w-16"
-        />
-      </label>
+      {!hideMinGames && (
+        <label className="flex items-center gap-2 text-ink-dim">
+          <span className="text-xs text-ink-faint">Min games</span>
+          <input
+            type="number"
+            min={1}
+            value={value.minGames}
+            onChange={(e) => onChange({ minGames: Math.max(1, Number(e.target.value) || 1) })}
+            className="control tnum w-16"
+          />
+        </label>
+      )}
 
       {summary && <span className="ml-auto text-xs text-ink-faint">{summary}</span>}
     </div>

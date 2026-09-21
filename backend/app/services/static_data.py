@@ -27,6 +27,7 @@ from typing import Any
 import httpx
 
 from app.db.base import PROJECT_ROOT
+from app.services.item_taxonomy import SUMMONERS_RIFT
 
 log = logging.getLogger(__name__)
 
@@ -71,6 +72,31 @@ GLOBAL_RANGE = 25_000
 # The roster size below which "zero on every champion" proves nothing.
 MIN_ROSTER_FOR_GROWTH_CHECK = 20
 
+# Riot's item file carries other modes' copies of Summoner's Rift items under
+# ids from 220000 up (Arena's Archangel's Staff is 323003), and marks many of
+# them as Summoner's Rift items: by the build rules, 33 of 138 "finished items"
+# never appear in a ranked game we hold (measured 2026-09-22). Every item a
+# ranked game uses is below this.
+MODE_COPY_ID_FLOOR = 10_000
+
+# The item guide's sections, in the order the list shows them. "transformed" is
+# a grown form (Muramana): it keeps a page for links, but is listed under the
+# item that was bought.
+GUIDE_GROUPS = (
+    "finished", "boots", "starter", "support", "component", "consumable", "trinket",
+)
+
+_MAIN_TEXT = re.compile(r"</?mainText>", re.I)
+_STATS_BLOCK = re.compile(r"<stats>(.*?)</stats>", re.S | re.I)
+_ATTENTION = re.compile(r"^\s*<attention>(.*?)</attention>(.*)$", re.S | re.I)
+# A heading, not a keyword. Riot wraps the word "Glory" in <passive> inside Dark
+# Seal's text too, and splitting on every tag cut that sentence into three
+# "effects". A heading opens a line, and its name carries no markup; what
+# follows it on the same line (Heartsteel's "(0s) per target") is its text.
+_EFFECT_TAG = re.compile(
+    r"(?:^|<br\s*/?>|<li>)\s*<(passive|active|unique)>([^<]*)</\1>", re.S | re.I
+)
+
 # Community Dragon's rarity enum, in words. "kNoRarity" (836 of 2,155 skins,
 # most of them base skins and the older price tiers) has no word on purpose.
 _RARITY = {
@@ -83,7 +109,9 @@ _RARITY = {
     "kTranscendent": "Transcendent",
 }
 
-_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
+# A line break, or a list entry: the Guardian's starters write their effects as
+# `<li>` entries with no break between them, which ran into one sentence.
+_BREAK = re.compile(r"<br\s*/?>|<li>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -131,6 +159,44 @@ class ChampionLore:
 
 
 @dataclass(slots=True)
+class ItemEffect:
+    # "passive", "active", "unique", or "note" for text Riot did not name.
+    kind: str
+    name: str | None
+    text: str
+
+
+@dataclass(slots=True)
+class ItemInfo:
+    """One item as a guide reads it, built from the cached item file."""
+
+    id: int
+    name: str
+    plaintext: str
+    cost: int
+    # What the last step costs on top of the components.
+    combine_cost: int
+    sell: int
+    purchasable: bool
+    tags: list[str] = field(default_factory=list)
+    builds_from: list[int] = field(default_factory=list)
+    builds_into: list[int] = field(default_factory=list)
+    # The item this one grows out of once charged (Muramana from Manamune),
+    # from Riot's own `specialRecipe`, and the reverse.
+    grows_from: int | None = None
+    grows_into: list[int] = field(default_factory=list)
+    # (value, label) pairs, read from the description: the `stats` object Riot
+    # ships understates 98 of 138 finished items (measured 2026-09-22), and
+    # has no ability haste or lethality at all.
+    stats: list[tuple[str, str]] = field(default_factory=list)
+    effects: list[ItemEffect] = field(default_factory=list)
+    # A GUIDE_GROUPS section, "transformed", or None for an item the guide
+    # does not list (another mode's copy, a champion's own item).
+    group: str | None = None
+    on_rift: bool = False
+
+
+@dataclass(slots=True)
 class Skin:
     # Champion * 1000 + skin number, as Riot writes it.
     id: int
@@ -171,6 +237,8 @@ class StaticDataService:
         self.skin_lines: dict[int, str] = {}
         # Growth fields Data Dragon ships as zero for the whole roster.
         self.unpublished_growth: set[str] = set()
+        # item id -> the item as the guide reads it. Built with `items`.
+        self.item_infos: dict[int, ItemInfo] = {}
         self._loaded_at: float = 0.0
         # Set after a failed refresh so we stop hammering a CDN that is down.
         self._retry_not_before: float = 0.0
@@ -353,6 +421,7 @@ class StaticDataService:
         self.items = {
             int(k): v for k, v in (items.get("data") or {}).items() if k.isdigit()
         }
+        self._index_items()
         self.summoner_spells = {
             int(v["key"]): v for v in (spells.get("data") or {}).values() if v.get("key")
         }
@@ -376,6 +445,49 @@ class StaticDataService:
             queue_id, name = row.get("id"), (row.get("name") or "").strip()
             if isinstance(queue_id, int) and name:
                 self.queue_names[queue_id] = name
+
+    def _index_items(self) -> None:
+        """Read every item the way the guide shows it."""
+        infos: dict[int, ItemInfo] = {}
+        for item_id, raw in self.items.items():
+            gold = raw.get("gold") or {}
+            stats, effects = _item_text(raw.get("description"))
+            infos[item_id] = ItemInfo(
+                id=item_id,
+                name=_plain(raw.get("name")) or f"Item {item_id}",
+                plaintext=_plain(raw.get("plaintext")),
+                cost=int(gold.get("total") or 0),
+                combine_cost=int(gold.get("base") or 0),
+                sell=int(gold.get("sell") or 0),
+                purchasable=bool(gold.get("purchasable")),
+                tags=list(raw.get("tags") or []),
+                builds_from=_ids(raw.get("from")),
+                builds_into=_ids(raw.get("into")),
+                grows_from=_as_id(raw.get("specialRecipe")),
+                stats=stats,
+                effects=effects,
+                on_rift=bool((raw.get("maps") or {}).get(SUMMONERS_RIFT))
+                and item_id < MODE_COPY_ID_FLOOR,
+            )
+        for info in infos.values():
+            parent = infos.get(info.grows_from) if info.grows_from else None
+            if parent is not None:
+                parent.grows_into.append(info.id)
+        for item_id, info in infos.items():
+            info.group = _guide_group(info, self.items[item_id], infos)
+        # Riot lists three jungle pets twice. The higher ids were bought 0 times
+        # in 16,780 purchase orders against 3,370 for the lower ones (measured
+        # 2026-09-22), so a name listed twice keeps its lowest id.
+        kept: dict[str, int] = {}
+        for item_id in sorted(infos):
+            info = infos[item_id]
+            if info.group not in GUIDE_GROUPS:
+                continue
+            if info.name in kept:
+                info.group = None
+            else:
+                kept[info.name] = item_id
+        self.item_infos = infos
 
     # ------------------------------------------------------------ disk cache
 
@@ -714,6 +826,15 @@ class StaticDataService:
         folder = "passive" if ability.slot == "P" else "spell"
         return f"{self.cdn}/img/{folder}/{ability.image}"
 
+    def item_info(self, item_id: int | None) -> ItemInfo | None:
+        if item_id is None:
+            return None
+        return self.item_infos.get(int(item_id))
+
+    def guide_items(self) -> list[ItemInfo]:
+        """Every item the guide lists, in no particular order."""
+        return [i for i in self.item_infos.values() if i.group in GUIDE_GROUPS]
+
     def item_icon(self, item_id: int | None) -> str | None:
         if not item_id:  # 0 means "empty slot"
             return None
@@ -767,6 +888,92 @@ class StaticDataService:
 
     def all_champions(self) -> list[Champion]:
         return sorted(self.champions_by_id.values(), key=lambda c: c.name)
+
+
+def _as_id(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ids(values: Any) -> list[int]:
+    return [i for i in (_as_id(v) for v in values or []) if i is not None]
+
+
+def _item_text(description: str | None) -> tuple[list[tuple[str, str]], list[ItemEffect]]:
+    """An item description as stat lines and named effects.
+
+    Riot writes every description the same way: a ``<stats>`` block of
+    ``<attention>value</attention> label`` lines, then ``<passive>``,
+    ``<active>`` or ``<unique>`` names, each followed by its text. Text before
+    the first name (a note such as "Boots that build from this keep the Move
+    Speed") is kept as an unnamed note rather than dropped.
+    """
+    # The wrapper goes first, so a heading at the very top opens a line too.
+    body = _MAIN_TEXT.sub("", description or "")
+    stats: list[tuple[str, str]] = []
+    block = _STATS_BLOCK.search(body)
+    if block:
+        for line in _BREAK.split(block.group(1)):
+            marked = _ATTENTION.match(line)
+            value, label = (
+                (_plain(marked.group(1)), _plain(marked.group(2))) if marked else ("", _plain(line))
+            )
+            if value or label:
+                stats.append((value, label))
+        body = body[: block.start()] + body[block.end():]
+    effects: list[ItemEffect] = []
+    marks = list(_EFFECT_TAG.finditer(body))
+    lead = _plain(body[: marks[0].start()] if marks else body)
+    if lead:
+        effects.append(ItemEffect(kind="note", name=None, text=lead))
+    for index, mark in enumerate(marks):
+        end = marks[index + 1].start() if index + 1 < len(marks) else len(body)
+        text = _plain(body[mark.end():end])
+        # Mercurial Scimitar's description opens with an empty "ACTIVE"
+        # heading before the real one; a heading with no text says nothing.
+        if not text:
+            continue
+        effects.append(
+            ItemEffect(
+                kind=mark.group(1).lower(),
+                name=_plain(mark.group(2)).rstrip(":").strip() or None,
+                text=text,
+            )
+        )
+    return stats, effects
+
+
+def _guide_group(info: ItemInfo, raw: dict, infos: dict[int, ItemInfo]) -> str | None:
+    """Which section of the item guide an item belongs in, or None.
+
+    Each rule is here because an item needed it: Gunmetal Greaves has no Boots
+    tag but is built from boots; Long Sword carries the Lane tag of a starter
+    but builds into dozens of items; World Atlas is a lane starter too, but it
+    is the head of the support line, which is its own section; Stormsurge
+    carries that line's gold tag without being part of it.
+    """
+    if not info.on_rift or raw.get("requiredChampion") or raw.get("requiredAlly"):
+        return None
+    if not info.purchasable:
+        return "transformed" if info.grows_from in infos else None
+    tags = set(info.tags)
+    if "Trinket" in tags:
+        return "trinket"
+    if "Consumable" in tags:
+        return "consumable"
+    if {"GoldPer", "Lane"} <= tags:
+        return "support"
+    if "Boots" in tags or any(
+        "Boots" in (infos[f].tags if f in infos else []) for f in info.builds_from
+    ):
+        return "boots"
+    if tags & {"Lane", "Jungle"} and not info.builds_from and len(info.builds_into) <= 1:
+        return "starter"
+    if info.builds_into:
+        return "component"
+    return "finished"
 
 
 def _plain(text: str | None) -> str:

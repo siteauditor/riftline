@@ -126,7 +126,10 @@ esac
 
 # Always. These read the stored corpus and make no network call, so they are
 # what keeps the tier list, the champion pages and the scores consistent with
-# whatever is on disk, key or no key.
+# whatever is on disk, key or no key. Purchase times first: the item guide's
+# figures in `aggregate` read them, and timelines stored before they were
+# recorded are filled from their own raw events.
+run_stage "buytimes"  python -m scripts.ingest buytimes  || failures=$((failures+1))
 run_stage "aggregate" python -m scripts.ingest aggregate || failures=$((failures+1))
 
 # --rescore costs one query and makes a change to the weights self-applying on

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 
 import type { MatchSummary, ParticipantBrief } from '../lib/api'
 import RankBadge from './RankBadge'
+import ItemIcon from './items/ItemIcon'
 import Scoreboard from './match/Scoreboard'
 import {
   compact,
@@ -259,25 +260,10 @@ export default function MatchRow({
         <div className="flex flex-col gap-1.5">
           <div className="flex gap-1">
             {match.items.map((item, i) => (
-              <span
-                key={i}
-                className="size-[26px] overflow-hidden rounded-sm bg-raised"
-                title={item.name ?? ''}
-              >
-                {item.icon_url && (
-                  <img src={item.icon_url} alt={item.name ?? ''} loading="lazy" />
-                )}
-              </span>
+              <ItemIcon key={i} item={item} size={26} className="rounded-sm bg-raised" />
             ))}
             {match.trinket && (
-              <span
-                className="size-[26px] overflow-hidden rounded-full bg-raised"
-                title={match.trinket.name ?? ''}
-              >
-                {match.trinket.icon_url && (
-                  <img src={match.trinket.icon_url} alt="" loading="lazy" />
-                )}
-              </span>
+              <ItemIcon item={match.trinket} size={26} className="rounded-full bg-raised" />
             )}
           </div>
           {match.multi_kill && (

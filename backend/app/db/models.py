@@ -349,6 +349,10 @@ class MatchParticipant(Base):
     skill_order: Mapped[list | None] = mapped_column(JSON)
     # Item ids in true purchase order, replayed against undos and sells.
     build_order: Mapped[list | None] = mapped_column(JSON)
+    # Seconds into the game, one per entry in build_order and in step with it.
+    # Written with the timeline from now on, and filled for timelines stored
+    # before it existed by `scripts.ingest buytimes`, from their raw events.
+    build_times: Mapped[list | None] = mapped_column(JSON)
 
     # --- lifted out of `Match.raw` --------------------------------------
     # Riot sends 155 participant fields plus 130 `challenges`; the ingest maps
@@ -742,4 +746,97 @@ class SkinSighting(Base):
             "platform", "game_id", "participant_index", name="uq_skin_sighting"
         ),
         Index("ix_skin_sighting_champion", "champion_id", "skin_num"),
+    )
+
+
+class ItemStat(Base):
+    """One item across one slice, for the item guide.
+
+    Three measurements, each on its own base and never mixed:
+
+    * **Held at the end**: final inventories, every player in the slice. What
+      a scoreboard shows, and the one figure a transformed item (Muramana) is
+      counted under its bought parent for.
+    * **Bought**: purchase orders from timelines, first purchase per player,
+      with the minute it happened. The only honest base for "how often" and
+      "when", since components are combined and starters sold long before the
+      end of a game.
+    * **Against the same slot**: for finished items, each purchase as a
+      player's k-th finished item is scored against the same champion's k-th
+      items in the slice. Win rate rises from 28% for players who finished no
+      items to 62% for six (measured 2026-09-22), because long won games leave
+      room to buy more, so an item's raw win rate mostly measures how late it
+      is bought. Items in one slot share a game stage, and the champion
+      baseline stops a strong champion lending its win rate to its items.
+    """
+
+    __tablename__ = "item_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    patch: Mapped[str] = mapped_column(String(12), index=True)
+    queue_id: Mapped[int] = mapped_column(Integer, index=True)
+    rank_bracket: Mapped[str] = mapped_column(String(24), default="ALL")
+    item_id: Mapped[int] = mapped_column(Integer, index=True)
+
+    # Every player in the slice, and those holding the item when it ended.
+    players: Mapped[int] = mapped_column(Integer, default=0)
+    holders: Mapped[int] = mapped_column(Integer, default=0)
+    holder_wins: Mapped[int] = mapped_column(Integer, default=0)
+    # Players with a purchase order, and those who bought the item at all.
+    ordered_players: Mapped[int] = mapped_column(Integer, default=0)
+    buyers: Mapped[int] = mapped_column(Integer, default=0)
+    buyer_wins: Mapped[int] = mapped_column(Integer, default=0)
+    # Finished items only: four entries, for the 1st, 2nd, 3rd and any later
+    # finished item. `slot_expected` is the wins the same champions' items in
+    # that slot would have given the same purchases.
+    slot_games: Mapped[list | None] = mapped_column(JSON)
+    slot_wins: Mapped[list | None] = mapped_column(JSON)
+    slot_expected: Mapped[list | None] = mapped_column(JSON)
+    # Minute of each buyer's first purchase; `timed` is how many had a time.
+    timed: Mapped[int] = mapped_column(Integer, default=0)
+    minute_p25: Mapped[float | None] = mapped_column(Float)
+    minute_p50: Mapped[float | None] = mapped_column(Float)
+    minute_p75: Mapped[float | None] = mapped_column(Float)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "patch", "queue_id", "rank_bracket", "item_id", name="uq_item_stat_slice"
+        ),
+    )
+
+
+class ItemChampionStat(Base):
+    """One item on one champion, for the item guide's "who builds it".
+
+    Bought, by purchase order, like `ItemStat.buyers`, and stored only where
+    a champion bought the item a few times: the long tail of one-off purchases
+    is most of the pairs and says nothing.
+    """
+
+    __tablename__ = "item_champion_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    patch: Mapped[str] = mapped_column(String(12))
+    queue_id: Mapped[int] = mapped_column(Integer)
+    rank_bracket: Mapped[str] = mapped_column(String(24), default="ALL")
+    item_id: Mapped[int] = mapped_column(Integer)
+    champion_id: Mapped[int] = mapped_column(Integer)
+
+    # The champion's players with a purchase order, so a share can be shown.
+    champion_players: Mapped[int] = mapped_column(Integer, default=0)
+    buyers: Mapped[int] = mapped_column(Integer, default=0)
+    buyer_wins: Mapped[int] = mapped_column(Integer, default=0)
+    # Finished items only, as on `ItemStat`.
+    expected_wins: Mapped[float | None] = mapped_column(Float)
+    slot_games: Mapped[list | None] = mapped_column(JSON)
+    minute_p50: Mapped[float | None] = mapped_column(Float)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "patch", "queue_id", "rank_bracket", "item_id", "champion_id",
+            name="uq_item_champion_slice",
+        ),
+        Index("ix_item_champion_lookup", "patch", "queue_id", "rank_bracket", "item_id"),
     )

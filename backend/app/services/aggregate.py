@@ -34,6 +34,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     ChampionFacetStat,
     ChampionStat,
+    ItemChampionStat,
+    ItemStat,
     Match,
     MatchParticipant,
     MatchupStat,
@@ -707,6 +709,192 @@ async def rebuild_facet_stats(
     await session.commit()
     log.info("facets: %d rows for %s/%s/%s", len(payload), patch, queue_id, rank_bracket)
     return len(payload)
+
+
+# ----------------------------------------------------------------------- items
+
+# The 1st, 2nd and 3rd finished item, and everything after pooled into one:
+# past the third the samples are thin and the game is decided.
+ITEM_SLOTS = 4
+# An item and champion pair is stored from this many buyers. Below it the pair
+# is a one-off, and one-offs are most of the pairs.
+MIN_ITEM_CHAMPION_BUYERS = 3
+
+
+def _percentiles(values: list[float]) -> tuple[float | None, float | None, float | None]:
+    """25th, 50th and 75th percentiles, or nothing for an empty list."""
+    if not values:
+        return None, None, None
+    ordered = sorted(values)
+
+    def at(q: float) -> float:
+        position = (len(ordered) - 1) * q
+        low = math.floor(position)
+        high = min(low + 1, len(ordered) - 1)
+        return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+    return at(0.25), at(0.5), at(0.75)
+
+
+async def rebuild_item_stats(
+    session: AsyncSession,
+    *,
+    patch: str,
+    queue_id: int,
+    rank_bracket: str = ALL_BRACKETS,
+    taxonomy: ItemTaxonomy | None = None,
+) -> int:
+    """Recompute the item guide's figures for one slice. See `ItemStat`.
+
+    Two passes over the same rows: the first counts, and builds each
+    champion's win rate for its 1st, 2nd, 3rd and later finished items; the
+    second scores every finished-item purchase against that baseline. Reads
+    stored rows only.
+    """
+    taxonomy = taxonomy or ensure_taxonomy(static_data)
+    stmt = select(
+        MatchParticipant.champion_id,
+        MatchParticipant.win,
+        MatchParticipant.items,
+        MatchParticipant.build_order,
+        MatchParticipant.build_times,
+    ).join(Match, Match.match_id == MatchParticipant.match_id)
+    rows = (await session.execute(_slice_filter(stmt, patch, queue_id, rank_bracket))).all()
+
+    players = len(rows)
+    ordered_players = 0
+    held: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    bought: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    minutes: dict[int, list[float]] = defaultdict(list)
+    champion_players: Counter[int] = Counter()
+    pair: dict[tuple[int, int], list[int]] = defaultdict(lambda: [0, 0])
+    pair_minutes: dict[tuple[int, int], list[float]] = defaultdict(list)
+    # (champion, slot, item, won), one per finished-item purchase.
+    completions: list[tuple[int, int, int, int]] = []
+
+    for champion_id, win, items, order, times in rows:
+        won = 1 if win else 0
+        # A Muramana held at the end is the Manamune that was bought.
+        for item in {taxonomy.canonical(i) for i in (_as_json(items) or [])[:6] if i}:
+            held[item][0] += 1
+            held[item][1] += won
+
+        order = _as_json(order)
+        if not order:
+            continue
+        times = _as_json(times) or []
+        ordered_players += 1
+        champion_players[champion_id] += 1
+        seen: set[int] = set()
+        slot = 0
+        for index, raw_id in enumerate(order):
+            item = taxonomy.canonical(raw_id)
+            # First purchase only: three Long Swords are one buyer, and a
+            # finished item sold and bought again is not a new slot.
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            bought[item][0] += 1
+            bought[item][1] += won
+            pair[(item, champion_id)][0] += 1
+            pair[(item, champion_id)][1] += won
+            if index < len(times) and times[index] is not None:
+                minute = times[index] / 60
+                minutes[item].append(minute)
+                pair_minutes[(item, champion_id)].append(minute)
+            if taxonomy.is_legendary(item):
+                slot += 1
+                completions.append((champion_id, min(slot, ITEM_SLOTS), item, won))
+
+    baseline: dict[tuple[int, int], list[int]] = defaultdict(lambda: [0, 0])
+    for champion_id, slot, _, won in completions:
+        baseline[(champion_id, slot)][0] += 1
+        baseline[(champion_id, slot)][1] += won
+
+    slot_games: dict[int, list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
+    slot_wins: dict[int, list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
+    slot_expected: dict[int, list[float]] = defaultdict(lambda: [0.0] * ITEM_SLOTS)
+    pair_expected: dict[tuple[int, int], float] = defaultdict(float)
+    pair_slots: dict[tuple[int, int], list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
+    for champion_id, slot, item, won in completions:
+        games, wins = baseline[(champion_id, slot)]
+        expected = wins / games
+        slot_games[item][slot - 1] += 1
+        slot_wins[item][slot - 1] += won
+        slot_expected[item][slot - 1] += expected
+        pair_expected[(item, champion_id)] += expected
+        pair_slots[(item, champion_id)][slot - 1] += 1
+
+    await session.execute(
+        delete(ItemStat).where(
+            ItemStat.patch == patch,
+            ItemStat.queue_id == queue_id,
+            ItemStat.rank_bracket == rank_bracket,
+        )
+    )
+    await session.execute(
+        delete(ItemChampionStat).where(
+            ItemChampionStat.patch == patch,
+            ItemChampionStat.queue_id == queue_id,
+            ItemChampionStat.rank_bracket == rank_bracket,
+        )
+    )
+
+    now = utcnow()
+    slice_keys = {"patch": patch, "queue_id": queue_id, "rank_bracket": rank_bracket}
+    item_rows = []
+    for item in set(held) | set(bought):
+        p25, p50, p75 = _percentiles(minutes.get(item, []))
+        finished = item in slot_games
+        item_rows.append(
+            {
+                **slice_keys,
+                "item_id": item,
+                "players": players,
+                "holders": held[item][0] if item in held else 0,
+                "holder_wins": held[item][1] if item in held else 0,
+                "ordered_players": ordered_players,
+                "buyers": bought[item][0] if item in bought else 0,
+                "buyer_wins": bought[item][1] if item in bought else 0,
+                "slot_games": slot_games[item] if finished else None,
+                "slot_wins": slot_wins[item] if finished else None,
+                "slot_expected": [round(e, 4) for e in slot_expected[item]] if finished else None,
+                "timed": len(minutes.get(item, [])),
+                "minute_p25": p25,
+                "minute_p50": p50,
+                "minute_p75": p75,
+                "computed_at": now,
+            }
+        )
+    pair_rows = []
+    for (item, champion_id), (buyers, wins) in pair.items():
+        if buyers < MIN_ITEM_CHAMPION_BUYERS:
+            continue
+        finished = (item, champion_id) in pair_slots
+        pair_rows.append(
+            {
+                **slice_keys,
+                "item_id": item,
+                "champion_id": champion_id,
+                "champion_players": champion_players[champion_id],
+                "buyers": buyers,
+                "buyer_wins": wins,
+                "expected_wins": round(pair_expected[(item, champion_id)], 4) if finished else None,
+                "slot_games": pair_slots[(item, champion_id)] if finished else None,
+                "minute_p50": _percentiles(pair_minutes.get((item, champion_id), []))[1],
+                "computed_at": now,
+            }
+        )
+    if item_rows:
+        await session.execute(insert(ItemStat), item_rows)
+    if pair_rows:
+        await session.execute(insert(ItemChampionStat), pair_rows)
+    await session.commit()
+    log.info(
+        "items: %d item and %d champion rows for %s/%s/%s",
+        len(item_rows), len(pair_rows), patch, queue_id, rank_bracket,
+    )
+    return len(item_rows)
 
 
 # ------------------------------------------------------------------- discovery

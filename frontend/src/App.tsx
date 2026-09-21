@@ -42,6 +42,7 @@ export default function App() {
             {[
               { to: '/tierlist', label: 'Tier list' },
               { to: '/draft', label: 'Draft' },
+              { to: '/items', label: 'Items' },
               { to: '/leaderboards', label: 'Leaderboards' },
             ].map((item) => (
               <NavLink

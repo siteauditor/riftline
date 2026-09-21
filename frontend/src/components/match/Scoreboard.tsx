@@ -12,6 +12,7 @@ import {
   type TeamObjectives,
 } from '../../lib/api'
 import { compact, ordinal, pct, positionLabel, scoreColor } from '../../lib/format'
+import ItemIcon from '../items/ItemIcon'
 
 /**
  * The expanded match: every player's game, not just the searched player's.
@@ -335,26 +336,14 @@ function Build({ items, trinket }: { items: ItemRef[]; trinket: ItemRef | null }
   return (
     <span className="flex gap-px">
       {slots.map((item: ItemRef | null, i: number) => (
-        <span
+        <ItemIcon
           key={i}
-          title={item?.name ?? ''}
-          className={`size-[22px] shrink-0 overflow-hidden bg-raised/60 ${
-            item ? '' : 'border border-line-soft bg-transparent'
-          }`}
-        >
-          {item?.icon_url && (
-            <img src={item.icon_url} alt={item.name ?? ''} loading="lazy" className="size-full" />
-          )}
-        </span>
+          item={item}
+          size={22}
+          className={item ? 'bg-raised/60' : 'border border-line-soft bg-transparent'}
+        />
       ))}
-      <span
-        title={trinket?.name ?? ''}
-        className="ml-0.5 size-[22px] shrink-0 overflow-hidden rounded-full bg-raised/60"
-      >
-        {trinket?.icon_url && (
-          <img src={trinket.icon_url} alt="" loading="lazy" className="size-full" />
-        )}
-      </span>
+      <ItemIcon item={trinket} size={22} className="ml-0.5 rounded-full bg-raised/60" />
     </span>
   )
 }

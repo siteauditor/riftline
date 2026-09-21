@@ -170,6 +170,26 @@ def test_split_build_is_order_independent():
     assert TRINKET not in cores
 
 
+def test_a_grown_item_is_counted_as_the_item_that_was_bought():
+    """Muramana cannot be bought, so it was filed as "other" and the Build tab
+    dropped it from 204 of 241 Ezreal games (measured 2026-09-22)."""
+    t = ItemTaxonomy()
+    t.rebuild(
+        {
+            **FAKE_ITEMS,
+            3004: {"name": "Manamune", "tags": ["Mana"],
+                   "gold": {"total": 2900, "purchasable": True}, "maps": {"11": True}},
+            3042: {"name": "Muramana", "tags": ["Mana"], "specialRecipe": 3004,
+                   "gold": {"total": 2900, "purchasable": False}, "maps": {"11": True}},
+        },
+        version="test",
+    )
+    cores, _ = t.split_build([3042, LEGENDARY_A, BOOTS, 0, 0, 0, TRINKET])
+    assert cores == sorted([3004, LEGENDARY_A])
+    assert t.canonical(3042) == 3004
+    assert t.canonical(LEGENDARY_A) == LEGENDARY_A
+
+
 def test_perk_facets_reads_styles_by_label():
     keystone, page = perk_facets(perks(keystone=8010))
     assert keystone == 8010
@@ -497,3 +517,146 @@ def test_patch_sort_key_tolerates_a_non_numeric_component():
     rather than raise, because this runs on every corpus request."""
     assert patch_sort_key("16.18b") < patch_sort_key("16.18")
     assert patch_sort_key("16.18.1") > patch_sort_key("16.18")
+
+
+# ----------------------------------------------------------------------- items
+
+MANAMUNE, MURAMANA = 3004, 3042
+COMPONENT = 1038
+
+
+def item_taxonomy() -> ItemTaxonomy:
+    t = ItemTaxonomy()
+    t.rebuild(
+        {
+            **FAKE_ITEMS,
+            MANAMUNE: {"name": "Manamune", "tags": ["Mana"],
+                       "gold": {"total": 2900, "purchasable": True}, "maps": {"11": True}},
+            MURAMANA: {"name": "Muramana", "tags": ["Mana"], "specialRecipe": MANAMUNE,
+                       "gold": {"total": 2900, "purchasable": False}, "maps": {"11": True}},
+        },
+        version="test",
+    )
+    return t
+
+
+def buyer(champion_id, won, order, *, items=None, minutes=None):
+    """One player whose purchase order is `order`, bought at `minutes`."""
+    minutes = minutes or [5 * (i + 1) for i in range(len(order))]
+    return participant(
+        champion_id, "MIDDLE", 100, won, items=items if items is not None else [0] * 7,
+        build_order=list(order), build_times=[m * 60 for m in minutes],
+    )
+
+
+async def rebuilt(patch: str) -> tuple[dict, dict]:
+    from sqlalchemy import select
+
+    from app.db.models import ItemChampionStat, ItemStat
+    from app.services.aggregate import rebuild_item_stats
+
+    async with SessionLocal() as session:
+        await rebuild_item_stats(
+            session, patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS,
+            taxonomy=item_taxonomy(),
+        )
+        items = {
+            r.item_id: r for r in (
+                await session.execute(select(ItemStat).where(ItemStat.patch == patch))
+            ).scalars()
+        }
+        pairs = {
+            (r.item_id, r.champion_id): r for r in (
+                await session.execute(
+                    select(ItemChampionStat).where(ItemChampionStat.patch == patch)
+                )
+            ).scalars()
+        }
+    return items, pairs
+
+
+def delta(row, slot: int) -> float:
+    games = row.slot_games[slot - 1]
+    return (row.slot_wins[slot - 1] - row.slot_expected[slot - 1]) / games
+
+
+async def test_an_item_is_scored_against_the_same_champions_other_items_in_its_slot():
+    """Twenty players take A second and win fifteen; twenty take B second and
+    win five. Same champion, same slot, same first item: A is +25 points and B
+    is -25 against the champion's 2nd items, which win half the time."""
+    patch = "I1.00"
+    champion = 9601
+    players = (
+        [buyer(champion, i < 15, [LEGENDARY_C, LEGENDARY_A]) for i in range(20)]
+        + [buyer(champion, i < 5, [LEGENDARY_C, LEGENDARY_B]) for i in range(20)]
+    )
+    await seed(patch, [[p] for p in players])
+    items, _ = await rebuilt(patch)
+
+    assert items[LEGENDARY_A].slot_games == [0, 20, 0, 0]
+    assert delta(items[LEGENDARY_A], 2) == pytest.approx(0.25)
+    assert delta(items[LEGENDARY_B], 2) == pytest.approx(-0.25)
+    # Everyone's first item: it is the baseline, so it is measured as even.
+    assert delta(items[LEGENDARY_C], 1) == pytest.approx(0.0)
+
+
+async def test_a_strong_champion_does_not_lend_its_win_rate_to_its_items():
+    """A wins 90% of the time only because the champion that buys it does.
+    Its raw win rate says 90%; against that champion's own 2nd items, nothing."""
+    patch = "I2.00"
+    strong, weak = 9602, 9603
+    players = (
+        [buyer(strong, i < 18, [LEGENDARY_C, LEGENDARY_A]) for i in range(20)]
+        + [buyer(weak, i < 2, [LEGENDARY_C, LEGENDARY_B]) for i in range(20)]
+    )
+    await seed(patch, [[p] for p in players])
+    items, pairs = await rebuilt(patch)
+
+    a = items[LEGENDARY_A]
+    assert a.buyer_wins / a.buyers == pytest.approx(0.9), "the raw rate, as a sanity check"
+    assert delta(a, 2) == pytest.approx(0.0)
+    assert pairs[(LEGENDARY_A, strong)].expected_wins == pytest.approx(18.0)
+
+
+async def test_a_grown_item_is_counted_under_the_item_that_was_bought():
+    patch = "I3.00"
+    players = [
+        buyer(9604, True, [MANAMUNE], items=[MURAMANA, 0, 0, 0, 0, 0, 0])
+        for _ in range(3)
+    ]
+    await seed(patch, [[p] for p in players])
+    items, _ = await rebuilt(patch)
+
+    assert MURAMANA not in items
+    assert items[MANAMUNE].holders == 3
+    assert items[MANAMUNE].buyers == 3
+
+
+async def test_buyers_are_counted_once_and_timed_at_their_first_purchase():
+    """Three Long Swords are one buyer, bought at the first one's minute."""
+    patch = "I4.00"
+    players = [
+        buyer(9605, True, [COMPONENT, COMPONENT, COMPONENT], minutes=[m, m + 3, m + 6])
+        for m in (4, 6, 8, 10)
+    ]
+    await seed(patch, [[p] for p in players])
+    items, pairs = await rebuilt(patch)
+
+    component = items[COMPONENT]
+    assert component.buyers == 4
+    assert component.slot_games is None, "a component takes no finished-item slot"
+    assert (component.minute_p25, component.minute_p50, component.minute_p75) == (
+        pytest.approx(5.5), pytest.approx(7.0), pytest.approx(8.5)
+    )
+    assert pairs[(COMPONENT, 9605)].buyers == 4
+
+
+async def test_a_one_off_pair_is_not_stored():
+    from app.services.aggregate import MIN_ITEM_CHAMPION_BUYERS
+
+    patch = "I5.00"
+    players = [buyer(9606, True, [LEGENDARY_A]) for _ in range(MIN_ITEM_CHAMPION_BUYERS - 1)]
+    await seed(patch, [[p] for p in players])
+    items, pairs = await rebuilt(patch)
+    assert items[LEGENDARY_A].buyers == MIN_ITEM_CHAMPION_BUYERS - 1
+    assert (LEGENDARY_A, 9606) not in pairs

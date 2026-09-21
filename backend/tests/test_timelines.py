@@ -117,6 +117,21 @@ def test_item_undo_removes_only_the_most_recent_copy():
     assert out["buys"]["1"] == [ITEM_A, ITEM_B]
 
 
+def test_purchase_times_stay_in_step_with_purchases_through_an_undo():
+    """The item guide reads "when was this finished" from the time beside each
+    purchase, so an undo has to take its time with it, from the right place."""
+    events = [
+        {"type": "ITEM_PURCHASED", "participantId": 1, "itemId": ITEM_A, "timestamp": 61_000},
+        {"type": "ITEM_PURCHASED", "participantId": 1, "itemId": ITEM_B, "timestamp": 62_500},
+        {"type": "ITEM_PURCHASED", "participantId": 1, "itemId": ITEM_A, "timestamp": 700_000},
+        {"type": "ITEM_UNDO", "participantId": 1, "beforeId": ITEM_B, "afterId": 0},
+        {"type": "ITEM_PURCHASED", "participantId": 1, "itemId": ITEM_C, "timestamp": 1_260_900},
+    ]
+    out = extract(timeline([frame({1: pframe(0, 0, 0)}, events)]), duration_seconds=1800)
+    assert out["buys"]["1"] == [ITEM_A, ITEM_A, ITEM_C]
+    assert out["buy_times"]["1"] == [61, 700, 1260], "seconds, one per purchase"
+
+
 def test_selling_an_item_does_not_erase_it_from_the_build():
     """A build path that hides the item you sold describes a game nobody played."""
     events = [

@@ -32,6 +32,7 @@ from app.services.aggregate import (
     available_slices,
     rebuild_champion_stats,
     rebuild_facet_stats,
+    rebuild_item_stats,
     rebuild_matchup_stats,
     rebuild_synergy_stats,
 )
@@ -46,6 +47,7 @@ from app.services.ladders import DIVISIONS as LADDER_DIVISIONS
 from app.services.ladders import LadderService
 from app.services.scores import ScoreService
 from app.services.static_data import static_data
+from app.services.timelines import backfill_buy_times
 
 logging.basicConfig(
     level=logging.INFO,
@@ -317,10 +319,11 @@ async def cmd_aggregate(args) -> int:
                 facets = await rebuild_facet_stats(
                     session, **slice_kwargs, min_games=args.min_facet_games
                 )
+                items = await rebuild_item_stats(session, **slice_kwargs)
                 print(
                     f"patch {s['patch']} queue {s['queue_id']} [{bracket}]: "
                     f"{champions} champion, {matchups} matchup, "
-                    f"{synergies} synergy, {facets} facet rows "
+                    f"{synergies} synergy, {facets} facet, {items} item rows "
                     f"from {s['matches']:,} matches"
                 )
     return 0
@@ -370,6 +373,24 @@ async def cmd_score(args) -> int:
                 f"{coverage['withheld_matches']:,} lobbies withheld: not ten players "
                 "with lane roles, a remake, or a queue our corpus cannot carry"
             )
+    return 0
+
+
+async def cmd_buy_times(args) -> int:
+    """Fill purchase times for timelines stored before they were recorded.
+
+    Reads the raw timelines already on disk, so like `score` it makes no Riot
+    request and needs no key.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        stats = await backfill_buy_times(session)
+    print(f"purchase times filled for {stats.filled:,} players in {stats.matches:,} matches")
+    if stats.mismatched:
+        print(
+            f"{stats.mismatched:,} left without times: their stored purchase order no "
+            "longer matches a replay of the timeline"
+        )
     return 0
 
 
@@ -441,6 +462,11 @@ def main() -> int:
         help="Clear scores computed under older weights so they are recomputed.",
     )
 
+    sub.add_parser(
+        "buytimes",
+        help="Purchase times from the timelines already stored. Reads local storage only.",
+    )
+
     agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
     agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
     agg.add_argument("--queue", type=int, default=None)
@@ -483,6 +509,8 @@ def main() -> int:
         return asyncio.run(cmd_score(args))
     if args.command == "aggregate":
         return asyncio.run(cmd_aggregate(args))
+    if args.command == "buytimes":
+        return asyncio.run(cmd_buy_times(args))
     return 1
 
 

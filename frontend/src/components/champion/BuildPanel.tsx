@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import type { ChampionDetail, FacetEntry } from '../../lib/api'
+import ItemIcon from '../items/ItemIcon'
 import { EmptyState } from '../StateViews'
 import { compact, pct, winRateColor } from '../../lib/format'
 
@@ -138,25 +139,33 @@ function FacetRow({
   /** Draw arrows between icons, for a sequence rather than a set. */
   ordered?: boolean
 }) {
-  const icons = [...entry.items, ...entry.spells]
+  // Items link to their page in the item guide; summoner spells have none.
+  const icons = [
+    ...entry.items.map((ref) => ({ ref, item: true })),
+    ...entry.spells.map((ref) => ({ ref, item: false })),
+  ]
   return (
     <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
       <div className="flex shrink-0 gap-1">
-        {icons.map((ref, i) => (
+        {icons.map(({ ref, item }, i) => (
           <span key={`${ref.id}-${i}`} className="flex items-center gap-1">
             {ordered && i > 0 && (
               <span className="text-xs text-ink-faint" aria-hidden>
                 &rsaquo;
               </span>
             )}
-            <span
-              className="size-7 overflow-hidden rounded-sm bg-raised"
-              title={ref.name ?? ''}
-            >
-              {ref.icon_url && (
-                <img src={ref.icon_url} alt={ref.name ?? ''} loading="lazy" />
-              )}
-            </span>
+            {item ? (
+              <ItemIcon item={ref} size={28} className="rounded-sm bg-raised" />
+            ) : (
+              <span
+                className="size-7 overflow-hidden rounded-sm bg-raised"
+                title={ref.name ?? ''}
+              >
+                {ref.icon_url && (
+                  <img src={ref.icon_url} alt={ref.name ?? ''} loading="lazy" />
+                )}
+              </span>
+            )}
           </span>
         ))}
       </div>

@@ -87,7 +87,10 @@ def extract(payload: dict, duration_seconds: int) -> dict:
     info = payload.get("info") or {}
     frames = info.get("frames") or []
     if not frames:
-        return {"cp": {}, "skills": {}, "buys": {}, "obj": [], "frames": 0, "laning_minute": None}
+        return {
+            "cp": {}, "skills": {}, "buys": {}, "buy_times": {}, "obj": [],
+            "frames": 0, "laning_minute": None,
+        }
 
     last_minute = min(len(frames) - 1, max(0, duration_seconds // 60 - 1))
 
@@ -105,12 +108,14 @@ def extract(payload: dict, duration_seconds: int) -> dict:
             for pid, pf in (frames[minute].get("participantFrames") or {}).items()
         }
 
-    skills, purchases, objectives = _replay_events(frames)
+    skills, purchases, purchase_times, objectives = _replay_events(frames)
 
     return {
         "cp": checkpoints,
         "skills": skills,
         "buys": purchases,
+        # Seconds into the game, one per entry in "buys" and in the same order.
+        "buy_times": purchase_times,
         "obj": objectives,
         "frames": len(frames),
         # Short games clamp below 14. Recording which minute was used beats
@@ -119,7 +124,7 @@ def extract(payload: dict, duration_seconds: int) -> dict:
     }
 
 
-def _replay_events(frames: list[dict]) -> tuple[dict, dict, list]:
+def _replay_events(frames: list[dict]) -> tuple[dict, dict, dict, list]:
     """Walk the event stream into skill order, purchase order and objectives.
 
     ``ITEM_UNDO`` is the reason this is a replay rather than a filter. A single
@@ -129,9 +134,14 @@ def _replay_events(frames: list[dict]) -> tuple[dict, dict, list]:
     ``ITEM_SOLD`` is deliberately **not** replayed. Selling an item does not mean
     it was never built, and a build path that hides the Doran's you sold at forty
     minutes is describing a game nobody played.
+
+    Each purchase keeps its time beside it, and an undo removes both, so the two
+    lists stay the same length and in step: the item guide reads "when was this
+    finished" from them.
     """
     skills: dict[str, list[int]] = {}
     purchases: dict[str, list[int]] = {}
+    purchase_times: dict[str, list[int]] = {}
     objectives: list[list[Any]] = []
 
     for frame in frames:
@@ -146,15 +156,20 @@ def _replay_events(frames: list[dict]) -> tuple[dict, dict, list]:
             elif kind == "ITEM_PURCHASED":
                 if actor and event.get("itemId"):
                     purchases.setdefault(str(actor), []).append(int(event["itemId"]))
+                    purchase_times.setdefault(str(actor), []).append(
+                        int(event.get("timestamp") or 0) // 1000
+                    )
 
             elif kind == "ITEM_UNDO":
                 bought = event.get("beforeId")
                 bucket = purchases.get(str(actor)) if actor else None
                 if bucket and bought:
+                    times = purchase_times[str(actor)]
                     # Remove the most recent purchase *of that item*.
                     for position in range(len(bucket) - 1, -1, -1):
                         if bucket[position] == bought:
                             del bucket[position]
+                            del times[position]
                             break
 
             elif kind in ("ELITE_MONSTER_KILL", "BUILDING_KILL"):
@@ -165,7 +180,7 @@ def _replay_events(frames: list[dict]) -> tuple[dict, dict, list]:
                     event.get("killerTeamId") or event.get("teamId"),
                 ])
 
-    return skills, purchases, objectives
+    return skills, purchases, purchase_times, objectives
 
 
 # ------------------------------------------------------------- laning phase
@@ -242,6 +257,86 @@ def skill_priority(order: Iterable[int] | None) -> list[int] | None:
     if not maxed:
         maxed = [s for s, _ in sorted(counts.items(), key=lambda kv: -kv[1])]
     return maxed or None
+
+
+# ------------------------------------------------------------- purchase times
+
+
+@dataclass(slots=True)
+class BuyTimeStats:
+    matches: int = 0
+    filled: int = 0
+    # Rows whose replayed purchases no longer match the stored order. Left as
+    # they are and counted: a time beside the wrong item is worse than none.
+    mismatched: int = 0
+
+
+async def backfill_buy_times(session: AsyncSession, *, batch: int = 100) -> BuyTimeStats:
+    """Fill `build_times` for timelines stored before the column existed.
+
+    Reads the raw events kept in `match_timelines.raw_gz`, so it costs no Riot
+    call. The cursor is the absence of the data, rows with a purchase order and
+    no times, and every match is visited once per run: a mismatched row stays
+    empty, and asking again would hand back the same match for ever.
+    """
+    stats = BuyTimeStats()
+    attempted: set[str] = set()
+    while True:
+        stmt = (
+            select(MatchParticipant.match_id)
+            .where(
+                MatchParticipant.build_order.is_not(None),
+                MatchParticipant.build_times.is_(None),
+            )
+            .distinct()
+            .limit(batch)
+        )
+        if attempted:
+            stmt = stmt.where(MatchParticipant.match_id.not_in(attempted))
+        ids = list((await session.execute(stmt)).scalars())
+        if not ids:
+            break
+        attempted.update(ids)
+
+        timelines = {
+            t.match_id: t
+            for t in (
+                await session.execute(
+                    select(MatchTimeline).where(MatchTimeline.match_id.in_(ids))
+                )
+            ).scalars()
+        }
+        rows = (
+            await session.execute(
+                select(MatchParticipant).where(
+                    MatchParticipant.match_id.in_(ids),
+                    MatchParticipant.build_order.is_not(None),
+                    MatchParticipant.build_times.is_(None),
+                )
+            )
+        ).scalars()
+        by_match: dict[str, list[MatchParticipant]] = {}
+        for row in rows:
+            by_match.setdefault(row.match_id, []).append(row)
+
+        for match_id, players in by_match.items():
+            timeline = timelines.get(match_id)
+            if timeline is None or not timeline.raw_gz:
+                continue
+            payload = json.loads(gzip.decompress(timeline.raw_gz))
+            frames = (payload.get("info") or {}).get("frames") or []
+            _, purchases, times, _ = _replay_events(frames)
+            stats.matches += 1
+            for row in players:
+                key = str(row.participant_index)
+                if purchases.get(key) == row.build_order:
+                    row.build_times = times.get(key)
+                    stats.filled += 1
+                else:
+                    stats.mismatched += 1
+        await session.commit()
+        log.info("purchase times: %d players filled so far", stats.filled)
+    return stats
 
 
 # -------------------------------------------------------------------- service
@@ -392,11 +487,13 @@ class TimelineService:
 
         skills = extracted.get("skills") or {}
         buys = extracted.get("buys") or {}
+        buy_times = extracted.get("buy_times") or {}
 
         for row in rows:
             key = str(row.participant_index)
             row.skill_order = skills.get(key)
             row.build_order = buys.get(key)
+            row.build_times = buy_times.get(key)
 
             lane = scores.get(row.participant_index)
             if lane is None:

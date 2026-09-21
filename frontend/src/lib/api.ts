@@ -975,6 +975,120 @@ export interface TopSkins {
   skins: TopSkin[]
 }
 
+// --- item guide ------------------------------------------------------------
+
+export interface ItemStatLine {
+  value: string
+  label: string
+}
+
+export interface ItemEffect {
+  /** "passive", "active", "unique", or "note" for text Riot did not name. */
+  kind: string
+  name: string | null
+  text: string
+}
+
+export interface ItemRefCost {
+  id: number
+  name: string
+  icon_url: string | null
+  cost: number
+}
+
+export interface ItemSummary {
+  id: number
+  name: string
+  icon_url: string | null
+  cost: number
+  plaintext: string
+  tags: string[]
+  stats: ItemStatLine[]
+  /** Share of players with a purchase order who bought it. Null without figures. */
+  bought_share: number | null
+}
+
+export interface ItemSection {
+  key: string
+  label: string
+  items: ItemSummary[]
+}
+
+export interface ItemList {
+  version: string | null
+  patch: string | null
+  sections: ItemSection[]
+}
+
+export interface ItemSlot {
+  /** 1, 2, 3, or 4 for "4th or later". */
+  slot: number
+  games: number
+  share: number
+  win_rate: number
+  /** Against the same champions' other items in this slot. Null below the floor. */
+  delta: number | null
+}
+
+export interface ItemChampion {
+  champion: ChampionRef
+  buyers: number
+  share: number
+  win_rate: number
+  delta: number | null
+  minute: number | null
+  usual_slot: number | null
+}
+
+export interface ItemFigures {
+  patch: string
+  queue_id: number
+  rank_bracket: string
+  players: number
+  holders: number
+  held_share: number
+  ordered_players: number
+  buyers: number
+  bought_share: number
+  /** Raw, and mostly a measure of how late an item is bought. */
+  buyer_win_rate: number | null
+  timed: number
+  minute_p25: number | null
+  minute_p50: number | null
+  minute_p75: number | null
+  slots: ItemSlot[]
+  delta: number | null
+  delta_games: number
+  slot_min_games: number
+  champion_min_buyers: number
+  champions: ItemChampion[]
+}
+
+export interface ItemDetail {
+  id: number
+  name: string
+  icon_url: string | null
+  plaintext: string
+  cost: number
+  combine_cost: number
+  sell: number
+  purchasable: boolean
+  tags: string[]
+  /** A section key, "transformed", or null when the guide does not list it. */
+  group: string | null
+  group_label: string | null
+  on_rift: boolean
+  stats: ItemStatLine[]
+  effects: ItemEffect[]
+  builds_from: ItemRefCost[]
+  builds_into: ItemRefCost[]
+  grows_from: ItemRefCost | null
+  grows_into: ItemRefCost[]
+  figures: ItemFigures | null
+  /** Why there are no figures, when there are none. */
+  figures_note: string | null
+}
+
 // --- player analytics ------------------------------------------------------
 
 export interface Analytics {
@@ -1281,6 +1395,16 @@ export const api = {
     request<ChampionPlayers>(`/api/champions/${championId}/players`),
 
   topSkins: () => request<TopSkins>('/api/skins/top'),
+
+  items: () => request<ItemList>('/api/items'),
+
+  item: (itemId: number, opts: { patch?: string | null; queueId?: number; bracket?: string | null } = {}) => {
+    const params = new URLSearchParams()
+    if (opts.patch) params.set('patch', opts.patch)
+    params.set('queue_id', String(opts.queueId ?? 420))
+    if (opts.bracket) params.set('bracket', opts.bracket)
+    return request<ItemDetail>(`/api/items/${itemId}?${params}`)
+  },
 
   analytics: (
     platform: string,

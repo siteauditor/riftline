@@ -32,14 +32,24 @@ class ItemTaxonomy:
     boots: set[int] = field(default_factory=set)
     legendary: set[int] = field(default_factory=set)
     trinkets: set[int] = field(default_factory=set)
+    # A grown item -> the item it grows out of (Muramana -> Manamune), from
+    # Riot's own `specialRecipe`. The grown form cannot be bought, so it failed
+    # every clause below and was filed as "other": the Build tab then dropped
+    # Muramana from 204 of 241 Ezreal games and Seraph's Embrace from 142 of
+    # 165 Ryze games (measured 2026-09-22).
+    grown_from: dict[int, int] = field(default_factory=dict)
     version: str | None = None
 
     def rebuild(self, items: dict[int, dict], version: str | None = None) -> None:
         self.boots.clear()
         self.legendary.clear()
         self.trinkets.clear()
+        self.grown_from = {}
 
         for item_id, item in items.items():
+            parent = item.get("specialRecipe")
+            if parent is not None and str(parent).isdigit():
+                self.grown_from[item_id] = int(parent)
             tags = item.get("tags") or []
             gold = item.get("gold") or {}
             maps = item.get("maps") or {}
@@ -82,6 +92,18 @@ class ItemTaxonomy:
 
     # ------------------------------------------------------------------ query
 
+    def canonical(self, item_id: int | None) -> int | None:
+        """The item that was bought, for an item that grew out of it.
+
+        Followed as a chain (the support line grows twice), and bounded so a
+        malformed file that names an item as its own parent cannot loop.
+        """
+        for _ in range(5):
+            if item_id not in self.grown_from:
+                break
+            item_id = self.grown_from[item_id]
+        return item_id
+
     def is_boots(self, item_id: int | None) -> bool:
         return bool(item_id) and item_id in self.boots
 
@@ -111,7 +133,8 @@ class ItemTaxonomy:
         """
         if not items:
             return [], None
-        slots = [i for i in items[:6] if i]
+        # A Muramana at the end of the game is a Manamune that was bought.
+        slots = [self.canonical(i) for i in items[:6] if i]
         cores = sorted(i for i in slots if self.is_legendary(i))
         boots = next((i for i in slots if self.is_boots(i)), None)
         return cores, boots

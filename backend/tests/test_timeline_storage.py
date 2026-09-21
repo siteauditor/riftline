@@ -144,6 +144,8 @@ async def test_storing_a_timeline_fills_the_participant_columns(client):
         assert blue.cs_diff_14 == 40
         assert blue.skill_order == [1, 1, 1, 1, 1]
         assert blue.build_order == [3001, 3002, 3003, 3004, 3005]
+        # Seconds, in step with the order: the item guide's "when" is read here.
+        assert blue.build_times == [60, 120, 180, 240, 300]
 
         red = (await session.execute(
             select(MatchParticipant).where(
@@ -173,6 +175,44 @@ async def test_a_timeline_with_no_frames_is_not_stored(client):
 
 
 # ------------------------------------------------------------------ backfill
+
+
+@respx.mock
+async def test_purchase_times_are_filled_from_a_timeline_already_stored(client):
+    """Timelines stored before `build_times` existed still hold every event,
+    so the times come from disk, once, with no Riot call."""
+    from sqlalchemy import null, update
+
+    from app.services.timelines import backfill_buy_times
+
+    match_id = "EUW1_6000000039"
+    await seed_match(client, match_id)
+    mock_timeline(timeline_payload())
+    async with SessionLocal() as session:
+        await service(session).ensure_timelines(await stored_matches(session, match_id))
+        # As a row stored before the column existed looks: SQL NULL, which the
+        # migration leaves, not the JSON `null` that assigning None writes.
+        await session.execute(
+            update(MatchParticipant)
+            .where(MatchParticipant.match_id == match_id)
+            .values(build_times=null())
+        )
+        await session.commit()
+
+    async with SessionLocal() as session:
+        first = await backfill_buy_times(session)
+    async with SessionLocal() as session:
+        second = await backfill_buy_times(session)
+        blue = (await session.execute(
+            select(MatchParticipant).where(
+                MatchParticipant.match_id == match_id,
+                MatchParticipant.participant_index == BLUE_MID,
+            )
+        )).scalar_one()
+
+    assert first.filled >= 1 and first.mismatched == 0
+    assert blue.build_times == [60, 120, 180, 240, 300]
+    assert second.filled == 0, "a second run has nothing left to do"
 
 
 @respx.mock

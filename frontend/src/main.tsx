@@ -13,6 +13,8 @@ import Tierlist from './routes/Tierlist'
 import Draft from './routes/Draft'
 import Champion from './routes/Champion'
 import LiveGame from './routes/LiveGame'
+import Item from './routes/Item'
+import Items from './routes/Items'
 import Leaderboard from './routes/Leaderboard'
 import Match from './routes/Match'
 import NotFound, { RouteError } from './routes/NotFound'
@@ -71,6 +73,8 @@ const router = createBrowserRouter([
       { path: 'tierlist', element: <Tierlist /> },
       { path: 'draft', element: <Draft /> },
       { path: 'champions/:championId', element: <Champion /> },
+      { path: 'items', element: <Items /> },
+      { path: 'items/:itemId', element: <Item /> },
       { path: 'match/:matchId', element: <Match /> },
       // nginx serves index.html for every path it does not recognise, so the
       // router is what decides an address is not a page. Keep this last.

@@ -336,3 +336,148 @@ def test_a_broken_detail_file_keeps_what_we_had():
     service._index_skins({})
     assert 103 in service.lore_by_id
     assert len(service.champion_skins(103)) == 3
+
+
+# -------------------------------------------------------------------- items
+
+RIFT = {"11": True, "12": False}
+
+
+def _item(name, total, *, tags=(), description="", into=None, from_=None,
+          purchasable=True, maps=RIFT, **extra):
+    raw = {
+        "name": name, "plaintext": f"{name} in a line", "description": description,
+        "gold": {"base": 100, "total": total, "sell": total * 7 // 10,
+                 "purchasable": purchasable},
+        "tags": list(tags), "maps": maps, **extra,
+    }
+    if into:
+        raw["into"] = [str(i) for i in into]
+    if from_:
+        raw["from"] = [str(i) for i in from_]
+    return raw
+
+
+# Riot's own strings, markup included, for the items each rule was written for.
+ITEMS = {
+    "3031": _item(
+        "Infinity Edge", 3500, tags=["CriticalStrike", "Damage"],
+        description="<mainText><stats><attention>75</attention> Attack Damage<br>"
+        "<attention>25%</attention> Critical Strike Chance<br><attention>30%</attention> "
+        "Critical Strike Damage</stats><br><br></mainText>",
+        stats={"FlatPhysicalDamageMod": 75, "FlatCritChanceMod": 0.25},
+    ),
+    "3078": _item(
+        "Trinity Force", 3333, tags=["Damage"],
+        description="<mainText><stats><attention>36</attention> Attack Damage</stats><br><br>"
+        "<passive>Spellblade</passive><br>After using an Ability, your next Attack deals "
+        "<physicalDamage>bonus physical damage</physicalDamage>.<br> <br>"
+        "<passive>Quicken</passive><br>Attacking grants <speed>20 Move Speed</speed>.</mainText>",
+    ),
+    "1082": _item(
+        "Dark Seal", 350, tags=["SpellDamage", "Lane"], into=[3041],
+        description="<mainText><stats><attention>15</attention> Ability Power</stats><br><br>"
+        "<passive>Glory</passive><br>Takedowns grant <passive>2 Glory</passive>, up to 10. "
+        "5 <passive>Glory</passive> is lost on death.</mainText>",
+    ),
+    "3041": _item("Mejai's Soulstealer", 1500, tags=["SpellDamage"], from_=[1082]),
+    "1036": _item("Long Sword", 350, tags=["Damage", "Lane"], into=[3031, 3078, 3004]),
+    "1001": _item("Boots", 300, tags=["Boots"], into=[3006]),
+    "3006": _item("Berserker's Greaves", 1100, tags=["AttackSpeed", "Boots"],
+                  from_=[1001], into=[3172]),
+    "3172": _item("Gunmetal Greaves", 1100, tags=["AttackSpeed"], from_=[3006]),
+    "3865": _item("World Atlas", 400, tags=["GoldPer", "Lane"]),
+    "4646": _item("Stormsurge", 2800, tags=["SpellDamage", "GoldPer"]),
+    "3004": _item("Manamune", 2900, tags=["Mana"]),
+    "3042": _item("Muramana", 2900, tags=["Mana"], purchasable=False, specialRecipe=3004),
+    "323004": _item("Manamune", 2900, tags=["Mana"]),
+    "1101": _item("Scorchclaw Pup", 450, tags=["Jungle"]),
+    "1107": _item("Scorchclaw Pup", 450, tags=["Jungle"]),
+    "3599": _item("Kalista's Black Spear", 0, tags=["Consumable"], requiredChampion="Kalista"),
+    "3139": _item(
+        "Mercurial Scimitar", 3200, tags=["Active"],
+        description="<mainText><stats><attention>50</attention> Attack Damage</stats><br><br>"
+        "<active>ACTIVE</active><br><active>Quicksilver</active><br>Removes all crowd "
+        "control debuffs (excluding <keyword>Airborne</keyword>).</mainText>",
+    ),
+    "2051": _item(
+        "Guardian's Horn", 950, tags=["Health", "Lane"],
+        description="<mainText><stats><attention>150</attention> Health</stats><br><br><br>"
+        "<li><passive>Recovery:</passive> Restores <healing>20 Health</healing> every 5 "
+        "seconds.<li><passive>Undaunted:</passive> Blocks 15 damage.<br></mainText>",
+    ),
+    "3340": _item("Stealth Ward", 0, tags=["Trinket", "Vision"]),
+    "2055": _item("Control Ward", 75, tags=["Consumable", "Vision"]),
+}
+
+
+def _with_items() -> StaticDataService:
+    service = StaticDataService()
+    service.version = "16.18.1"
+    service._index({}, {"data": ITEMS}, {}, [], [])
+    return service
+
+
+def test_stats_come_from_the_description_not_the_stats_object():
+    """Riot's `stats` object understates 98 of 138 finished items. Infinity
+    Edge's crit damage is in the description and nowhere else."""
+    ie = _with_items().item_info(3031)
+    assert ie.stats == [
+        ("75", "Attack Damage"), ("25%", "Critical Strike Chance"),
+        ("30%", "Critical Strike Damage"),
+    ]
+
+
+def test_effects_are_named_blocks_with_their_markup_taken_out():
+    tf = _with_items().item_info(3078)
+    assert [(e.kind, e.name) for e in tf.effects] == [("passive", "Spellblade"), ("passive", "Quicken")]
+    assert tf.effects[0].text == "After using an Ability, your next Attack deals bonus physical damage."
+
+
+def test_a_keyword_inside_a_sentence_is_not_a_heading():
+    """Riot wraps "Glory" in <passive> mid-sentence too. Splitting on every tag
+    cut Dark Seal's one effect into three."""
+    seal = _with_items().item_info(1082)
+    assert len(seal.effects) == 1
+    assert seal.effects[0].text == "Takedowns grant 2 Glory, up to 10. 5 Glory is lost on death."
+
+
+def test_an_empty_heading_is_dropped_and_list_entries_are_effects():
+    items = _with_items()
+    assert [e.name for e in items.item_info(3139).effects] == ["Quicksilver"]
+    horn = items.item_info(2051)
+    assert [(e.name, e.text) for e in horn.effects] == [
+        ("Recovery", "Restores 20 Health every 5 seconds."),
+        ("Undaunted", "Blocks 15 damage."),
+    ]
+
+
+def test_every_item_lands_in_the_section_its_rule_was_written_for():
+    items = _with_items()
+    group = {i: items.item_info(i).group for i in (
+        3031, 3078, 1082, 3041, 1036, 1001, 3006, 3172, 3865, 4646, 3004, 3042,
+        323004, 1101, 1107, 3599, 3340, 2055,
+    )}
+    assert group == {
+        3031: "finished", 3078: "finished",
+        1082: "starter",
+        3041: "finished",  # under the legendary gold floor, but nothing builds from it
+        1036: "component",  # a Lane tag, but it builds into everything
+        1001: "boots", 3006: "boots",
+        3172: "boots",  # no Boots tag; built from boots
+        3865: "support",
+        4646: "finished",  # the support line's gold tag, without the lane tag
+        3004: "finished",
+        3042: "transformed",
+        323004: None,  # another mode's copy, marked as a Rift item by Riot
+        1101: "starter", 1107: None,  # listed twice: the lower id is the one bought
+        3599: None,  # a champion's own item
+        3340: "trinket", 2055: "consumable",
+    }
+
+
+def test_a_grown_item_knows_its_parent_and_the_parent_knows_it():
+    items = _with_items()
+    assert items.item_info(3042).grows_from == 3004
+    assert items.item_info(3004).grows_into == [3042]
+    assert 3042 not in {i.id for i in items.guide_items()}, "listed under what was bought"
