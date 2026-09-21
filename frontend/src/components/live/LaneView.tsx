@@ -1,0 +1,249 @@
+import { Link } from 'react-router-dom'
+
+import PositionIcon from '../PositionIcon'
+import RankBadge from '../RankBadge'
+import { Loadout, MasteryChip, RoleRecord, SkinArt } from './PlayerBits'
+import { BLUE, LANES, RED } from './sides'
+import type { CorpusRecord, LiveGame, LiveParticipant, Position } from '../../lib/api'
+import { pct, positionLabel } from '../../lib/format'
+
+/**
+ * Lane by lane, each blue player facing their red opponent.
+ *
+ * Only when the server could place all ten players: spectator-v5 carries no
+ * positions, so they are inferred, and a lobby with some lanes and some blanks
+ * has no layout. Everything else falls back to the team columns.
+ */
+export default function LaneView({ game, platform, you }: { game: LiveGame; platform: string; you: string }) {
+  const at = (team: number, lane: Position) =>
+    game.participants.find((p) => p.team_id === team && p.position === lane)
+  const confidentAt = game.position_model?.confident_at ?? 0.9
+
+  // Full width, like the rest of the page, with each card pulled in towards the
+  // lane icon rather than out to its own edge. Pushed to the edges, the two
+  // players in a lane sat a page apart with the icon adrift between them, and
+  // nothing on screen said which two were facing each other.
+  return (
+    <section>
+      <div className="mb-1 grid grid-cols-[1fr_3.5rem_1fr] items-end gap-2 border-b border-line pb-1.5 sm:grid-cols-[1fr_6rem_1fr] sm:gap-3">
+        <h3
+          className="display text-right text-base font-600"
+          style={{ color: 'var(--color-win)' }}
+        >
+          Blue side
+        </h3>
+        <span />
+        <h3 className="display text-base font-600" style={{ color: 'var(--color-loss)' }}>
+          Red side
+        </h3>
+      </div>
+      <ul>
+        {LANES.map((lane) => {
+          const blue = at(BLUE, lane)
+          const red = at(RED, lane)
+          if (!blue || !red) return null
+          return (
+            <li
+              key={lane}
+              className="grid grid-cols-[1fr_3.5rem_1fr] items-center gap-2 border-b border-line-soft py-2 sm:grid-cols-[1fr_6rem_1fr] sm:gap-3"
+            >
+              <LaneCard
+                p={blue}
+                side="blue"
+                platform={platform}
+                isYou={Boolean(blue.puuid) && blue.puuid === you}
+              />
+              <LaneCenter
+                lane={lane}
+                blue={blue}
+                red={red}
+                confidentAt={confidentAt}
+                patch={game.corpus_patch}
+              />
+              <LaneCard
+                p={red}
+                side="red"
+                platform={platform}
+                isYou={Boolean(red.puuid) && red.puuid === you}
+              />
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+function LaneCard({
+  p,
+  side,
+  platform,
+  isYou,
+}: {
+  p: LiveParticipant
+  side: 'blue' | 'red'
+  platform: string
+  isYou: boolean
+}) {
+  const [name, tag] = (p.riot_id ?? '').split('#')
+  const linkable = Boolean(p.riot_id && name && tag)
+  // Blue is the mirrored side: its art sits on the right, beside the lane icon,
+  // so both champions in a lane face each other across it.
+  const mirrored = side === 'blue'
+
+  return (
+    // The cell pushes the card towards the lane icon; the card itself is only
+    // as wide as its content, so the "you" outline fits the player, not the
+    // whole half of the row.
+    <div className={`flex min-w-0 ${mirrored ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={`flex min-w-0 max-w-full items-center gap-2.5 rounded-sm px-1.5 py-1 ${
+        mirrored ? 'flex-row-reverse text-right' : ''
+      } ${isYou ? 'bg-gold/[0.07] ring-1 ring-gold/40' : ''}`}
+    >
+      {/* The skin this player is wearing, from spectator's own record of it:
+          the same art their teammates see on the loading screen. */}
+      <span className="size-12 shrink-0 overflow-hidden rounded-sm bg-raised sm:size-14">
+        <SkinArt p={p} className="size-full object-cover" />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <p className="display truncate text-[15px] font-600 leading-tight text-ink">
+          {p.champion.name}
+        </p>
+        <p className="truncate text-xs leading-snug">
+          {linkable ? (
+            <Link
+              to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+              className="text-ink-dim transition-colors hover:text-gold-bright"
+            >
+              {name}
+            </Link>
+          ) : (
+            // Never the champion name Riot puts in `riotId` for a hidden player:
+            // it would read as a person and link to a profile that does not exist.
+            <span className="text-ink-faint">{p.state === 'bot' ? 'Bot' : 'Hidden player'}</span>
+          )}
+        </p>
+        <div
+          className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${
+            mirrored ? 'justify-end' : ''
+          }`}
+        >
+          <RankBadge
+            state={p.state}
+            tier={p.rank?.tier}
+            division={p.rank?.division}
+            leaguePoints={p.rank?.league_points}
+          />
+          {p.rank && p.rank.games > 0 && (
+            <span
+              title={`${p.rank.wins}W ${p.rank.losses}L this season, ${pct(p.rank.win_rate, 1)} win rate`}
+              className="tnum whitespace-nowrap text-[11px] text-ink-faint"
+            >
+              {pct(p.rank.win_rate)} WR
+            </span>
+          )}
+          <MasteryChip p={p} />
+        </div>
+        <div
+          className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${
+            mirrored ? 'justify-end' : ''
+          }`}
+        >
+          <Loadout p={p} />
+          <RoleRecord p={p} />
+        </div>
+      </div>
+    </div>
+    </div>
+  )
+}
+
+function LaneCenter({
+  lane,
+  blue,
+  red,
+  confidentAt,
+  patch,
+}: {
+  lane: Position
+  blue: LiveParticipant
+  red: LiveParticipant
+  confidentAt: number
+  patch: string | null
+}) {
+  // Either side's placement can be the close call, and a lane is only as sure
+  // as its less certain half.
+  const unsure = [blue, red].some(
+    (p) => p.position_basis !== 'smite' && (p.position_confidence ?? 1) < confidentAt,
+  )
+  // Blue's view of the matchup. The two sides' records are mirror images, so
+  // one is shown, and the other is only used if blue's is the one missing.
+  const record = blue.lane_record ?? mirror(red.lane_record)
+
+  return (
+    <div className="flex flex-col items-center justify-center gap-0.5 text-center">
+      <PositionIcon position={lane} className="size-5 text-ink-dim" />
+      <span className="display text-xs font-600 text-ink-dim">{positionLabel(lane)}</span>
+      {unsure && (
+        <span
+          className="text-[10px] text-gold"
+          title="Riot's live data has no positions, so this lane is inferred from the champions and their summoner spells, and this one is a close call. Measured on held-out games, lanes this uncertain are right about half to two thirds of the time."
+        >
+          likely
+        </span>
+      )}
+      {record && (
+        <span
+          className="mt-0.5 w-full"
+          title={
+            `${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}: ` +
+            `${record.wins} wins and ${record.games - record.wins} losses in our stored games` +
+            (patch ? ` on patch ${patch}` : '') +
+            '. This is the matchup, not these two players.' +
+            (record.gold_diff_14 != null
+              ? ` ${blue.champion.name} averages ${signed(Math.round(record.gold_diff_14))} gold at 14 minutes, over ${record.timeline_games} games with timelines.`
+              : '')
+          }
+        >
+          {/* Blue's share of the matchup's wins, as blue against red. */}
+          <span className="flex h-1 w-full overflow-hidden rounded-full bg-loss/70">
+            <span
+              className="h-full bg-win"
+              style={{ width: `${Math.round(record.win_rate * 100)}%` }}
+            />
+          </span>
+          <span className="tnum mt-0.5 block text-[11px] text-ink-dim">
+            {record.wins}-{record.games - record.wins}
+          </span>
+          {record.gold_diff_14 != null && (
+            <span
+              className="tnum block text-[10px]"
+              style={{
+                color:
+                  record.gold_diff_14 >= 0 ? 'var(--color-win)' : 'var(--color-loss)',
+              }}
+            >
+              {signed(Math.round(record.gold_diff_14))}g
+            </span>
+          )}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function mirror(r: CorpusRecord | null): CorpusRecord | null {
+  if (!r) return null
+  return {
+    ...r,
+    wins: r.games - r.wins,
+    win_rate: 1 - r.win_rate,
+    gold_diff_14: r.gold_diff_14 == null ? null : -r.gold_diff_14,
+  }
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : `${n}`
+}

@@ -45,6 +45,15 @@ const queryClient = new QueryClient({
   },
 })
 
+// The live game page is the one page that cannot be reached on demand: 31
+// production lookups on 2026-09-21 found nobody in a game. So in development
+// the cache is reachable from outside, and the screenshot script can seed a
+// lobby, a champion select or an ended game and photograph it. Stripped from
+// the production bundle by the `import.meta.env.DEV` branch.
+if (import.meta.env.DEV) {
+  ;(window as unknown as { queryClient: QueryClient }).queryClient = queryClient
+}
+
 const router = createBrowserRouter([
   {
     path: '/',
