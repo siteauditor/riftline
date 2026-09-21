@@ -256,6 +256,8 @@ export interface LiveGame {
   /** True when every player has a position, so the game can be shown by lane. */
   positions_inferred: boolean
   position_model: PositionModel | null
+  /** Riot's id for this game once it finishes, built on the server. */
+  match_id: string
   /** The patch the champion and lane records were read from. */
   corpus_patch: string | null
   /** Every patch the lane fallback was allowed to read, newest first. */
@@ -301,6 +303,25 @@ export interface LiveGameResponse {
   /** Only when they are not in a game. */
   idle: IdleSummary | null
   checked_at: number
+}
+
+/** Whether a finished live game has reached storage yet. Always 200 with a
+ *  status: the match will exist, so "not yet" is an answer rather than a 404. */
+export interface MatchResolve {
+  match_id: string
+  status: 'stored' | 'pending' | 'gave_up'
+  /** Whether this request spent a Riot call. */
+  attempted: boolean
+  /** Seconds until the client should ask again. Null means stop asking. */
+  retry_after: number | null
+  game_creation: number | null
+  game_duration: number | null
+  /** The searched player's own line, once the match is stored. */
+  win: boolean | null
+  /** Null on a game the score was withheld for. Never render it as 0.0. */
+  score: number | null
+  placement: number | null
+  hint: string | null
 }
 
 export interface LeaderboardRow {
@@ -1124,6 +1145,13 @@ export const api = {
   live: (platform: string, name: string, tag: string) =>
     request<LiveGameResponse>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/live`,
+    ),
+
+  /** Ask whether a game that just ended has reached storage. The server bounds
+   *  the Riot spend at three calls per match id, whoever is asking. */
+  liveResult: (platform: string, name: string, tag: string, matchId: string) =>
+    request<MatchResolve>(
+      `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/live/result/${enc(matchId)}`,
     ),
 
   leaderboardSlices: () =>

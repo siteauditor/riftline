@@ -1,19 +1,23 @@
-import { useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, type LiveGame } from '../lib/api'
 import ArtHeader from '../components/ArtHeader'
 import GameView from '../components/live/GameView'
 import IdleView from '../components/live/IdleView'
 import PollClock from '../components/live/PollClock'
+import StatusBand from '../components/live/StatusBand'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
+import { duration, ordinal, scoreColor } from '../lib/format'
 import { useChampionArt } from '../lib/useChampionArt'
 import { useMatchHistory } from '../lib/useMatchHistory'
 
 const POLL_MS = 60_000
+// Three asks for the result of a finished game, a minute apart. The server caps
+// the spend at the same number per match id, so extra tabs cost nothing.
+const RESULT_ATTEMPTS = 3
 
 export default function LiveGamePage() {
   const { platform = '', name = '', tag = '' } = useParams()
@@ -155,6 +159,16 @@ export default function LiveGamePage() {
   )
 }
 
+/**
+ * The moment after a game ends, which is when a reader is most interested and
+ * where this page used to stop with a paragraph telling them to go and look
+ * somewhere else.
+ *
+ * Riot publishes a finished match a minute or two later, so the page asks for
+ * it: at most three times, a minute apart, and the server bounds the spend at
+ * three Riot calls per match id however many people are watching. Once it
+ * lands, the result and a link to the full scoreboard replace the waiting.
+ */
 function GameOver({
   game,
   platform,
@@ -168,28 +182,124 @@ function GameOver({
   tag: string
   you: string
 }) {
+  const queryClient = useQueryClient()
+  const [since] = useState(() => Date.now())
+  // One ticking clock, so the wait can be shown and the asking can stop without
+  // reading the wall clock during a render.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  // Bounded by elapsed time rather than by a counter: one minute per attempt,
+  // three attempts. A fast poll on a forgotten tab is how the page that most
+  // needs to stay inside the rate limit would spend it.
+  const keepAsking = now - since < RESULT_ATTEMPTS * 60_000
+
+  const result = useQuery({
+    queryKey: ['live-result', game.match_id],
+    queryFn: () => api.liveResult(platform, name, tag, game.match_id),
+    refetchInterval: (query) =>
+      query.state.data?.status === 'pending' && keepAsking ? 60_000 : false,
+    retry: false,
+  })
+
+  const status = result.data?.status
+
+  // The new game belongs in their history too, so the overview does not show a
+  // stale list when the reader goes back to it.
+  useEffect(() => {
+    if (status === 'stored') {
+      queryClient.invalidateQueries({ queryKey: ['matches', platform, name, tag] })
+    }
+  }, [status, queryClient, platform, name, tag])
+
+  const waited = Math.max(0, Math.round((now - since) / 1000))
+
   return (
     <div className="space-y-5">
-      <section
-        className="accent-edge bg-panel/50 py-3 pl-4"
-        style={{ '--accent': 'var(--color-gold)' } as CSSProperties}
-      >
-        <h2 className="display text-xl font-700 text-ink">This game has ended</h2>
-        <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-dim">
-          Riot publishes the result, with gold, items and K/D/A for all ten players, a
-          minute or two after the game ends. It appears in the{' '}
-          <Link
-            to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
-            className="text-ink underline decoration-line underline-offset-2 hover:text-gold-bright"
-          >
-            match history
-          </Link>{' '}
-          with its full scoreboard. The lineup below is how the game started.
-        </p>
-      </section>
-      <div className="opacity-70">
-        <GameView game={game} platform={platform} you={you} stale={false} ended />
-      </div>
+      {status === 'stored' ? (
+        <StatusBand
+          accent="var(--color-gold)"
+          title={
+            <span
+              style={{
+                color:
+                  result.data?.win == null
+                    ? 'var(--color-gold-bright)'
+                    : result.data.win
+                      ? 'var(--color-win)'
+                      : 'var(--color-loss)',
+              }}
+            >
+              {result.data?.win == null
+                ? 'The result is in'
+                : result.data.win
+                  ? 'You won'
+                  : 'You lost'}
+              {result.data?.game_duration ? ` in ${duration(result.data.game_duration)}` : ''}
+            </span>
+          }
+          detail={
+            <>
+              {/* Never a 0.0: a game the score was withheld for says nothing
+                  about the score, the way the scoreboard already does. */}
+              {result.data?.score != null && (
+                <>
+                  <span
+                    className="tnum font-600"
+                    style={{ color: scoreColor(result.data.score) }}
+                  >
+                    {result.data.score.toFixed(1)}
+                  </span>{' '}
+                  Riftline score
+                  {result.data.placement != null && `, ${ordinal(result.data.placement)} of ten`}
+                  {'. '}
+                </>
+              )}
+              The scoreboard has gold, items and K/D/A for all ten players.
+            </>
+          }
+          aside={
+            <Link
+              to={`/match/${encodeURIComponent(game.match_id)}?player=${encodeURIComponent(you)}`}
+              className="control px-3 py-1.5 text-sm font-600 text-gold-bright"
+            >
+              Open the scoreboard
+            </Link>
+          }
+        />
+      ) : (
+        <StatusBand
+          accent="var(--color-gold)"
+          title="This game has ended"
+          detail={
+            status === 'gave_up'
+              ? 'Riot has not published this game. That happens when a game was remade, or was not a queue Riot publishes.'
+              : `Riot publishes the result a minute or two later. This page is watching for it, ${waited < 60 ? `${waited}s` : `${Math.floor(waited / 60)}m`} so far.`
+          }
+          aside={
+            status === 'gave_up' ? null : <Spinner label="Waiting for Riot" />
+          }
+        />
+      )}
+
+      {/* The lineup as it started. Collapsed once the scoreboard exists, which
+          is strictly better, but kept because somebody will want to compare. */}
+      {status === 'stored' ? (
+        <details className="frame px-4 py-3">
+          <summary className="cursor-pointer text-sm text-ink-dim">
+            The lineup as the game started
+          </summary>
+          <div className="mt-4 opacity-70">
+            <GameView game={game} platform={platform} you={you} stale={false} ended />
+          </div>
+        </details>
+      ) : (
+        <div className="opacity-70">
+          <GameView game={game} platform={platform} you={you} stale={false} ended />
+        </div>
+      )}
     </div>
   )
 }

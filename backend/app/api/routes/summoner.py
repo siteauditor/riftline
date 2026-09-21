@@ -7,9 +7,12 @@ neither browsers nor proxies reliably.
 
 from __future__ import annotations
 
+import logging
+import re
+import time
 from collections import Counter
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 
 from app.api.deps import (
@@ -30,6 +33,7 @@ from app.api.schemas import (
     LiveGameResponse,
     MasteryResponse,
     MatchHistoryResponse,
+    MatchResolveResponse,
     MatchSummary,
     PlayStyleTotals,
     ProfileResponse,
@@ -46,7 +50,7 @@ from app.api.schemas import (
     to_profile,
 )
 from app.api.schemas import ChampionRef as ChampionRefSchema
-from app.db.models import RankHistory
+from app.db.models import Match, MatchParticipant, RankHistory
 from app.riot.errors import RiotForbidden
 from app.riot.routing import resolve_platform
 from app.services.profile_stats import (
@@ -54,6 +58,8 @@ from app.services.profile_stats import (
     champion_totals,
     score_profile,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/summoner", tags=["summoner"])
 
@@ -423,4 +429,169 @@ async def get_live_game(
         ),
         idle=idle,
         checked_at=int(time.time() * 1000),
+    )
+
+
+# Riot publishes a finished match a minute or two after it ends, and a live page
+# polls, so the spend is bounded per match id rather than per request: one
+# process-global dict, the same shape and the same trim as the mastery cache in
+# `app/services/live.py`.
+_resolve_attempts: dict[str, tuple[float, int]] = {}
+_RESOLVE_CACHE_LIMIT = 5000
+# A Riot match id: a platform prefix, an underscore, and the game id.
+_MATCH_ID = re.compile(r"^[A-Z0-9]{2,7}_\d{1,20}$")
+
+
+def clear_resolve_cache() -> None:
+    """For tests, which must not inherit each other's attempt counts."""
+    _resolve_attempts.clear()
+
+
+def _remember_attempt(match_id: str, attempts: int) -> None:
+    if len(_resolve_attempts) >= _RESOLVE_CACHE_LIMIT:
+        # The oldest fifth out, so the dict cannot grow for ever.
+        by_age = sorted(_resolve_attempts, key=lambda k: _resolve_attempts[k][0])
+        for stale in by_age[: _RESOLVE_CACHE_LIMIT // 5]:
+            _resolve_attempts.pop(stale, None)
+    _resolve_attempts[match_id] = (time.monotonic(), attempts)
+
+
+
+async def _their_line(db, match_id: str, puuid: str) -> tuple[bool | None, float | None, int | None]:
+    """The searched player's own result in a stored match.
+
+    One indexed read, so the band can say "you won" rather than "the result
+    exists". A player whose row is not in the match, which happens when the id
+    came from somewhere else, gets nulls rather than a guess.
+    """
+    row = (
+        await db.execute(
+            select(
+                MatchParticipant.win,
+                MatchParticipant.performance_score,
+                MatchParticipant.performance_rank,
+            ).where(
+                MatchParticipant.match_id == match_id,
+                MatchParticipant.puuid == puuid,
+            )
+        )
+    ).first()
+    return (row[0], row[1], row[2]) if row is not None else (None, None, None)
+
+
+@router.get(
+    "/{platform}/{game_name}/{tag_line}/live/result/{match_id}",
+    response_model=MatchResolveResponse,
+)
+async def get_live_result(
+    platform: str,
+    game_name: str,
+    tag_line: str,
+    match_id: str,
+    players: PlayerServiceDep,
+    matches: MatchServiceDep,
+    db: DbDep,
+    settings: SettingsDep,
+) -> MatchResolveResponse:
+    """Has the game that just ended reached storage yet?
+
+    The only Riot call the live page spends beyond the lookup itself, so it sits
+    behind four gates, three of them free: the id has to look like a match id,
+    storage is checked first, a cooldown holds the second tab off, and a cap
+    stops a match id that is never going to publish from costing anything more.
+
+    Under the summoner path deliberately. A bare ``/api/matches/{id}/resolve``
+    would be a generic "make the server fetch any match from Riot" door open to
+    anyone; here it needs a resolvable Riot ID, which the live poll just looked
+    up and which is cached for a day, and every fetch is tied to an account.
+    """
+    match_id = match_id.upper()
+    if not _MATCH_ID.match(match_id):
+        raise HTTPException(status_code=400, detail=f"{match_id!r} is not a match id.")
+    try:
+        regional = resolve_platform(match_id.split("_")[0]).regional
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail=f"{match_id!r} names a platform we do not serve."
+        ) from None
+
+    # Before resolving the player, so a disabled server does not spend an
+    # account lookup answering a question it will not answer.
+    if not settings.enable_spectator:
+        raise RiotForbidden(
+            "Live game lookup is switched off on this server (ENABLE_SPECTATOR).",
+            status=403,
+        )
+
+    stored = (
+        await db.execute(
+            select(Match.game_creation, Match.game_duration).where(
+                Match.match_id == match_id
+            )
+        )
+    ).first()
+    if stored is not None:
+        # Resolve the player from cache to read their own line. The account
+        # lookup is cached for a day and the live poll just made it, so this is
+        # free in practice and never a Riot call of its own.
+        player = await players.resolve(platform, game_name, tag_line)
+        win, score, placement = await _their_line(db, match_id, player.puuid)
+        return MatchResolveResponse(
+            match_id=match_id,
+            status="stored",
+            game_creation=stored[0],
+            game_duration=stored[1],
+            win=win,
+            score=score,
+            placement=placement,
+        )
+
+    now = time.monotonic()
+    last_at, attempts = _resolve_attempts.get(match_id, (0.0, 0))
+    waited = now - last_at
+    if attempts >= settings.live_result_max_attempts:
+        return MatchResolveResponse(
+            match_id=match_id,
+            status="gave_up",
+            hint=(
+                "Riot has not published this game. That happens when a game was "
+                "remade or was not a queue Riot publishes."
+            ),
+        )
+    if waited < settings.live_result_cooldown_seconds:
+        return MatchResolveResponse(
+            match_id=match_id,
+            status="pending",
+            retry_after=int(settings.live_result_cooldown_seconds - waited) + 1,
+        )
+
+    # The one call. `ensure_matches` checks storage itself, swallows a 404 from
+    # Riot and returns an empty list for a match that is not published yet, and
+    # scores what it stores on the way through.
+    player = await players.resolve(platform, game_name, tag_line)
+    # Read before the fetch: `ensure_matches` can roll back, and a rollback
+    # expires every ORM object in the shared session, so a later attribute read
+    # would fire a lazy SELECT and fail as MissingGreenlet.
+    puuid = player.puuid
+    _remember_attempt(match_id, attempts + 1)
+    found = await matches.ensure_matches([match_id], regional)
+    if found:
+        log.info("resolved finished live game %s", match_id)
+        win, score, placement = await _their_line(db, match_id, puuid)
+        return MatchResolveResponse(
+            match_id=match_id,
+            status="stored",
+            attempted=True,
+            game_creation=found[0].game_creation,
+            game_duration=found[0].game_duration,
+            win=win,
+            score=score,
+            placement=placement,
+        )
+    return MatchResolveResponse(
+        match_id=match_id,
+        status="pending",
+        attempted=True,
+        retry_after=int(settings.live_result_cooldown_seconds) + 1,
+        hint="Riot has not published the result yet.",
     )

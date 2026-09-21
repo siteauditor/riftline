@@ -658,6 +658,9 @@ class LobbyCompareOut(BaseModel):
 class LiveGameOut(BaseModel):
     game_id: int
     platform_id: str
+    # Riot's own id for this game once it finishes, built here rather than
+    # concatenated in React: this codebase does not hand assemble identifiers.
+    match_id: str
     queue_id: int
     queue_name: str
     game_mode: str | None = None
@@ -724,6 +727,35 @@ class IdleSummaryOut(BaseModel):
     stored_games: int
     last_game: LastStoredGameOut | None = None
     basis: str = "stored_matches"
+
+
+class MatchResolveResponse(BaseModel):
+    """Whether a finished live game has reached storage yet.
+
+    Always 200, never a 404. The match will exist: the question is answerable
+    and the answer is "not yet". A 404 here would render as "no such match",
+    which is a different and false claim, the same reason the live endpoint
+    answers 200 with ``in_game: false``.
+    """
+
+    match_id: str
+    # "stored" once we hold it, "pending" while Riot has not published it, and
+    # "gave_up" once this match id has used its attempts.
+    status: str
+    # Whether this request spent a Riot call. False on a storage hit, inside the
+    # cooldown and past the cap, which is all but a handful of requests.
+    attempted: bool = False
+    # Seconds until the client should ask again. Null means stop asking.
+    retry_after: int | None = None
+    game_creation: int | None = None
+    game_duration: int | None = None
+    # The searched player's own line, once the match is stored. Null while it is
+    # not, and null for a player whose row is not in it.
+    win: bool | None = None
+    # Null on a game the score was withheld for. Never rendered as 0.0.
+    score: float | None = None
+    placement: int | None = None
+    hint: str | None = None
 
 
 class LiveGameResponse(BaseModel):
@@ -1354,6 +1386,7 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
     return LiveGameOut(
         game_id=game.game_id,
         platform_id=game.platform_id,
+        match_id=f"{game.platform_id}_{game.game_id}",
         queue_id=game.queue_id,
         queue_name=queue_name,
         game_mode=game.game_mode,

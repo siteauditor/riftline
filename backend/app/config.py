@@ -62,6 +62,19 @@ class Settings(BaseSettings):
         default=8.0, alias="SPECTATOR_RANK_BUDGET_SECONDS"
     )
 
+    # Resolving a finished live game into its stored match is the only Riot call
+    # the live page spends beyond the lookup itself, so both dials are settings:
+    # production can widen them without a deploy, the way the rank budget can.
+    # Riot publishes a match a minute or two after it ends, so asking more than
+    # once every 45 seconds cannot make it arrive sooner, it only multiplies the
+    # spend by the number of open tabs.
+    live_result_cooldown_seconds: float = Field(
+        default=45.0, alias="LIVE_RESULT_COOLDOWN_SECONDS"
+    )
+    # Three attempts per match id, which is the promise the page makes: at most
+    # three Riot calls per finished game however many people are watching it.
+    live_result_max_attempts: int = Field(default=3, alias="LIVE_RESULT_MAX_ATTEMPTS")
+
     # Ladder snapshots. A ladder is one Riot call, so these are short; Master is
     # ten thousand entries and a multi-megabyte transfer, so it is not.
     ttl_ladder: int = Field(default=900, alias="TTL_LADDER")
