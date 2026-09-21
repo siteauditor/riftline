@@ -6,9 +6,12 @@ import { useQuery } from '@tanstack/react-query'
 import { api, type LiveGame } from '../lib/api'
 import ArtHeader from '../components/ArtHeader'
 import GameView from '../components/live/GameView'
+import IdleView from '../components/live/IdleView'
+import PollClock from '../components/live/PollClock'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import { useChampionArt } from '../lib/useChampionArt'
+import { useMatchHistory } from '../lib/useMatchHistory'
 
 const POLL_MS = 60_000
 
@@ -24,6 +27,19 @@ export default function LiveGamePage() {
   })
 
   const data = query.data
+
+  // The profile is nearly always already cached: this tab is reached from it.
+  // Asked without options so it shares the profile page's own entry.
+  const profileQuery = useQuery({
+    queryKey: ['profile', platform, name, tag],
+    queryFn: () => api.profile(platform, name, tag),
+    enabled: Boolean(platform && name && tag),
+  })
+  // History costs Riot calls, so it is read only on the branch that shows it:
+  // a lobby in progress keeps this page down to one spectator lookup.
+  const { query: historyQuery, matches } = useMatchHistory(platform, name, tag, {
+    enabled: Boolean(data) && !data?.in_game,
+  })
 
   // The last game this page saw. When it ends, the next poll says "not in a
   // game", and without this the lineup vanished for a bare empty state, which
@@ -44,8 +60,21 @@ export default function LiveGamePage() {
   // The champion the searched player is on, in the live game or in the one
   // that just ended: this page is about them, so the art is theirs.
   const shown = data?.game ?? lastGame
+  // The champion they are on, then the one they just finished on, then the one
+  // in the newest game we hold. A page with no art at all read as the art
+  // having failed to load, and this page is idle almost every time it is open.
   const heroArt = useChampionArt(
-    shown?.participants.find((p) => p.puuid && p.puuid === data?.puuid)?.champion.id,
+    shown?.participants.find((p) => p.puuid && p.puuid === data?.puuid)?.champion.id ??
+      matches.find((m) => !m.is_remake)?.champion.id ??
+      data?.idle?.last_game?.champion.id,
+  )
+  const poll = (
+    <PollClock
+      updatedAt={query.dataUpdatedAt}
+      intervalMs={POLL_MS}
+      fetching={query.isFetching}
+      onCheck={() => query.refetch()}
+    />
   )
 
   // One shell around every branch, matching the other routes: without it the
@@ -62,6 +91,18 @@ export default function LiveGamePage() {
               {name}
               <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
             </h1>
+            <p className="mt-2 flex items-center gap-2 text-sm">
+              {data?.in_game ? (
+                <>
+                  <span className="size-2 animate-pulse rounded-full bg-accent-bright" />
+                  <span className="text-accent-bright">Live now</span>
+                </>
+              ) : ended ? (
+                <span className="text-gold-bright">Game ended</span>
+              ) : (
+                <span className="text-ink-dim">Not in a game</span>
+              )}
+            </p>
           </div>
           <ProfileTabs platform={platform} name={name} tag={tag} />
         </div>
@@ -81,12 +122,26 @@ export default function LiveGamePage() {
         <GameOver game={lastGame} platform={platform} name={name} tag={tag} you={data.puuid} />
       )}
       {!query.isLoading && !(query.isError && !data) && !ended &&
-        (!data?.in_game || !data.game) && (
+        (!data?.in_game || !data.game) &&
+        (data?.idle ? (
+          <IdleView
+            idle={data.idle}
+            profile={profileQuery.data}
+            matches={matches}
+            loading={historyQuery.isLoading}
+            platform={platform}
+            name={name}
+            tag={tag}
+            poll={poll}
+          />
+        ) : (
+          // No idle block means an older server, or a response we could not
+          // read: say the one thing that is certainly true rather than nothing.
           <EmptyState
             title="Not in a game right now"
             body="This page checks again every minute while it is open."
           />
-        )}
+        ))}
       {data?.in_game && data.game && (
         <GameView
           game={data.game}

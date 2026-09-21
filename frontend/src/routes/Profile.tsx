@@ -1,12 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import {
-  keepPreviousData,
-  useInfiniteQuery,
-  useQuery,
-  useQueryClient,
-} from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
 import ArtHeader from '../components/ArtHeader'
@@ -17,7 +12,8 @@ import ProfileTabs from '../components/ProfileTabs'
 import RankCard from '../components/RankCard'
 import StrengthsPanel from '../components/StrengthsPanel'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
-import { api, type Analytics, type MatchSummary, type Profile as ProfileData } from '../lib/api'
+import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
+import { useMatchHistory } from '../lib/useMatchHistory'
 import {
   compact,
   ordinal,
@@ -30,7 +26,6 @@ import {
 } from '../lib/format'
 import { rememberSearch } from '../lib/storage'
 
-const PAGE = 20
 
 const QUEUE_FILTERS = [
   { id: null, label: 'All' },
@@ -95,13 +90,11 @@ export default function Profile() {
     })
   }, [loaded])
 
-  const matchesQuery = useInfiniteQuery({
-    queryKey: ['matches', platform, name, tag, queue],
-    initialPageParam: 0,
-    queryFn: ({ pageParam }) =>
-      api.matches(platform, name, tag, { start: pageParam, count: PAGE, queue }),
-    getNextPageParam: (last, pages) =>
-      last.has_more ? pages.length * PAGE : undefined,
+  // The live page reads the same history, so the query lives in one hook: two
+  // configurations of one cache key is a race between whichever page mounts
+  // first.
+  const { query: matchesQuery, matches } = useMatchHistory(platform, name, tag, {
+    queue,
     enabled: profileQuery.isSuccess,
   })
 
@@ -124,11 +117,6 @@ export default function Profile() {
     queryFn: api.champions,
     staleTime: 6 * 60 * 60 * 1000,
   })
-
-  const matches: MatchSummary[] = useMemo(
-    () => matchesQuery.data?.pages.flatMap((p) => p.matches) ?? [],
-    [matchesQuery.data],
-  )
 
   if (profileQuery.isLoading) {
     return (

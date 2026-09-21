@@ -39,6 +39,7 @@ from app.api.schemas import (
     RoleShare,
     epoch_ms,
     numeric_rank,
+    to_idle_summary,
     to_live_game,
     to_mastery_response,
     to_match_summary,
@@ -361,6 +362,7 @@ async def get_live_game(
     tag_line: str,
     players: PlayerServiceDep,
     live: LiveServiceDep,
+    matches: MatchServiceDep,
     sd: StaticDep,
     settings: SettingsDep,
 ) -> LiveGameResponse:
@@ -399,6 +401,17 @@ async def get_live_game(
     # quiet lie about where the answer came from.
     home = await players.effective_platform(player, resolve_platform(platform))
     game = await live.for_puuid(puuid, home.id)
+    # Two storage reads, and only on the branch nobody wanted: 31 production
+    # lookups on 2026-09-21 found nobody in a game, so this is the state the
+    # page is almost always in, and it used to be an empty box. A game in
+    # progress pays for none of it.
+    idle = (
+        to_idle_summary(
+            await matches.last_stored(puuid), await matches.stored_count(puuid), sd
+        )
+        if game is None
+        else None
+    )
     return LiveGameResponse(
         puuid=puuid,
         platform=home.id,
@@ -408,5 +421,6 @@ async def get_live_game(
             if game is not None
             else None
         ),
+        idle=idle,
         checked_at=int(time.time() * 1000),
     )

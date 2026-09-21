@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,6 +27,9 @@ from app.services.scores import (
     badge_detail,
 )
 from app.services.static_data import StaticDataService
+
+if TYPE_CHECKING:
+    from app.services.matches import PlayedRow
 
 # Ranked tiers, lowest to highest. Used for sorting and for the rank-bracket filter.
 TIER_ORDER = [
@@ -526,6 +530,43 @@ class LiveGameOut(BaseModel):
     corpus_patch: str | None = None
 
 
+class LastStoredGameOut(BaseModel):
+    """The newest game we hold for a player, for the page they see when they are
+    not playing."""
+
+    match_id: str
+    queue_id: int
+    queue_name: str
+    champion: ChampionRef
+    position: str | None = None
+    win: bool
+    kills: int
+    deaths: int
+    assists: int
+    game_creation: int
+    game_duration: int
+    performance_score: float | None = None
+
+
+class IdleSummaryOut(BaseModel):
+    """What we hold for a player who is not in a game.
+
+    Measured on 2026-09-21: 31 live lookups against production, covering the
+    active EUW and NA challengers and everyone in that week's best games, found
+    nobody in a game. This is the live page's normal state, so it carries
+    something rather than an empty box.
+
+    ``last_game`` is the newest game **Riftline has stored**, which is not the
+    newest game they played: the corpus is crawled, and for a player with five
+    or more stored games the newest one is a median of four days old (p90
+    seven). Anything rendering this has to word it that way.
+    """
+
+    stored_games: int
+    last_game: LastStoredGameOut | None = None
+    basis: str = "stored_matches"
+
+
 class LiveGameResponse(BaseModel):
     puuid: str
     platform: str
@@ -533,6 +574,8 @@ class LiveGameResponse(BaseModel):
     # a 404 would render as "no player found".
     in_game: bool = False
     game: LiveGameOut | None = None
+    # Only when they are not in a game, so the live path pays nothing for it.
+    idle: IdleSummaryOut | None = None
     checked_at: int
 
 
@@ -1077,6 +1120,35 @@ def _corpus_record_out(record) -> CorpusRecordOut | None:
         win_rate=record.wins / record.games if record.games else 0.0,
         gold_diff_14=record.gold_diff_14,
         timeline_games=record.timeline_games,
+    )
+
+
+def to_idle_summary(
+    row: PlayedRow | None, stored_games: int, sd: StaticDataService
+) -> IdleSummaryOut:
+    """The idle page's content, from storage only.
+
+    A player we hold nothing for gets `stored_games: 0` and no game, never a
+    zeroed one: "we hold nothing" and "they played badly" are different claims.
+    """
+    if row is None or row.match_id is None:
+        return IdleSummaryOut(stored_games=stored_games, last_game=None)
+    return IdleSummaryOut(
+        stored_games=stored_games,
+        last_game=LastStoredGameOut(
+            match_id=row.match_id,
+            queue_id=row.queue_id,
+            queue_name=sd.queue_name(row.queue_id),
+            champion=_champion_ref(row.champion_id, sd),
+            position=row.team_position or None,
+            win=row.win,
+            kills=row.kills,
+            deaths=row.deaths,
+            assists=row.assists,
+            game_creation=row.game_creation,
+            game_duration=row.game_duration,
+            performance_score=row.performance_score,
+        ),
     )
 
 

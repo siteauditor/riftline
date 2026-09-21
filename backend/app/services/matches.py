@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -82,6 +82,10 @@ class PlayedRow(NamedTuple):
     performance_rank: int | None = None
     performance_detail: dict | None = None
     gold_diff_14: int | None = None
+    # Appended rather than placed with the other match columns, because rows are
+    # built positionally with `PlayedRow(*row)`: a field in the middle would
+    # silently shift every value after it.
+    match_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -394,6 +398,7 @@ class MatchService:
                 MatchParticipant.performance_rank,
                 MatchParticipant.performance_detail,
                 MatchParticipant.gold_diff_14,
+                MatchParticipant.match_id,
             )
             .join(Match, Match.match_id == MatchParticipant.match_id)
             .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))
@@ -403,3 +408,24 @@ class MatchService:
         if queue is not None:
             stmt = stmt.where(Match.queue_id == queue)
         return [PlayedRow(*row) for row in (await self.session.execute(stmt)).all()]
+
+    async def last_stored(self, puuid: str) -> PlayedRow | None:
+        """The newest game we hold for this player, or None if we hold none.
+
+        The newest game **we hold**, which is not the newest they played: the
+        corpus is crawled, and for a player with five or more stored games the
+        newest one is a median of four days old. Whatever shows this has to say
+        so.
+        """
+        rows = await self.played_by(puuid, limit=1)
+        return rows[0] if rows else None
+
+    async def stored_count(self, puuid: str) -> int:
+        """How many games we hold for this player. Zero is an answer."""
+        stmt = (
+            select(func.count())
+            .select_from(MatchParticipant)
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))
+        )
+        return int((await self.session.execute(stmt)).scalar() or 0)

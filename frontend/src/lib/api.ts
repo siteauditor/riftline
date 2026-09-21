@@ -154,11 +154,37 @@ export interface LiveGame {
   corpus_patch: string | null
 }
 
+/** The newest game Riftline holds for a player, for the page they see when they
+ *  are not playing. Not the newest game they played: the corpus is crawled, and
+ *  for a player with 5+ stored games the newest is a median of 4 days old. */
+export interface LastStoredGame {
+  match_id: string
+  queue_id: number
+  queue_name: string
+  champion: ChampionRef
+  position: Position | null
+  win: boolean
+  kills: number
+  deaths: number
+  assists: number
+  game_creation: number
+  game_duration: number
+  performance_score: number | null
+}
+
+export interface IdleSummary {
+  stored_games: number
+  last_game: LastStoredGame | null
+  basis: string
+}
+
 export interface LiveGameResponse {
   puuid: string
   platform: string
   in_game: boolean
   game: LiveGame | null
+  /** Only when they are not in a game. */
+  idle: IdleSummary | null
   checked_at: number
 }
 
