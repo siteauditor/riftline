@@ -136,6 +136,13 @@ time somebody opens it. Run it to pre-warm one. Names are the interesting cost
 there, because league-v4 returns none at all: a ladder in a region you have
 crawled is almost entirely named for free from stored matches (99% of EUW
 Challenger), and one you have not is named a page at a time as people browse.
+Each name is one `account-v1` call, and naming never spends the last 20 calls
+of the key's two-minute window, which stay free for player searches. On a
+development key that is at most 80 names every two minutes, so an open page
+asks again on its own, at the moment the server says the key will have room.
+A few ladder entries have no account behind them at all (two of the first 200
+in EUW Bronze IV): Riot's 404 is remembered for a week and the row reads "No
+Riot ID" instead of waiting for a name that is not coming.
 
 `timelines` is what produces the laning score on match rows, the Laning tab, the
 skill order, and the ordered build path. Without it the champion page falls back

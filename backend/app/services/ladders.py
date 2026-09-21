@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IngestCursor, LadderEntry, Player, utcnow
 from app.riot.client import RiotClient
-from app.riot.errors import RiotApiError
+from app.riot.errors import RiotApiError, RiotNotFound
 from app.riot.limiter import wait_deadline
 from app.riot.routing import Platform, resolve_platform
 from app.services.players import normalize_riot_name
@@ -88,6 +88,11 @@ REFRESH_WAIT_SECONDS = 5.0
 # Calls in the key's two-minute window that naming never touches, kept for the
 # lookups a visitor is actually waiting on: about four cold profiles' worth.
 NAME_RESERVE = 20
+# How long a "no such account" from account-v1 is believed. Some ladder entries
+# have no account behind them: on 2026-09-22, two of the first 200 EUW Bronze IV rows
+# answered 404 for every lookup, and each view of their page paid for both
+# again. A week, rather than for good, in case the account comes back.
+NO_ACCOUNT_RECHECK_SECONDS = 7 * 24 * 3600
 
 
 @dataclass(slots=True)
@@ -105,6 +110,9 @@ class LadderRow:
     inactive: bool
     game_name: str | None = None
     tag_line: str | None = None
+    # Riot has no account for this entry, so it will never have a name, and
+    # the page should stop waiting for one.
+    no_riot_id: bool = False
 
 
 @dataclass(slots=True)
@@ -131,6 +139,11 @@ class LadderPage:
     # True when naming stopped to leave the key's reserve alone, so the page
     # can say the rest are waiting on Riot rather than unknown.
     names_held_back: bool = False
+    # When held back: seconds until the key has room for the next batch, so
+    # the page can ask again then instead of guessing. A call frees two
+    # minutes after it was made, which is longer than any fixed retry that
+    # still feels live.
+    names_retry_after: float | None = None
     rows: list[LadderRow] = field(default_factory=list)
 
 
@@ -177,8 +190,10 @@ class LadderService:
         self.client = client
         self.settings = settings
         self.ranks = RankCache(session, client, settings)
-        # Set by `_resolve_names` when the key's reserve stopped it.
+        # Set by `_resolve_names` when the key's reserve stopped it, with when
+        # trying again will get somewhere.
         self.names_held_back = False
+        self.names_retry_after: float | None = None
 
     # ------------------------------------------------------------- fetching
 
@@ -499,7 +514,7 @@ class LadderService:
             ).scalars()
         )
 
-        names = await self._names_for(
+        names, nameless = await self._names_for(
             [e.puuid for e in entries], resolve_names, resolved
         )
         rows = [
@@ -517,6 +532,7 @@ class LadderService:
                 inactive=e.inactive,
                 game_name=names.get(e.puuid, (None, None))[0],
                 tag_line=names.get(e.puuid, (None, None))[1],
+                no_riot_id=e.puuid in nameless,
             )
             for e in entries
         ]
@@ -537,6 +553,7 @@ class LadderService:
             named_on_page=sum(1 for r in rows if r.game_name and r.tag_line),
             fetched_at=age,
             names_held_back=self.names_held_back,
+            names_retry_after=self.names_retry_after,
             rows=rows,
         )
 
@@ -544,10 +561,14 @@ class LadderService:
 
     async def _names_for(
         self, puuids: list[str], resolve: bool, platform: Platform
-    ) -> dict[str, tuple[str | None, str | None]]:
-        """Names for the rows on this page, resolving a bounded few if asked."""
+    ) -> tuple[dict[str, tuple[str | None, str | None]], set[str]]:
+        """Names for the rows on this page, resolving a bounded few if asked.
+
+        Also the rows Riot recently said have no account, which are not asked
+        about again until `NO_ACCOUNT_RECHECK_SECONDS` has passed.
+        """
         if not puuids:
-            return {}
+            return {}, set()
 
         known = {
             p.puuid: (p.game_name, p.tag_line)
@@ -563,17 +584,33 @@ class LadderService:
         for puuid, pair in (await self.ranks.names_from_matches(puuids)).items():
             known.setdefault(puuid, pair)
 
-        missing = [p for p in puuids if p not in known]
+        nameless = {
+            row.puuid
+            for row in (
+                await self.session.execute(
+                    select(Player.puuid, Player.account_fetched_at).where(
+                        Player.puuid.in_(puuids),
+                        Player.game_name.is_(None),
+                        Player.account_fetched_at.isnot(None),
+                    )
+                )
+            )
+            if row.puuid not in known
+            and is_fresh(row.account_fetched_at, NO_ACCOUNT_RECHECK_SECONDS)
+        }
+
+        missing = [p for p in puuids if p not in known and p not in nameless]
         if resolve and missing:
-            resolved = await self._resolve_names(
+            resolved, absent = await self._resolve_names(
                 missing[:NAME_BUDGET_PER_REQUEST], platform
             )
             known.update(resolved)
-        return known
+            nameless |= absent
+        return known, nameless
 
     async def _resolve_names(
         self, puuids: list[str], platform: Platform
-    ) -> dict[str, tuple[str | None, str | None]]:
+    ) -> tuple[dict[str, tuple[str | None, str | None]], set[str]]:
         """Spend account-v1 calls to name PUUIDs nothing else could.
 
         Writes what it learns onto ``Player``, so the cost is paid once per
@@ -584,10 +621,13 @@ class LadderService:
         stored games, so it can spend 25 calls a view, and with the page now
         asking again while unnamed rows remain, it would otherwise take the
         whole two-minute budget and answer the next search with a rate limit.
-        Sets `names_held_back` when the reserve stopped it.
+        Sets `names_held_back` when the reserve stopped it. Returns the names
+        found and the entries Riot has no account for; those are stamped too,
+        so the next view does not pay for them again.
         """
         semaphore = asyncio.Semaphore(NAME_CONCURRENCY)
         found: dict[str, tuple[str | None, str | None]] = {}
+        absent: set[str] = set()
 
         async def one(puuid: str) -> None:
             async with semaphore:
@@ -602,6 +642,9 @@ class LadderService:
                     account = await self.client.account_by_puuid(
                         puuid, platform.account_region
                     )
+                except RiotNotFound:
+                    absent.add(puuid)
+                    return
                 except RiotApiError:
                     return
                 name, tag = account.get("gameName"), account.get("tagLine")
@@ -616,10 +659,17 @@ class LadderService:
                 "ladder name budget of %.0fs expired with %d of %d named",
                 NAME_BUDGET_SECONDS, len(found), len(puuids),
             )
-        if not found:
-            return found
+        if self.names_held_back:
+            # Room for everything this page still wants, not just one more
+            # call: a single freed slot names one row and costs a poll.
+            wanted = len(puuids) - len(found) - len(absent)
+            self.names_retry_after = round(
+                self.client.limiter.seconds_until_free(NAME_RESERVE + wanted), 1
+            )
+        if not found and not absent:
+            return found, absent
 
-        players = await self.ranks.ensure_players(list(found), platform)
+        players = await self.ranks.ensure_players([*found, *absent], platform)
         for puuid, (name, tag) in found.items():
             player = players.get(puuid)
             if player is not None and not player.game_name:
@@ -628,8 +678,15 @@ class LadderService:
                 # not find the row and will pay for the same account-v1 call a
                 # second time. That is the whole "paid once per player" claim.
                 player.search_name = normalize_riot_name(name)
+        for puuid in absent:
+            player = players.get(puuid)
+            if player is not None and not player.game_name:
+                # A stub with a lookup stamp and no name: nothing else reads
+                # that pair, because a Riot ID search matches on
+                # `search_name` and suggestions need a name.
+                player.account_fetched_at = utcnow()
         await self.session.commit()
-        return found
+        return found, absent
 
 
 __all__ = [

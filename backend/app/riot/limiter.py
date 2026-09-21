@@ -92,6 +92,17 @@ class SlidingWindow:
     def record(self, now: float) -> None:
         self.hits.append(now)
 
+    def seconds_until_free(self, slots: int, now: float) -> float:
+        """Seconds until at least ``slots`` are free. 0.0 if they already are.
+
+        Asking for more than the window holds is answered for the whole window.
+        """
+        self.prune(now)
+        excess = len(self.hits) - (self.limit - min(slots, self.limit))
+        if excess <= 0:
+            return 0.0
+        return max(0.0, self.hits[excess - 1] + self.period - now)
+
     def sync(self, observed: int, now: float) -> None:
         """Reconcile our count with Riot's own.
 
@@ -233,6 +244,17 @@ class RateLimiter:
             return 0
         longest.prune(now)
         return max(0, longest.limit - len(longest.hits))
+
+    def seconds_until_free(self, slots: int) -> float:
+        """Seconds until the longest application window has ``slots`` free.
+
+        The same window `spare` reads, so a caller that stopped because
+        `spare` was low can say when trying again will get somewhere.
+        """
+        longest = max(self._app, key=lambda w: w.period, default=None)
+        if longest is None:
+            return 0.0
+        return longest.seconds_until_free(slots, time.monotonic())
 
     def snapshot(self) -> dict:
         """Current utilisation, for /health and the UI's rate-budget meter."""

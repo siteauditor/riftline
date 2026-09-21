@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { PLATFORMS, api } from '../lib/api'
+import { PLATFORMS, api, type LeaderboardResponse } from '../lib/api'
 import Crest from '../components/Crest'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
@@ -31,11 +31,21 @@ const PER_PAGE = 50
 
 // Riot sends ladders without names, so each unnamed player costs one lookup,
 // and the server names up to 25 a request while the key allows. A page with
-// unnamed rows asks again on its own, this often and this many times, instead
-// of telling the reader to come back: on a Bronze page nobody is named from
-// our stored games, and 50 names are two requests' worth.
-const NAME_POLL_MS = 8_000
-const NAME_POLLS = 6
+// unnamed rows asks again on its own instead of telling the reader to come
+// back: on a Bronze page nobody is named from our stored games, and 50 names
+// are two requests' worth, so the second follows quickly.
+const NAME_POLL_MS = 3_000
+// When the server held names back to keep the key's reserve, it says when the
+// key will have room and the page asks then. A call frees two minutes after it
+// was made, and a fixed 48 seconds of asking gave up first: measured on EUW
+// Bronze IV on 2026-09-22, pages 5 to 8 were still held when it stopped.
+const NAME_POLL_MAX_MS = 125_000
+const NAME_POLLS = 8
+
+/** Rows that can still get a name. Riot has no account behind some ladder
+ *  entries, and those are not worth waiting for. */
+const pendingNames = (d: LeaderboardResponse) =>
+  d.rows.filter((r) => !r.riot_id && !r.no_riot_id).length
 
 export default function Leaderboard() {
   // Filters live in the URL, the way the champion page already does it, so a
@@ -96,18 +106,22 @@ export default function Leaderboard() {
     // NAME_POLLS more and names the rest on a later visit.
     refetchInterval: (q) => {
       const d = q.state.data
-      if (!d || d.named_on_page >= d.rows.length) return false
-      return q.state.dataUpdateCount <= NAME_POLLS ? NAME_POLL_MS : false
+      if (!d || pendingNames(d) === 0 || q.state.dataUpdateCount > NAME_POLLS) return false
+      if (!d.names_held_back) return NAME_POLL_MS
+      // A second past the estimate, so the slots have freed when it lands.
+      const wait = ((d.names_retry_after ?? 0) + 1) * 1000
+      return Math.min(Math.max(wait, NAME_POLL_MS), NAME_POLL_MAX_MS)
     },
     refetchIntervalInBackground: false,
   })
 
   const data = query.data
   const answers = queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0
-  const unnamed = data ? data.rows.length - data.named_on_page : 0
+  const pending = data ? pendingNames(data) : 0
+  const noAccount = data ? data.rows.filter((r) => r.no_riot_id).length : 0
   // Still asking, and this is the page's own answer rather than the previous
   // page shown while it loads.
-  const lookingUp = unnamed > 0 && answers <= NAME_POLLS && !query.isPlaceholderData
+  const lookingUp = pending > 0 && answers <= NAME_POLLS && !query.isPlaceholderData
 
   // The ladder being read is the subject, so it sets the page's accent. On a
   // site about rank the colour carries information rather than decorating.
@@ -195,12 +209,13 @@ export default function Leaderboard() {
               : ''}
             {data.fetched_at && `, snapshot ${timeAgo(data.fetched_at)}`}
             {`, ${data.named_on_page} of ${data.rows.length} named here`}
-            {unnamed > 0 &&
-              (lookingUp
-                ? ', looking up the rest'
+            {noAccount > 0 && `, ${noAccount} with no Riot ID`}
+            {pending > 0 &&
+              (!lookingUp
+                ? ', the rest fill in on a later visit'
                 : data.names_held_back
-                  ? ", the rest wait on Riot's rate limit"
-                  : ', the rest fill in on a later visit')}
+                  ? ", the rest follow when Riot's rate limit allows"
+                  : ', looking up the rest')}
           </p>
         )}
       </div>
@@ -257,6 +272,13 @@ export default function Leaderboard() {
                               #{tagLine}
                             </span>
                           </Link>
+                        ) : row.no_riot_id ? (
+                          <span
+                            className="text-ink-faint"
+                            title="Riot has no account record behind this ladder entry, so there is no name to show."
+                          >
+                            No Riot ID
+                          </span>
                         ) : (
                           <span
                             className="text-ink-faint"

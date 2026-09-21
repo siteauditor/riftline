@@ -27,6 +27,8 @@ class LeaderboardRow(BaseModel):
     # name at all, so a region we have not crawled is genuinely a list of
     # anonymous ids until somebody pays an account-v1 call each to name it.
     riot_id: str | None = None
+    # Riot has no account for this entry, so no name is coming.
+    no_riot_id: bool = False
     tier: str
     division: str | None = None
     league_points: int = 0
@@ -68,6 +70,8 @@ class LeaderboardResponse(BaseModel):
     # True when names were left for later so the key keeps a reserve for
     # player searches. The rest are waiting on Riot, not unknown.
     names_held_back: bool = False
+    # With it, seconds until the key has room to name the rest.
+    names_retry_after: float | None = None
     fetched_at: int | None = None
     rows: list[LeaderboardRow] = Field(default_factory=list)
 
@@ -151,6 +155,7 @@ async def get_leaderboard(
         has_more=result.page * result.per_page < result.total_stored,
         named_on_page=result.named_on_page,
         names_held_back=result.names_held_back,
+        names_retry_after=result.names_retry_after,
         fetched_at=epoch_ms(result.fetched_at),
         rows=[
             LeaderboardRow(
@@ -159,6 +164,7 @@ async def get_leaderboard(
                 riot_id=(
                     f"{r.game_name}#{r.tag_line}" if r.game_name and r.tag_line else None
                 ),
+                no_riot_id=r.no_riot_id,
                 tier=r.tier,
                 division=None if r.tier in APEX_TIERS else r.division,
                 league_points=r.league_points,

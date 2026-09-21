@@ -332,6 +332,9 @@ export interface LeaderboardRow {
   puuid: string
   /** Null where we have never seen the account: league-v4 carries no names. */
   riot_id: string | null
+  /** Riot has no account for this entry, so no name is coming. Optional: a
+   *  server one deploy behind does not send it. */
+  no_riot_id?: boolean
   tier: string
   division: string | null
   league_points: number
@@ -366,6 +369,8 @@ export interface LeaderboardResponse {
   /** True when names were left for later to keep the key's reserve for
    *  player searches. Optional: a server one deploy behind does not send it. */
   names_held_back?: boolean
+  /** With it, seconds until the key has room to name the rest. */
+  names_retry_after?: number | null
   fetched_at: number | null
   rows: LeaderboardRow[]
 }

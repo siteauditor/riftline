@@ -323,6 +323,62 @@ async def test_an_unresolvable_player_stays_unnamed():
 
 
 @respx.mock
+async def test_an_entry_riot_has_no_account_for_is_not_asked_about_again():
+    """Measured on EUW Bronze IV: two of the first 200 rows answer 404 to every
+    lookup, and each view of their page paid for both again while the page
+    kept waiting for names that were never coming."""
+    from datetime import timedelta
+
+    from app.db.models import utcnow
+    from app.services.ladders import NO_ACCOUNT_RECHECK_SECONDS
+
+    puuid = "LAD-no-account".ljust(78, "z")
+    mock_apex([apex_entry(puuid, 900)])
+    account = respx.get(url__regex=r".*/riot/account/v1/accounts/by-puuid/.*").mock(
+        return_value=httpx.Response(404, json={})
+    )
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+        first = await service(session).page(PLATFORM, tier="CHALLENGER")
+    async with SessionLocal() as session:
+        second = await service(session).page(PLATFORM, tier="CHALLENGER")
+
+    assert account.call_count == 1, "a 404 is remembered"
+    assert first.rows[0].no_riot_id and second.rows[0].no_riot_id
+    assert second.rows[0].game_name is None
+    assert not second.names_held_back
+
+    # Believed for a while, not for good.
+    async with SessionLocal() as session:
+        stored = await session.get(Player, puuid)
+        stored.account_fetched_at = utcnow() - timedelta(
+            seconds=NO_ACCOUNT_RECHECK_SECONDS + 60
+        )
+        await session.commit()
+        await service(session).page(PLATFORM, tier="CHALLENGER")
+    assert account.call_count == 2
+
+
+@respx.mock
+async def test_a_failed_lookup_that_is_not_a_404_is_tried_again():
+    """Only "no such account" is remembered. Anything else says nothing about
+    the player, so the next view asks again."""
+    puuid = "LAD-forbidden".ljust(78, "z")
+    mock_apex([apex_entry(puuid, 900)])
+    account = respx.get(url__regex=r".*/riot/account/v1/accounts/by-puuid/.*").mock(
+        return_value=httpx.Response(403, json={})
+    )
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+        first = await service(session).page(PLATFORM, tier="CHALLENGER")
+    async with SessionLocal() as session:
+        await service(session).page(PLATFORM, tier="CHALLENGER")
+
+    assert account.call_count == 2
+    assert not first.rows[0].no_riot_id
+
+
+@respx.mock
 async def test_a_player_returned_on_two_pages_is_stored_once():
     """The paged endpoint reads a ladder that is moving: a player on page 1 when
     it is fetched can be on page 2 a second later. Seen live on EUW Diamond I,
@@ -433,3 +489,32 @@ async def test_naming_leaves_the_keys_last_calls_for_player_searches():
     assert account.call_count == len(puuids), "only the page with headroom spent calls"
     assert (held.named_on_page, held.names_held_back) == (0, True)
     assert (named.named_on_page, named.names_held_back) == (len(puuids), False)
+    assert named.names_retry_after is None
+
+
+@respx.mock
+async def test_a_held_back_page_says_when_to_ask_again():
+    """A call frees two minutes after it was made, longer than any fixed
+    retry that still feels live, so the page is told when the key will have
+    room for the names it still wants instead of guessing."""
+    from app.services.ladders import NAME_RESERVE
+
+    puuids = [f"LAD-retry{i}".ljust(78, "r") for i in range(5)]
+    mock_apex([apex_entry(p, 900 - i) for i, p in enumerate(puuids)])
+    account = respx.get(url__regex=r".*/riot/account/v1/accounts/by-puuid/.*").mock(
+        return_value=httpx.Response(200, json={"gameName": "N", "tagLine": "T"})
+    )
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+        busy = service(session)
+        await busy.client.limiter.observe(
+            "x", {"X-App-Rate-Limit-Count": f"{100 - NAME_RESERVE}:120"}
+        )
+        held = await busy.page(PLATFORM, tier="CHALLENGER")
+
+    assert account.call_count == 0
+    assert held.names_held_back
+    # The key needs NAME_RESERVE + 5 free: 5 of the 80 spread hits aging out,
+    # the fifth at 5 * 120 / 80 = 7.5 s from now.
+    assert held.names_retry_after is not None
+    assert 6.0 <= held.names_retry_after <= 7.5

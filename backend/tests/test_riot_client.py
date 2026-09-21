@@ -68,6 +68,19 @@ def test_sliding_window_reports_when_a_slot_frees():
     assert w.retry_after(now + 11) == 0.0
 
 
+def test_sliding_window_says_when_several_slots_will_be_free():
+    w = SlidingWindow(limit=4, period=10.0)
+    for t in (1000.0, 1001.0, 1002.0, 1003.0):
+        w.record(t)
+    now = 1004.0
+    assert w.seconds_until_free(0, now) == 0.0
+    # Two free once the two oldest age out, the second at 1011.
+    assert w.seconds_until_free(2, now) == pytest.approx(7.0)
+    # More than the window holds means the whole window.
+    assert w.seconds_until_free(9, now) == pytest.approx(9.0)
+    assert w.seconds_until_free(2, 1011.0) == 0.0
+
+
 def test_sliding_window_sync_only_tops_up():
     w = SlidingWindow(limit=10, period=60.0)
     w.record(1000.0)
