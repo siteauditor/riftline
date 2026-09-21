@@ -661,6 +661,10 @@ async def rebuild_facet_stats(
                 record("skill_priority", priority)
             if len(levels) >= 15:
                 record("skill_order", list(levels[:15]))
+            # The level 1 pick on its own. Three possible values, so unlike
+            # the sequence above it holds up on a few dozen games, and it is
+            # the first thing anyone asks about an ability.
+            record("skill_first", [levels[0]])
 
     await session.execute(
         delete(ChampionFacetStat).where(

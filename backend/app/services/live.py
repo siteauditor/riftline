@@ -40,6 +40,8 @@ from app.services.aggregate import (
 from app.services.draft import MATCHUP_SHRINKAGE, TEAM_SHRINKAGE, credible_lift
 from app.services.ranks import RankCache
 from app.services.roles import SUMMONERS_RIFT_MAP_ID, assign_team, load_priors
+from app.services.skins import record_sightings
+from app.services.static_data import static_data
 
 log = logging.getLogger(__name__)
 
@@ -899,6 +901,16 @@ class LiveGameService:
         # Pure arithmetic over what the readers above attached: no query, no
         # Riot call, and nothing in it that predicts the game.
         game.sides = side_read(participants, game.queue_id, puuid)
+        # The only place Riot ever says which skin anyone wears. No Riot call:
+        # the payload is already in hand.
+        await record_sightings(
+            platform=game.platform_id,
+            game_id=game.game_id,
+            queue_id=game.queue_id,
+            in_progress=game.phase == "in_progress",
+            participants=participants,
+            chroma_parent=static_data.chroma_parent,
+        )
         return game
 
     async def _infer_positions(self, participants: list[LiveParticipant]) -> bool:

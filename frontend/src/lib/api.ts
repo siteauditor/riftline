@@ -822,6 +822,8 @@ export interface ChampionDetail {
     avg_gold: number
     avg_damage: number
     avg_vision: number
+    /** Null on the oldest patch held, or where the role was not played before. */
+    previous?: PatchChange | null
   }
   builds: {
     /**
@@ -837,8 +839,12 @@ export interface ChampionDetail {
     path: FacetEntry[]
   }
   runes: { keystones: FacetEntry[]; pages: FacetEntry[] }
-  /** Ability slots 1-4 are Q/W/E/R; these facets carry no icons. */
-  skills: { priority: FacetEntry[]; order: FacetEntry[] }
+  /**
+   * Ability slots 1-4 are Q/W/E/R; these facets carry no icons, which come once
+   * from the profile instead. `first` is optional because a server one deploy
+   * behind does not send it.
+   */
+  skills: { priority: FacetEntry[]; order: FacetEntry[]; first?: FacetEntry[] }
   laning: {
     /** How many of the champion's games had a timeline, not its total games. */
     games: number
@@ -849,6 +855,124 @@ export interface ChampionDetail {
   spells: FacetEntry[]
   counters: { lane: PairEntry[]; team: PairEntry[] }
   synergies: PairEntry[]
+}
+
+/**
+ * The same champion, role and bracket on the patch before. A change is only
+ * drawn where `*_moved` is true: the two 95% intervals no longer overlap.
+ */
+export interface PatchChange {
+  patch: string
+  games: number
+  win_rate: number
+  pick_rate: number
+  win_rate_moved: boolean
+  pick_rate_moved: boolean
+}
+
+// --- champion profile ------------------------------------------------------
+
+export interface ChampionRating {
+  key: string
+  label: string
+  /** Riot's own 0 to 10. */
+  value: number
+}
+
+export interface ChampionBaseStat {
+  key: string
+  label: string
+  level1: number
+  /** Null for the stats that do not grow, and for growth Riot did not publish. */
+  level18: number | null
+  /** False when Data Dragon ships this growth as zero for every champion. */
+  growth_published?: boolean
+}
+
+export interface ChampionAbility {
+  /** "P" for the passive, then "Q", "W", "E", "R". */
+  slot: string
+  name: string
+  /** Plain text; line breaks are newlines. */
+  description: string
+  icon_url: string | null
+  cooldown: string | null
+  cost: string | null
+  range: string | null
+}
+
+export interface ChampionSkin {
+  id: number
+  num: number
+  name: string
+  rarity: string | null
+  legacy: boolean
+  line: string | null
+  description: string | null
+  chromas: number
+  tile_url: string | null
+  splash_url: string | null
+  /** Live sightings. Null while the champion is under the floor, which is not zero. */
+  sightings: number | null
+}
+
+export interface ChampionProfile {
+  champion: ChampionInfo
+  blurb: string
+  lore: string | null
+  resource: string | null
+  ratings: ChampionRating[]
+  stats: ChampionBaseStat[]
+  ally_tips: string[]
+  enemy_tips: string[]
+  passive: ChampionAbility | null
+  abilities: ChampionAbility[]
+  /** False when the lore file has not arrived: absence, not "none". */
+  detail_loaded: boolean
+  skins: ChampionSkin[]
+  skin_sightings: number
+  skin_sightings_floor: number
+}
+
+export interface ChampionPlayer {
+  puuid: string
+  game_name: string | null
+  tag_line: string | null
+  /** Lower case, for the profile link. */
+  platform: string
+  games: number
+  wins: number
+  win_rate: number
+  avg_score: number
+  scored_games: number
+  tier: string | null
+  division: string | null
+  league_points: number | null
+}
+
+export interface ChampionPlayers {
+  champion_id: number
+  min_games: number
+  min_scored: number
+  /** How many cleared the floors, whether or not the list is shown. */
+  qualified: number
+  players: ChampionPlayer[]
+}
+
+export interface TopSkin {
+  champion: ChampionRef
+  num: number
+  name: string
+  tile_url: string | null
+  sightings: number
+  champion_sightings: number
+}
+
+export interface TopSkins {
+  total: number
+  min_sightings: number
+  min_skins: number
+  skins: TopSkin[]
 }
 
 // --- player analytics ------------------------------------------------------
@@ -1130,6 +1254,14 @@ export const api = {
 
   champion: (championId: number, opts: SliceQuery = {}) =>
     request<ChampionDetail>(`/api/champions/${championId}?${sliceParams(opts, 5)}`),
+
+  championProfile: (championId: number) =>
+    request<ChampionProfile>(`/api/champions/${championId}/profile`),
+
+  championPlayers: (championId: number) =>
+    request<ChampionPlayers>(`/api/champions/${championId}/players`),
+
+  topSkins: () => request<TopSkins>('/api/skins/top'),
 
   analytics: (
     platform: string,

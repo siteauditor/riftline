@@ -705,3 +705,41 @@ class IngestCursor(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
+
+
+class SkinSighting(Base):
+    """One player seen wearing one skin in one live game.
+
+    The only skin signal Riot gives us. match-v5 carries no skin field at all
+    (every one of a stored payload's 156 participant keys checked, 2026-09-21)
+    and a timeline carries none either, so nothing here can be backfilled: the
+    table holds only what the live tab has watched since it was created, and a
+    skin board built on it says how many sightings it stands on.
+
+    Keyed on the slot in the game rather than the player. A live page polls, so
+    the same ten players are seen again every few seconds; the unique key makes
+    each of them count once, and no puuid is kept, because nothing here needs to
+    know who was wearing what.
+    """
+
+    __tablename__ = "skin_sightings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    platform: Mapped[str] = mapped_column(String(8))
+    game_id: Mapped[int] = mapped_column(BigInteger)
+    participant_index: Mapped[int] = mapped_column(Integer)
+    champion_id: Mapped[int] = mapped_column(Integer)
+    # The skin, never a chroma: a chroma is recorded as the skin it recolours,
+    # so the board ranks skins and every entry on it has art.
+    skin_num: Mapped[int] = mapped_column(Integer)
+    queue_id: Mapped[int] = mapped_column(Integer, default=0)
+    seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "platform", "game_id", "participant_index", name="uq_skin_sighting"
+        ),
+        Index("ix_skin_sighting_champion", "champion_id", "skin_num"),
+    )

@@ -374,6 +374,57 @@ Counters come in two scopes. `LANE` is the opponent in your lane, which is what
 "counters" usually means. `TEAM` is the champion against all five enemies, which
 is what actually decides games and what the draft assistant was missing.
 
+### The champion, not just the numbers
+
+The page has two groups of tabs. **The numbers** (Build, Runes, Laning,
+Counters, Synergies, Players) are a slice of our games. **The champion** (Story,
+Abilities, Skins) is who the champion is, which no sample size changes, and it
+comes from `GET /api/champions/{id}/profile`: its own endpoint, because the
+detail endpoint is a 404 on any patch where the champion has no games (one
+champion on 16.17, and every new release on its first day), and a story does
+not depend on a sample. On such a patch the page opens on the story instead of
+an error.
+
+- **Story and abilities** come from Data Dragon's `championFull.json`, 0.41 MB
+  gzipped for all 173 champions, fetched on the static refresh as an optional
+  source. Without it a page loses only the long lore, the tips and the ability
+  names: the ratings and base stats come from `champion.json`, which is
+  required. Ability text is `description`, never `tooltip` (the tooltip is
+  written against `{{ }}` placeholders only the client resolves), with Riot's
+  markup stripped server side so the page never renders Riot's HTML. A cost is
+  printed only where its template resolves; 37 of 692 are withheld rather than
+  half filled.
+- **Data Dragon ships `attackdamageperlevel: 0` for all 173 champions** on
+  16.18.1. A growth field that is zero across the whole roster is treated as
+  unpublished, so level 18 attack damage reads "not published" rather than
+  equal to level 1. Real zeros are never roster wide (28 champions have no mana).
+- **Skins come from Community Dragon, not Data Dragon**, because Data Dragon
+  lists every chroma as a skin: Ahri has 95 "skins" there and 21 real ones, and
+  74 of the 95 have no art (their tile URL is a 404). The file was already
+  downloaded for the live tab's chroma map; the catalogue is the rest of it.
+- **The skill figures** beside each ability (taken at level 1, maxed first) are
+  our own, from the `skill_first` and `skill_priority` facets, sliced like the
+  rest of the numbers.
+- **Players** ranks everyone with 5 or more Summoner's Rift games on the
+  champion (3 of them scored) by average Riftline score, over every game we
+  hold rather than the patch slice: who is good on a champion is not a patch
+  question, and the slice costs a third of the sample (399 qualifying pairs
+  against 621). The board is withheld below 3 players, and the record sits
+  beside the score because a score rates play, not results.
+- **The change since last patch** is drawn only where this patch's and the
+  last one's 95% Wilson intervals stop overlapping. From 16.17 to 16.18, 293 of
+  760 win rates moved 20 points or more and 2 of those moves passed.
+
+**Skin popularity cannot be backfilled.** No stored match or timeline carries a
+skin: not one of a match payload's 156 participant keys mentions one. The only
+place Riot says what anyone wears is spectator's `lastSelectedSkinIndex`, so
+every live lookup records its lobby in `skin_sightings`, once the game is under
+way (a skin can change in champion select), once per player however often the
+page polls, with chromas counted as their parent skin and no puuid stored. Per
+skin counts appear on a champion at 20 sightings, and the home page's "Most
+worn skins" appears once 3 skins have 5 sightings each. Until then both say
+nothing, which is the honest state of a table that started empty.
+
 ## Play style
 
 `/api/summoner/{platform}/{name}/{tag}/analytics` returns role share, champion

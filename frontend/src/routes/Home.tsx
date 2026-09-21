@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import MostWornSkins from '../components/MostWornSkins'
 import PositionIcon from '../components/PositionIcon'
 import SearchBar from '../components/SearchBar'
 import { SectionTitle } from '../components/Stat'
@@ -107,6 +108,8 @@ export default function Home() {
       <BestPicks meta={meta} />
 
       <BestGames best={best} />
+
+      <MostWornSkins />
     </div>
   )
 }

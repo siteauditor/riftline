@@ -22,18 +22,30 @@ from collections import defaultdict
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import DbDep, StaticDep
 from app.api.schemas import ChampionRef, ItemRef, RuneRef, SpellRef
-from app.db.models import ChampionFacetStat, ChampionStat, MatchupStat, SynergyStat
+from app.db.models import (
+    ChampionFacetStat,
+    ChampionStat,
+    Match,
+    MatchParticipant,
+    MatchupStat,
+    RankedEntry,
+    SynergyStat,
+)
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
     available_slices,
     tier_for,
     wilson_lower_bound,
+    wilson_upper_bound,
+    win_as_int,
 )
+from app.services.skins import MIN_CHAMPION_SIGHTINGS, champion_skin_counts
+from app.services.static_data import Ability, StaticDataService
 
 router = APIRouter(prefix="/api/champions", tags=["champions"])
 
@@ -90,6 +102,8 @@ class SkillSection(BaseModel):
     priority: list[FacetEntry] = Field(default_factory=list)
     # The exact level-up sequence. High cardinality, so usually thin.
     order: list[FacetEntry] = Field(default_factory=list)
+    # The ability taken at level 1, one slot per entry.
+    first: list[FacetEntry] = Field(default_factory=list)
 
 
 class LaningSection(BaseModel):
@@ -131,6 +145,24 @@ class CounterSection(BaseModel):
     team: list[PairEntry] = Field(default_factory=list)
 
 
+class PatchChange(BaseModel):
+    """The same champion, role and bracket on the patch before.
+
+    Measured on 2026-09-21: of 760 champion and role rows held on both 16.17
+    and 16.18, the win rate moved 20 points or more on 293, and 2 of those
+    moves survive a test for chance. So a change is published only where the
+    two 95% Wilson intervals stop overlapping, and ``*_moved`` says when that
+    is. Pick rate stands on the whole slice, so 32 of its moves survive.
+    """
+
+    patch: str
+    games: int
+    win_rate: float
+    pick_rate: float
+    win_rate_moved: bool = False
+    pick_rate_moved: bool = False
+
+
 class ChampionOverview(BaseModel):
     games: int
     wins: int
@@ -147,6 +179,8 @@ class ChampionOverview(BaseModel):
     avg_gold: float
     avg_damage: float
     avg_vision: float
+    # Null on the oldest patch held, or where the role was not played before.
+    previous: PatchChange | None = None
 
 
 class ChampionDetail(BaseModel):
@@ -166,6 +200,223 @@ class ChampionDetail(BaseModel):
     spells: list[FacetEntry] = Field(default_factory=list)
     counters: CounterSection
     synergies: list[PairEntry] = Field(default_factory=list)
+
+
+# --- profile: who the champion is ---------------------------------------------
+
+
+class Rating(BaseModel):
+    key: str
+    label: str
+    # Riot's own 0 to 10.
+    value: int
+
+
+class BaseStat(BaseModel):
+    key: str
+    label: str
+    level1: float
+    # Null for the stats that do not grow (move speed, attack range), and for
+    # the ones whose growth Riot did not publish; `growth_published` says which.
+    level18: float | None = None
+    growth_published: bool = True
+
+
+class AbilityOut(BaseModel):
+    # "P" for the passive, then "Q", "W", "E", "R".
+    slot: str
+    name: str
+    description: str
+    icon_url: str | None = None
+    cooldown: str | None = None
+    cost: str | None = None
+    range: str | None = None
+
+
+class SkinOut(BaseModel):
+    id: int
+    num: int
+    name: str
+    rarity: str | None = None
+    legacy: bool = False
+    line: str | None = None
+    description: str | None = None
+    chromas: int = 0
+    tile_url: str | None = None
+    splash_url: str | None = None
+    # Live games this skin was seen in. Null while the champion is under the
+    # sighting floor, which is not the same as zero.
+    sightings: int | None = None
+
+
+class ChampionProfile(BaseModel):
+    """Everything about a champion that is not a statistic.
+
+    Its own endpoint, not part of the detail above, because that one is a
+    404 on any patch where the champion has no games (one champion on 16.17,
+    and every new release on its first day). A story does not depend on a
+    sample size.
+    """
+
+    champion: ChampionInfo
+    blurb: str = ""
+    lore: str | None = None
+    resource: str | None = None
+    ratings: list[Rating] = Field(default_factory=list)
+    stats: list[BaseStat] = Field(default_factory=list)
+    ally_tips: list[str] = Field(default_factory=list)
+    enemy_tips: list[str] = Field(default_factory=list)
+    passive: AbilityOut | None = None
+    abilities: list[AbilityOut] = Field(default_factory=list)
+    # False when championFull.json has not arrived: lore, tips and abilities
+    # are then missing for that reason, not because the champion has none.
+    detail_loaded: bool = False
+    skins: list[SkinOut] = Field(default_factory=list)
+    # Every live sighting of this champion, and the count it needs before any
+    # per skin figure is shown.
+    skin_sightings: int = 0
+    skin_sightings_floor: int = MIN_CHAMPION_SIGHTINGS
+
+
+# --- players: who is good on it -----------------------------------------------
+
+# Five games on the champion, three of them scored. At 5+ games the corpus holds
+# 621 player and champion pairs across 146 champions (measured 2026-09-21), and
+# 612 of them are fully scored, so the second floor rarely bites; it is there
+# for the games scored before the score existed.
+PLAYER_MIN_GAMES = 5
+PLAYER_MIN_SCORED = 3
+# Fewer than this and a board is a list of whoever was crawled, not a ranking.
+PLAYER_MIN_ROWS = 3
+PLAYER_LIMIT = 20
+
+
+class ChampionPlayer(BaseModel):
+    puuid: str
+    game_name: str | None = None
+    tag_line: str | None = None
+    # Lower case, for the profile link: the shard of their latest stored game.
+    platform: str
+    games: int
+    wins: int
+    win_rate: float
+    avg_score: float
+    scored_games: int
+    tier: str | None = None
+    division: str | None = None
+    league_points: int | None = None
+
+
+class ChampionPlayers(BaseModel):
+    champion_id: int
+    min_games: int = PLAYER_MIN_GAMES
+    min_scored: int = PLAYER_MIN_SCORED
+    # How many players cleared the floors, whether or not the list is shown.
+    qualified: int = 0
+    players: list[ChampionPlayer] = Field(default_factory=list)
+
+
+_RATINGS = (
+    ("attack", "Attack"),
+    ("defense", "Defense"),
+    ("magic", "Magic"),
+    ("difficulty", "Difficulty"),
+)
+
+# (key, label, growth per level). Regeneration is per 5 seconds, as Riot
+# writes it. The resource rows take the champion's own resource name.
+_BASE_STATS = (
+    ("hp", "Health", "hpperlevel"),
+    ("hpregen", "Health regen", "hpregenperlevel"),
+    ("mp", None, "mpperlevel"),
+    ("mpregen", None, "mpregenperlevel"),
+    ("attackdamage", "Attack damage", "attackdamageperlevel"),
+    ("attackspeed", "Attack speed", "attackspeedperlevel"),
+    ("armor", "Armor", "armorperlevel"),
+    ("spellblock", "Magic resist", "spellblockperlevel"),
+    ("movespeed", "Move speed", None),
+    ("attackrange", "Attack range", None),
+)
+
+
+def _base_stats(
+    stats: dict[str, float], resource: str, unpublished: set[str] | frozenset[str] = frozenset()
+) -> list[BaseStat]:
+    """Level 1 and level 18, from Data Dragon's base values and growth.
+
+    Riot's growth curve is ``growth * (n - 1) * (0.7025 + 0.0175 * (n - 1))``,
+    which at level 18 is exactly ``growth * 17``. Attack speed is the exception:
+    its growth is a percentage of the base, not a flat amount. A growth field
+    in ``unpublished`` is one Data Dragon ships as zero for every champion, so
+    its level 18 figure is withheld rather than printed equal to level 1.
+    """
+    out: list[BaseStat] = []
+    for key, label, growth_key in _BASE_STATS:
+        if key not in stats:
+            continue
+        base = stats[key]
+        if key in ("mp", "mpregen"):
+            # A champion without a resource carries zeros here, and "Mana 0"
+            # on Garen is a wrong fact rather than a missing one.
+            if not base or resource in ("", "None"):
+                continue
+            label = resource if key == "mp" else f"{resource} regen"
+        published = growth_key not in unpublished
+        growth = stats.get(growth_key, 0.0) if growth_key and published else None
+        if growth is None:
+            level18 = None
+        elif key == "attackspeed":
+            level18 = base * (1 + growth / 100 * 17)
+        else:
+            level18 = base + growth * 17
+        out.append(
+            BaseStat(
+                key=key,
+                label=label or key,
+                level1=base,
+                level18=level18,
+                growth_published=published,
+            )
+        )
+    return out
+
+
+def _ability_out(ability: Ability | None, sd: StaticDataService) -> AbilityOut | None:
+    if ability is None:
+        return None
+    return AbilityOut(
+        slot=ability.slot,
+        name=ability.name,
+        description=ability.description,
+        icon_url=sd.ability_icon(ability),
+        cooldown=ability.cooldown,
+        cost=ability.cost,
+        range=ability.range,
+    )
+
+
+def _champion_info(champion_id: int, sd: StaticDataService) -> ChampionInfo:
+    champion = sd.champion(champion_id)
+    return ChampionInfo(
+        id=champion_id,
+        name=sd.champion_name(champion_id),
+        icon_url=sd.champion_icon(champion_id),
+        key=champion.key if champion else None,
+        title=champion.title if champion else None,
+        tags=champion.tags if champion else [],
+        splash_url=sd.champion_splash(champion_id),
+        art_url=sd.champion_art(champion_id),
+        tile_url=sd.champion_tile(champion_id),
+    )
+
+
+def _moved(wins_a: int, games_a: int, wins_b: int, games_b: int) -> bool:
+    """True when two proportions' Wilson intervals do not overlap."""
+    if not games_a or not games_b:
+        return False
+    return wilson_lower_bound(wins_a, games_a) > wilson_upper_bound(
+        wins_b, games_b
+    ) or wilson_lower_bound(wins_b, games_b) > wilson_upper_bound(wins_a, games_a)
 
 
 def _facet_entry(row: ChampionFacetStat, sd, kind: str) -> FacetEntry:
@@ -240,15 +491,18 @@ async def get_champion(
         if position not in POSITIONS:
             raise HTTPException(400, f"position must be one of {', '.join(POSITIONS)}")
 
+    # Newest first. Read whether or not a patch was asked for, because the
+    # patch before the one shown is where the change figures come from.
+    held = [s["patch"] for s in await available_slices(db) if s["queue_id"] == queue_id]
     if patch is None:
-        matching = [s for s in await available_slices(db) if s["queue_id"] == queue_id]
-        if not matching:
+        if not held:
             raise HTTPException(
                 404,
                 "No aggregated data yet. Run `python -m scripts.ingest crawl` then "
                 "`python -m scripts.ingest aggregate`.",
             )
-        patch = matching[0]["patch"]
+        patch = held[0]
+    previous_patch = held[held.index(patch) + 1] if patch in held[:-1] else None
 
     slice_where = (
         ChampionStat.patch == patch,
@@ -333,6 +587,30 @@ async def get_champion(
         avg_vision=stat.avg_vision,
     )
 
+    if previous_patch:
+        before = (
+            await db.execute(
+                select(ChampionStat).where(
+                    ChampionStat.patch == previous_patch,
+                    ChampionStat.queue_id == queue_id,
+                    ChampionStat.rank_bracket == bracket,
+                    ChampionStat.champion_id == champion_id,
+                    ChampionStat.team_position == position,
+                )
+            )
+        ).scalar_one_or_none()
+        if before and before.games:
+            overview.previous = PatchChange(
+                patch=previous_patch,
+                games=before.games,
+                win_rate=before.win_rate,
+                pick_rate=before.pick_rate,
+                win_rate_moved=_moved(stat.wins, stat.games, before.wins, before.games),
+                pick_rate_moved=_moved(
+                    stat.games, stat.pool_games, before.games, before.pool_games
+                ),
+            )
+
     # --- facets -------------------------------------------------------------
     facet_rows = list(
         (
@@ -372,7 +650,9 @@ async def get_champion(
     )
     runes = RuneSection(keystones=entries("keystone"), pages=entries("rune_page"))
     skills = SkillSection(
-        priority=entries("skill_priority"), order=entries("skill_order")
+        priority=entries("skill_priority"),
+        order=entries("skill_order"),
+        first=entries("skill_first"),
     )
     laning = LaningSection(
         games=stat.timeline_games,
@@ -432,19 +712,8 @@ async def get_champion(
     # Best first: synergy is a question about who to pair with, not avoid.
     synergies.sort(key=lambda p: p.confidence_win_rate, reverse=True)
 
-    champion = sd.champion(champion_id)
     return ChampionDetail(
-        champion=ChampionInfo(
-            id=champion_id,
-            name=sd.champion_name(champion_id),
-            icon_url=sd.champion_icon(champion_id),
-            key=champion.key if champion else None,
-            title=champion.title if champion else None,
-            tags=champion.tags if champion else [],
-            splash_url=sd.champion_splash(champion_id),
-            art_url=sd.champion_art(champion_id),
-            tile_url=sd.champion_tile(champion_id),
-        ),
+        champion=_champion_info(champion_id, sd),
         patch=patch,
         queue_id=queue_id,
         position=position,
@@ -464,3 +733,148 @@ async def get_champion(
         ),
         synergies=synergies[:PAIR_LIMIT],
     )
+
+
+@router.get("/{champion_id}/profile", response_model=ChampionProfile)
+async def get_champion_profile(champion_id: int, db: DbDep, sd: StaticDep) -> ChampionProfile:
+    """Story, ratings, base stats, abilities and skins. No Riot call, and one
+    indexed read for the skin counts.
+
+    Answers for every champion Data Dragon knows, games or not.
+    """
+    champion = sd.champion(champion_id)
+    if champion is None:
+        raise HTTPException(404, f"No champion with id {champion_id}.")
+    lore = sd.champion_lore(champion_id)
+    counts = await champion_skin_counts(db, champion_id)
+    shown = bool(counts.by_skin)
+    return ChampionProfile(
+        champion=_champion_info(champion_id, sd),
+        blurb=champion.blurb,
+        lore=lore.lore if lore and lore.lore else None,
+        resource=champion.partype if champion.partype not in ("", "None") else None,
+        ratings=[
+            Rating(key=key, label=label, value=champion.info[key])
+            for key, label in _RATINGS
+            if key in champion.info
+        ],
+        stats=_base_stats(champion.stats, champion.partype, sd.unpublished_growth),
+        ally_tips=lore.ally_tips if lore else [],
+        enemy_tips=lore.enemy_tips if lore else [],
+        passive=_ability_out(lore.passive if lore else None, sd),
+        abilities=[a for a in (_ability_out(s, sd) for s in (lore.spells if lore else [])) if a],
+        detail_loaded=lore is not None,
+        skins=[
+            SkinOut(
+                id=skin.id,
+                num=skin.num,
+                name=skin.name,
+                rarity=skin.rarity,
+                legacy=skin.legacy,
+                line=next(
+                    (n for n in (sd.skin_line_name(i) for i in skin.lines) if n), None
+                ),
+                description=skin.description,
+                chromas=skin.chromas,
+                tile_url=sd.champion_tile(champion_id, skin.num),
+                splash_url=sd.champion_skin_splash(champion_id, skin.num),
+                # Zero is a real answer once the champion clears the floor: the
+                # skin was never seen in that many sightings.
+                sightings=counts.by_skin.get(skin.num, 0) if shown else None,
+            )
+            for skin in sd.champion_skins(champion_id)
+        ],
+        skin_sightings=counts.total,
+    )
+
+
+@router.get("/{champion_id}/players", response_model=ChampionPlayers)
+async def get_champion_players(champion_id: int, db: DbDep) -> ChampionPlayers:
+    """The players who do best on this champion, by average Riftline score.
+
+    Counts every Summoner's Rift game we hold rather than the page's patch
+    slice: who is good on a champion is not a patch question, and the slice
+    costs a third of the sample (399 qualifying pairs on 16.18 against 621
+    overall, measured 2026-09-21). Remakes are left out, as they are
+    everywhere else.
+    """
+    games = func.count(MatchParticipant.id)
+    scored = func.count(MatchParticipant.performance_score)
+    score = func.avg(MatchParticipant.performance_score)
+    rows = (
+        await db.execute(
+            select(
+                MatchParticipant.puuid,
+                games.label("games"),
+                func.sum(win_as_int()).label("wins"),
+                score.label("score"),
+                scored.label("scored"),
+            )
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(
+                MatchParticipant.champion_id == champion_id,
+                MatchParticipant.team_position.in_(POSITIONS),
+                Match.is_remake.is_(False),
+            )
+            .group_by(MatchParticipant.puuid)
+            .having(games >= PLAYER_MIN_GAMES, scored >= PLAYER_MIN_SCORED)
+            # Ties on score go to the bigger sample.
+            .order_by(score.desc(), games.desc())
+        )
+    ).all()
+    result = ChampionPlayers(champion_id=champion_id, qualified=len(rows))
+    if len(rows) < PLAYER_MIN_ROWS:
+        return result
+    top = rows[:PLAYER_LIMIT]
+    puuids = [r.puuid for r in top]
+
+    # Name and shard from each player's latest stored game on any champion:
+    # Riot IDs change, and the latest one is the one a profile link resolves.
+    identity: dict[str, tuple[str | None, str | None, str]] = {}
+    for puuid, name, tag, platform in (
+        await db.execute(
+            select(
+                MatchParticipant.puuid,
+                MatchParticipant.riot_id_game_name,
+                MatchParticipant.riot_id_tagline,
+                Match.platform_id,
+            )
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(MatchParticipant.puuid.in_(puuids))
+            .order_by(Match.game_creation.desc())
+        )
+    ).all():
+        identity.setdefault(puuid, (name, tag, (platform or "").lower()))
+
+    ranks = {
+        entry.puuid: entry
+        for entry in (
+            await db.execute(
+                select(RankedEntry).where(
+                    RankedEntry.puuid.in_(puuids),
+                    RankedEntry.queue_type == "RANKED_SOLO_5x5",
+                )
+            )
+        ).scalars()
+    }
+
+    for row in top:
+        name, tag, platform = identity.get(row.puuid, (None, None, ""))
+        rank = ranks.get(row.puuid)
+        result.players.append(
+            ChampionPlayer(
+                puuid=row.puuid,
+                game_name=name,
+                tag_line=tag,
+                platform=platform,
+                games=row.games,
+                wins=row.wins or 0,
+                win_rate=(row.wins or 0) / row.games,
+                avg_score=float(row.score),
+                scored_games=row.scored,
+                tier=rank.tier if rank else None,
+                division=rank.division if rank else None,
+                league_points=rank.league_points if rank else None,
+            )
+        )
+    return result

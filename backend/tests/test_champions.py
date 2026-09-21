@@ -228,3 +228,280 @@ async def test_facet_decoration_matches_the_facet_kind(client, corpus):
 
     path = _facet_entry(Row(), static_data, "build_path")
     assert len(path.items) == 3, "an ordered build path is items, not runes"
+
+
+# ------------------------------------------------- patch change and level one
+
+# A queue nobody else seeds, so the list of patches held is exactly ours and
+# "the patch before" is not some other test's private patch.
+QUEUE = 4420
+CHANGER = 9_101
+Q_FIRST = [1, 3, 2, 1, 1, 4, 1, 3, 1, 3, 4, 3, 3, 2, 2, 4, 2, 2]
+E_FIRST = [3, 1, 2, 1, 1, 4, 1, 3, 1, 3, 4, 3, 3, 2, 2, 4, 2, 2]
+
+
+async def _two_patches() -> None:
+    from sqlalchemy import func, select
+
+    from app.db.models import Match
+
+    async with SessionLocal() as session:
+        if await session.scalar(select(func.count()).where(Match.queue_id == QUEUE)):
+            return
+
+    def games(wins: int, total: int) -> list[list[dict]]:
+        return [
+            [participant(CHANGER, "MIDDLE", 100, i < wins,
+                         skill_order=Q_FIRST if i % 4 else E_FIRST)]
+            for i in range(total)
+        ]
+
+    # 8 of 40 then 32 of 40: the 95% Wilson intervals are about 0.11 to 0.35
+    # and 0.65 to 0.90, so this is a move the page is allowed to report.
+    await seed("7.1", games(8, 40), queue_id=QUEUE)
+    await seed("7.2", games(32, 40), queue_id=QUEUE)
+    async with SessionLocal() as session:
+        for patch in ("7.1", "7.2"):
+            kwargs = {"patch": patch, "queue_id": QUEUE, "rank_bracket": ALL_BRACKETS}
+            await rebuild_champion_stats(session, **kwargs)
+            await rebuild_facet_stats(session, **kwargs, min_games=1, taxonomy=taxonomy())
+
+
+async def test_a_change_since_last_patch_is_reported_only_when_it_is_real(client):
+    await _two_patches()
+    body = (
+        await client.get(f"/api/champions/{CHANGER}?patch=7.2&queue_id={QUEUE}&min_games=1")
+    ).json()
+    previous = body["overview"]["previous"]
+    assert previous["patch"] == "7.1"
+    assert previous["games"] == 40
+    assert previous["win_rate"] == pytest.approx(0.2)
+    assert previous["win_rate_moved"] is True
+    # Picked in every game on both patches: a pick rate that did not move.
+    assert previous["pick_rate_moved"] is False
+
+
+async def test_the_oldest_patch_held_has_nothing_to_compare_with(client):
+    await _two_patches()
+    body = (
+        await client.get(f"/api/champions/{CHANGER}?patch=7.1&queue_id={QUEUE}&min_games=1")
+    ).json()
+    assert body["overview"]["previous"] is None
+
+
+async def test_the_level_one_pick_is_its_own_facet(client):
+    await _two_patches()
+    body = (
+        await client.get(f"/api/champions/{CHANGER}?patch=7.2&queue_id={QUEUE}&min_games=1")
+    ).json()
+    first = body["skills"]["first"]
+    assert [(f["ids"], f["games"]) for f in first] == [([1], 30), ([3], 10)]
+
+
+# ---------------------------------------------------------------- the profile
+
+# Not a real champion, so the profile is checked against data these tests
+# wrote rather than against whatever Data Dragon says this week.
+TESTY = 9_201
+
+
+@pytest.fixture
+def testy(monkeypatch):
+    from app.services.static_data import (
+        Ability,
+        Champion,
+        ChampionLore,
+        Skin,
+        static_data,
+    )
+
+    monkeypatch.setitem(
+        static_data.champions_by_id,
+        TESTY,
+        Champion(
+            id=TESTY, key="Testy", name="Testy", title="the Fixture", tags=["Mage"],
+            partype="Mana", blurb="A short story.",
+            info={"attack": 3, "defense": 4, "magic": 8, "difficulty": 5},
+            stats={
+                "hp": 590, "hpperlevel": 104, "mp": 418, "mpperlevel": 25,
+                "attackspeed": 0.668, "attackspeedperlevel": 2.2, "movespeed": 330,
+            },
+        ),
+    )
+    monkeypatch.setitem(
+        static_data.lore_by_id,
+        TESTY,
+        ChampionLore(
+            lore="A long story.",
+            ally_tips=["Stay back."],
+            passive=Ability(slot="P", name="Heal", description="Heals.", image="P.png"),
+            spells=[
+                Ability(slot=s, name=f"Spell {s}", description="Does it.", image=f"{s}.png")
+                for s in "QWER"
+            ],
+        ),
+    )
+    monkeypatch.setitem(
+        static_data.skins_by_champion,
+        TESTY,
+        [
+            Skin(id=TESTY * 1000, num=0, name="Testy"),
+            Skin(id=TESTY * 1000 + 1, num=1, name="Gilded Testy", rarity="Epic",
+                 lines=[1], chromas=3),
+            Skin(id=TESTY * 1000 + 2, num=2, name="Plain Testy"),
+        ],
+    )
+    monkeypatch.setitem(static_data.skin_lines, 1, "Gilded")
+    return TESTY
+
+
+async def test_the_profile_answers_where_the_numbers_cannot(client, testy):
+    """The detail is a 404 on a patch with no games, which is every new
+    champion's first day. The story must not share that fate."""
+    assert (await client.get(f"/api/champions/{testy}?patch={PATCH}")).status_code == 404
+
+    response = await client.get(f"/api/champions/{testy}/profile")
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert body["champion"]["name"] == "Testy"
+    assert body["lore"] == "A long story."
+    assert body["resource"] == "Mana"
+    assert body["detail_loaded"] is True
+    assert [r["value"] for r in body["ratings"]] == [3, 4, 8, 5]
+    assert [a["slot"] for a in body["abilities"]] == ["Q", "W", "E", "R"]
+    assert body["passive"]["icon_url"].endswith("/img/passive/P.png")
+
+
+async def test_base_stats_at_level_eighteen(client, testy):
+    stats = {s["key"]: s for s in (await client.get(f"/api/champions/{testy}/profile")).json()["stats"]}
+    assert stats["hp"]["level18"] == pytest.approx(590 + 104 * 17)
+    assert stats["mp"]["label"] == "Mana", "the resource row takes the champion's own name"
+    # Attack speed grows by a percentage of its base, not by a flat amount.
+    assert stats["attackspeed"]["level18"] == pytest.approx(0.668 * (1 + 0.022 * 17))
+    assert stats["movespeed"]["level18"] is None
+    assert stats["movespeed"]["growth_published"] is True, "it does not grow; that is known"
+
+
+def test_an_unpublished_growth_is_withheld_not_printed_as_level_one():
+    from app.api.routes.champions import _base_stats
+
+    stats = {s.key: s for s in _base_stats(
+        {"attackdamage": 53, "attackdamageperlevel": 0, "hp": 590, "hpperlevel": 104},
+        "Mana",
+        {"attackdamageperlevel"},
+    )}
+    assert stats["attackdamage"].level18 is None
+    assert stats["attackdamage"].growth_published is False
+    assert stats["hp"].level18 == pytest.approx(590 + 104 * 17)
+
+
+async def test_the_skins_carry_their_line_and_art(client, testy):
+    skins = (await client.get(f"/api/champions/{testy}/profile")).json()["skins"]
+    assert [s["num"] for s in skins] == [0, 1, 2]
+    gilded = skins[1]
+    assert (gilded["line"], gilded["rarity"], gilded["chromas"]) == ("Gilded", "Epic", 3)
+    assert gilded["splash_url"].endswith(f"/{testy}/splash-art/centered/skin/1")
+    assert all(s["sightings"] is None for s in skins), "no sightings yet, not zero sightings"
+
+
+async def test_skin_counts_appear_once_the_champion_clears_the_floor(client, testy):
+    from types import SimpleNamespace
+
+    from app.services.skins import MIN_CHAMPION_SIGHTINGS, record_sightings
+
+    await record_sightings(
+        platform="EUW1", game_id=881_000_001, queue_id=420, in_progress=True,
+        participants=[
+            SimpleNamespace(champion_id=testy, skin_index=1, state="unknown")
+            for _ in range(MIN_CHAMPION_SIGHTINGS)
+        ],
+        chroma_parent={},
+    )
+    body = (await client.get(f"/api/champions/{testy}/profile")).json()
+    assert body["skin_sightings"] == MIN_CHAMPION_SIGHTINGS
+    counts = {s["num"]: s["sightings"] for s in body["skins"]}
+    assert counts == {0: 0, 1: MIN_CHAMPION_SIGHTINGS, 2: 0}, "zero is now a real answer"
+
+
+async def test_an_unknown_champion_has_no_profile(client):
+    assert (await client.get("/api/champions/987654/profile")).status_code == 404
+
+
+# ---------------------------------------------------------------- the players
+
+BOARD = 9_301
+THIN_BOARD = 9_302
+
+
+def _puuid(name: str) -> str:
+    return f"champ-board-{name}".ljust(78, "0")
+
+
+async def _board() -> None:
+    from sqlalchemy import func, select
+
+    from app.db.models import MatchParticipant
+
+    async with SessionLocal() as session:
+        if await session.scalar(
+            select(func.count()).where(MatchParticipant.champion_id == BOARD)
+        ):
+            return
+
+    def games(name: str, champion: int, n: int, *, score: float, scored: int, wins: int,
+              riot_name: str):
+        return [
+            [participant(champion, "MIDDLE", 100, i < wins, puuid=_puuid(name),
+                         performance_score=score if i < scored else None,
+                         riot_id_game_name=riot_name, riot_id_tagline="EUW")]
+            for i in range(n)
+        ]
+
+    early = (
+        games("ace", BOARD, 6, score=8.0, scored=6, wins=2, riot_name="OldAce")
+        + games("bee", BOARD, 6, score=6.0, scored=6, wins=5, riot_name="Bee")
+        + games("cat", BOARD, 7, score=7.0, scored=7, wins=4, riot_name="Cat")
+        + games("dog", BOARD, 5, score=5.0, scored=5, wins=1, riot_name="Dog")
+        # Four games: one short of the floor.
+        + games("elk", BOARD, 4, score=9.9, scored=4, wins=4, riot_name="Elk")
+        # Six games, two of them scored: short of the scored floor.
+        + games("fox", BOARD, 6, score=9.5, scored=2, wins=6, riot_name="Fox")
+        + games("gnu", THIN_BOARD, 6, score=7.0, scored=6, wins=3, riot_name="Gnu")
+        + games("hen", THIN_BOARD, 6, score=6.0, scored=6, wins=3, riot_name="Hen")
+    )
+    await seed("BOARD_EARLY", early, game_creation=1_000)
+    # A later game on another champion renames the first player. The profile
+    # link has to use the name they go by now.
+    await seed(
+        "BOARD_LATE",
+        [[participant(1, "MIDDLE", 100, True, puuid=_puuid("ace"),
+                      riot_id_game_name="NewAce", riot_id_tagline="EUW")]],
+        game_creation=2_000,
+    )
+
+
+async def test_the_board_ranks_by_score_and_keeps_the_record_beside_it(client):
+    await _board()
+    body = (await client.get(f"/api/champions/{BOARD}/players")).json()
+    assert body["qualified"] == 4
+    rows = body["players"]
+    assert [r["puuid"] for r in rows] == [_puuid(n) for n in ("ace", "cat", "bee", "dog")]
+    ace = rows[0]
+    assert (ace["games"], ace["wins"], ace["avg_score"]) == (6, 2, pytest.approx(8.0))
+    assert ace["game_name"] == "NewAce", "the name they go by now"
+    assert ace["platform"] == "euw1"
+
+
+async def test_players_under_either_floor_stay_off_the_board(client):
+    await _board()
+    rows = (await client.get(f"/api/champions/{BOARD}/players")).json()["players"]
+    names = {r["puuid"] for r in rows}
+    assert _puuid("elk") not in names, "four games is one short"
+    assert _puuid("fox") not in names, "two scored games is one short"
+
+
+async def test_a_board_of_two_is_withheld(client):
+    await _board()
+    body = (await client.get(f"/api/champions/{THIN_BOARD}/players")).json()
+    assert body["qualified"] == 2
+    assert body["players"] == []
