@@ -219,7 +219,17 @@ async def get_mastery(
     # never touched a champion.
     home = await players.effective_platform(player, resolve_platform(platform))
     masteries = await players.masteries(player, home.id, refresh=refresh)
-    return to_mastery_response(puuid, masteries, sd)
+    # Read after the fetch, and safe to: the session keeps objects usable after
+    # a commit, and the one path that rolls back refreshes the player itself.
+    # The shard is worth saying out loud, because it is often not the one in the
+    # URL and the page has no other way to know.
+    return to_mastery_response(
+        puuid,
+        masteries,
+        sd,
+        platform=player.mastery_platform,
+        fetched_at=epoch_ms(player.mastery_fetched_at),
+    )
 
 
 @router.get("/{platform}/{game_name}/{tag_line}/analytics", response_model=AnalyticsResponse)

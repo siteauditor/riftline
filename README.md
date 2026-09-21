@@ -224,6 +224,19 @@ show Riot's crests (`lib/rankArt.ts`), the corner radius is zero everywhere
 through one token, and colour has three sources only: hextech teal for the
 interface, gold for what was earned, and the rank being described.
 
+**The mastery page shows the shape of a pool, not a wall of squares.** Riot's
+2024 rework removed the level cap, so levels now run past 200: measured on three
+real accounts, the tops were 232, 152 and 45, while the old page's colour ramp
+stopped at "10 or above" and put 41 of one player's 166 champions in a single
+colour. The grid is now banded by share of lifetime points, because three to
+eleven champions hold the first half of a career and a hundred or more sit in
+the last fifteen percent. Colour still means level, rebanded to 1-4, 5-9, 10-24,
+25-49 and 50 and up. Champions we hold stored games for carry a mark and show
+their win rate and Riftline average when opened, which is 10 of 166 champions on
+one account but 5 of the 8 in its core. `chest_granted` is gone from the
+response: Riot removed chests in 2024 and it was false on every entry we have
+ever seen.
+
 **The live game page is about the players, not only the champions.** Every
 identified player in a lobby carries what the corpus holds about them: their W-L
 and average Riftline score with the sample stated, their usual role and whether

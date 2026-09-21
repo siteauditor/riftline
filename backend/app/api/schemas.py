@@ -402,19 +402,36 @@ class MasteryEntry(BaseModel):
     points_until_next_level: int = 0
     progress_to_next: float = 0.0
     last_play_time: int | None = None
-    chest_granted: bool = False
     tokens_earned: int = 0
     season_milestone: int | None = None
     milestone_grades: list[str] | None = None
     tags: list[str] = Field(default_factory=list)
+    # False when Riot names a champion our static data does not list yet, which
+    # happens for a day or two after a release. Measured on 2026-09-21: id 60016
+    # with 665 points. The page used to build its grid from the static roster
+    # alone and drop the champion, so it reported 165 where this said 166.
+    champion_known: bool = True
 
 
 class MasteryResponse(BaseModel):
+    """Every champion this account has touched, newest Riot reading first.
+
+    `champions_owned_ratio` and a `levels` histogram used to ride along here.
+    Both are gone: the ratio divided by our static roster and so exceeded 1.0
+    for as long as Data Dragon lagged a champion release, and the histogram was
+    34 buckets of an unbounded scale that nothing read. The page holds the
+    roster already and counts what it needs from `entries`.
+    """
+
     puuid: str
     total_points: int = 0
     total_champions_played: int = 0
-    champions_owned_ratio: float = 0.0
-    levels: dict[str, int] = Field(default_factory=dict)
+    # The shard the table was actually read from, which is not always the one in
+    # the URL: an OCE Riot ID resolves through `sea` while the account lives on
+    # sg2, and mastery answers 200 with nothing on the wrong shard.
+    platform: str | None = None
+    # When we last asked Riot, so the page can say how old this is.
+    fetched_at: int | None = None
     entries: list[MasteryEntry] = Field(default_factory=list)
 
 
@@ -1163,10 +1180,14 @@ def to_match_summary(match: Match, puuid: str, sd: StaticDataService) -> MatchSu
 
 
 def to_mastery_response(
-    puuid: str, masteries: list[ChampionMastery], sd: StaticDataService
+    puuid: str,
+    masteries: list[ChampionMastery],
+    sd: StaticDataService,
+    *,
+    platform: str | None = None,
+    fetched_at: int | None = None,
 ) -> MasteryResponse:
     entries: list[MasteryEntry] = []
-    levels: dict[str, int] = {}
 
     for m in sorted(masteries, key=lambda x: x.champion_points, reverse=True):
         champ = sd.champion(m.champion_id)
@@ -1182,23 +1203,20 @@ def to_mastery_response(
                 # Riot still reports points remaining to a next level.
                 progress_to_next=(m.points_since_last_level / span) if span else 1.0,
                 last_play_time=m.last_play_time,
-                chest_granted=m.chest_granted,
                 tokens_earned=m.tokens_earned,
                 season_milestone=m.season_milestone,
                 milestone_grades=m.milestone_grades,
                 tags=champ.tags if champ else [],
+                champion_known=champ is not None,
             )
         )
-        key = str(m.champion_level)
-        levels[key] = levels.get(key, 0) + 1
 
-    total_champions = len(sd.champions_by_id) or 1
     return MasteryResponse(
         puuid=puuid,
         total_points=sum(m.champion_points for m in masteries),
         total_champions_played=len(masteries),
-        champions_owned_ratio=len(masteries) / total_champions,
-        levels=dict(sorted(levels.items(), key=lambda kv: int(kv[0]), reverse=True)),
+        platform=platform,
+        fetched_at=fetched_at,
         entries=entries,
     )
 

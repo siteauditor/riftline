@@ -282,6 +282,75 @@ async def test_mastery_response(client):
     assert wukong["champion"]["name"] == "Wukong"
     assert wukong["champion"]["icon_url"].endswith("/MonkeyKing.png")
 
+    # The shard the table came from, and when. An OCE Riot ID's mastery is read
+    # from sg2 while the URL says oc1, and the page has no other way to know.
+    assert body["platform"] == "euw1"
+    assert body["fetched_at"] > 0
+
+    # Three fields are gone on purpose. `chest_granted` because Riot removed
+    # chests in 2024 and it was false on 166 of 166 entries for a real account;
+    # `levels` because it was 34 buckets of an unbounded scale that nothing
+    # read; `champions_owned_ratio` because it divided by our static roster and
+    # so exceeded 1.0 for as long as Data Dragon lagged a champion release.
+    assert "chest_granted" not in top
+    assert "levels" not in body
+    assert "champions_owned_ratio" not in body
+
+
+@respx.mock
+async def test_a_champion_our_static_data_does_not_know_is_still_reported(client):
+    """Riot returned champion id 60016 with 665 points on 2026-09-21, and Data
+    Dragon does not list it. The entry has to survive, because the player really
+    has played it, and `champion_known` is how the page knows to draw a
+    placeholder instead of a broken image."""
+    mock_riot()
+    # Its own account: mastery rows are never deleted, so a puuid another test
+    # has already fetched for carries that test's champions too.
+    unknown_puuid = "mastery-unknown-champ".ljust(78, "0")
+    respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
+        return_value=httpx.Response(
+            200, json={"puuid": unknown_puuid, "gameName": "Newbie", "tagLine": "EUW"}
+        )
+    )
+    respx.get(
+        url__regex=r".*/lol/champion-mastery/v4/champion-masteries/by-puuid/.*"
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {
+                    "championId": 103,
+                    "championLevel": 4,
+                    "championPoints": 20_000,
+                    "championPointsSinceLastLevel": 100,
+                    "championPointsUntilNextLevel": 900,
+                    "lastPlayTime": 1_725_900_000_000,
+                },
+                {
+                    "championId": 60016,
+                    "championLevel": 1,
+                    "championPoints": 665,
+                    "championPointsSinceLastLevel": 665,
+                    "championPointsUntilNextLevel": 0,
+                    "lastPlayTime": 1_725_800_000_000,
+                },
+            ],
+        )
+    )
+
+    body = (await client.get("/api/summoner/euw1/Newbie/EUW/mastery")).json()
+
+    assert body["total_champions_played"] == 2
+    unknown = next(e for e in body["entries"] if e["champion"]["id"] == 60016)
+    assert unknown["champion_known"] is False
+    assert unknown["champion"]["name"] == "Champion 60016"
+    assert unknown["champion"]["icon_url"] is None
+    assert unknown["tags"] == []
+    assert unknown["points"] == 665
+    # And a champion we do know still says so, or the flag would be useless.
+    known = next(e for e in body["entries"] if e["champion"]["id"] == 103)
+    assert known["champion_known"] is True
+
 
 # -------------------------------------------------------------------- static
 

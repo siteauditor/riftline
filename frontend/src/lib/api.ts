@@ -586,19 +586,25 @@ export interface MasteryEntry {
   points_until_next_level: number
   progress_to_next: number
   last_play_time: number | null
-  chest_granted: boolean
   tokens_earned: number
   season_milestone: number | null
   milestone_grades: string[] | null
   tags: string[]
+  /** False when Riot names a champion Data Dragon does not list yet, which
+   *  happens for a day or two after a release. The tile draws a placeholder
+   *  rather than dropping a champion the player has really played. */
+  champion_known: boolean
 }
 
 export interface MasteryResponse {
   puuid: string
   total_points: number
   total_champions_played: number
-  champions_owned_ratio: number
-  levels: Record<string, number>
+  /** The shard the table was read from, which is not always the one in the URL:
+   *  mastery answers 200 with nothing on the wrong shard. */
+  platform: string | null
+  /** When we last asked Riot. */
+  fetched_at: number | null
   entries: MasteryEntry[]
 }
 

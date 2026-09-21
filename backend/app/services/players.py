@@ -357,11 +357,18 @@ class PlayerService:
             mastery.points_since_last_level = raw.get("championPointsSinceLastLevel") or 0
             mastery.points_until_next_level = raw.get("championPointsUntilNextLevel") or 0
             mastery.last_play_time = raw.get("lastPlayTime")
-            mastery.chest_granted = bool(raw.get("chestGranted"))
             mastery.tokens_earned = raw.get("tokensEarned") or 0
             mastery.season_milestone = raw.get("championSeasonMilestone")
-            mastery.marks_required_next = raw.get("markRequiredForNextLevel")
             mastery.milestone_grades = raw.get("milestoneGrades")
+            # `chestGranted` and `markRequiredForNextLevel` are no longer read.
+            # Riot removed chests in 2024: measured false on 166 of 166 entries
+            # for a real account and on all 789 rows we hold. The marks figure
+            # has never reached a response or a test. Their columns stay for
+            # now, because `chest_granted` is NOT NULL with no server default
+            # and this deploy runs migrations *after* the new code is already
+            # serving, so a model without the column would spend that window
+            # failing every insert, swallowed by `_commit_tolerating_race` as a
+            # concurrent write.
             if champion_id not in existing:
                 self.session.add(mastery)
 

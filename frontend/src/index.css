@@ -101,6 +101,26 @@
   --color-challenger: #4fd4f5;
 
   /*
+   * Champion mastery, which is Riot's own currency and so gets neither the tier
+   * colours above nor gold. Riot removed the level 7 cap in 2024 and levels now
+   * run without a ceiling: measured on 2026-09-21, three real accounts topped
+   * out at 232, 152 and 45, and the old ramp put 41 of one player's champions
+   * in a single colour because it stopped at "10+".
+   *
+   * The steps are not an even lightness ramp, and cannot be. The level number
+   * is drawn on the swatch, so every step has to clear 4.5:1 against one of the
+   * page's two inks, and between "dark enough for light ink" and "light enough
+   * for dark ink" there is a band where no text colour works. The first two
+   * steps therefore separate by chroma rather than lightness, and the ink flips
+   * between the second and the third.
+   */
+  --color-mastery-1: #52627c;
+  --color-mastery-2: #3d6bb0;
+  --color-mastery-3: #5b93d6;
+  --color-mastery-4: #9bc0ea;
+  --color-mastery-5: #e8eef7;
+
+  /*
    * Barlow Condensed for anything that is a name or a number, Barlow for prose.
    * One superfamily, width as the contrast axis. The reference is a competitive
    * timing screen: on a stats site the numerals are the content, so they get
