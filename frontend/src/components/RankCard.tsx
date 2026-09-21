@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
+import Crest from './Crest'
 import { api, type RankHistory, type RankInfo } from '../lib/api'
-import { emblemUrl } from '../lib/rankArt'
 import { pct, tierColor, tierLabel } from '../lib/format'
 
 interface PlayerKey {
@@ -78,16 +78,9 @@ export default function RankCard({
         {ranked ? (
           <>
             <div className="flex items-center gap-3">
-              {/* The emblem is the one place a rank is the subject rather than
-                  a label, so it gets the full crest and the tier's own glow. */}
-              <img
-                src={emblemUrl(rank.tier!)}
-                alt=""
-                aria-hidden
-                loading="lazy"
-                className="size-16 shrink-0"
-                style={{ filter: `drop-shadow(0 0 10px color-mix(in srgb, ${color} 40%, transparent))` }}
-              />
+              {/* The emblem is one of the two places a rank is the subject
+                  rather than a label, so it gets the full art and its glow. */}
+              <Crest tier={rank.tier} division={rank.division} size="card" />
               <div className="min-w-0">
                 <p
                   className="display text-[26px] font-700 uppercase leading-none tracking-tight"

@@ -1,5 +1,5 @@
+import Crest from './Crest'
 import { tierColor, tierLabel } from '../lib/format'
-import { crestUrl } from '../lib/rankArt'
 
 /**
  * A rank as a small inline pill.
@@ -22,7 +22,6 @@ interface Props {
   leaguePoints?: number | null
   /** Apex tiers span thousands of LP, so the number carries the meaning. */
   showLp?: boolean
-  size?: 'sm' | 'md'
   /**
    * Replaces the default tooltip. A caller that wraps this in its own titled
    * element gets nothing: the inner title always wins on hover.
@@ -54,10 +53,11 @@ export default function RankBadge({
   division,
   leaguePoints,
   showLp = false,
-  size = 'sm',
   title,
 }: Props) {
-  const pad = size === 'sm' ? 'px-1.5 py-0.5 text-[11px]' : 'px-2 py-1 text-xs'
+  // One size. The `md` variant this used to carry was never passed by any of
+  // the five call sites, so it had never been on screen to be reviewed.
+  const pad = 'px-1.5 py-0.5 text-[11px]'
 
   if (state !== 'ranked' || !tier) {
     const copy = COPY[state === 'ranked' ? 'unranked' : state]
@@ -86,13 +86,9 @@ export default function RankBadge({
         background: `color-mix(in srgb, ${colour} 14%, transparent)`,
       }}
     >
-      <img
-        src={crestUrl(tier)}
-        alt=""
-        aria-hidden
-        loading="lazy"
-        className={size === 'sm' ? 'size-3.5' : 'size-4'}
-      />
+      {/* The pill sets its own title with the LP in it, and an inner title
+          would win on hover, so the crest is told not to set one. */}
+      <Crest tier={tier} division={division} size="pill" title={null} />
       {tierLabel(tier, division)}
       {showLp && leaguePoints != null && (
         <span className="font-500 opacity-70">{leaguePoints.toLocaleString()} LP</span>

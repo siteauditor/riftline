@@ -3,10 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import { PLATFORMS, api } from '../lib/api'
+import Crest from '../components/Crest'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel, timeAgo } from '../lib/format'
-import { emblemUrl } from '../lib/rankArt'
 
 /**
  * Shown while `/leaderboard/slices` is in flight, so the filters are usable on
@@ -103,15 +103,10 @@ export default function Leaderboard() {
       style={{ '--accent': accent } as CSSProperties}
     >
       <header className="flex items-center gap-4">
-        {/* The ladder's own emblem: on this page the rank is the subject. */}
-        <img
-          src={emblemUrl(tier)}
-          alt=""
-          aria-hidden
-          loading="lazy"
-          className="hidden size-20 shrink-0 sm:block"
-          style={{ filter: `drop-shadow(0 0 12px color-mix(in srgb, ${accent} 40%, transparent))` }}
-        />
+        {/* The ladder's own emblem: on this page the rank is the subject.
+            Hidden below sm, where 128px of emblem above a 32px headline would
+            push the filter row off the first screen. */}
+        <Crest tier={tier} size="hero" className="hidden sm:block" />
         <div className="min-w-0">
           <p className="eyebrow">{regionLabel} ladder</p>
           <h1

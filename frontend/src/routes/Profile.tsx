@@ -202,7 +202,7 @@ export default function Profile() {
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-dim">
               {headline && (
                 <span className="flex items-center gap-1.5">
-                  <Crest tier={headline.tier} division={headline.division} size="sm" />
+                  <Crest tier={headline.tier} division={headline.division} size="line" />
                   <span
                     className="display text-base font-700 uppercase tracking-wide"
                     style={{ color: accent }}

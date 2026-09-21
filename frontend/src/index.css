@@ -391,6 +391,59 @@
   }
 
   /*
+   * Rank art: a frame holding a crop of the asset, not the asset in a box.
+   *
+   * Neither Riot family fills the file it ships in. Measured on 2026-09-21: the
+   * ladder header drew a 1280x720 emblem PNG in an 80x80 box at the default
+   * `object-fit: fill`, which painted about 20x28 pixels of challenger squashed
+   * to 56% of its correct width, and the ten mini crests are ten different
+   * boxes (17x12 through 20x20) that one square box stretched by up to 1.42x.
+   *
+   * So the frame clips and the image is placed inside it by three custom
+   * properties per tier, from `lib/rankArt.ts`. Every term is a percentage of
+   * the frame or of the image's own box, so one set of numbers is correct at
+   * every size. The zoom is a width rather than a `scale()`, because a
+   * transform would multiply every other length in the element with it.
+   */
+  .rank-art {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    flex: none;
+  }
+
+  .rank-art > img {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    max-width: none;
+    width: calc(100% * var(--art-zoom, 1));
+    height: auto;
+    transform: translate(
+      calc(-50% + var(--art-dx, 0%)),
+      calc(-50% + var(--art-dy, 0%))
+    );
+    pointer-events: none;
+  }
+
+  /*
+   * The glow behind an emblem, in the tier's own colour.
+   *
+   * A `drop-shadow` filter cannot do this job any more: once the crop is right
+   * the art touches the frame and the frame clips, so the halo comes out with
+   * four straight sides, and the filter would blur a surface several times
+   * wider than the frame to decorate it. A background gradient cannot leave its
+   * box, costs no blur pass, and is identical for all ten tiers.
+   */
+  .rank-art-glow {
+    background: radial-gradient(
+      closest-side at 50% 52%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 78%
+    );
+  }
+
+  /*
    * The corner cut, used on hero surfaces only.
    *
    * One 14px notch, bottom right, the way a broadcast lower-third or a Riot
