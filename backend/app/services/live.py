@@ -33,6 +33,7 @@ from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
     available_slices,
+    patch_sort_key,
     win_as_int,
 )
 from app.services.ranks import RankCache
@@ -61,6 +62,18 @@ APEX_TIER_NAMES = ("MASTER", "GRANDMASTER", "CHALLENGER")
 # the two pages cannot disagree about whether a record is worth showing. Shown
 # as a W-L record rather than a bare percentage, so a thin one looks thin.
 MIN_CORPUS_GAMES = 5
+
+# How far the lane record may reach when this patch holds too few games.
+# Measured 2026-09-21 over the lanes of forty real lobbies: 26% of them have a
+# five game lane record on the current patch, 34% once the previous patch is
+# pooled in, and 35% have a team scope record for the same pair. A third patch
+# was never measured, so it is not assumed.
+MAX_POOLED_PATCHES = 2
+# And only a patch close enough to still describe the same game. Judgement
+# rather than a measurement: the corpus is crawled rather than exhaustive, so
+# the next patch held can be a number or two down, but past that the items and
+# the kits have moved and pooling would be a different claim.
+POOL_MAX_MINOR_GAP = 2
 
 # How many stored games a player needs before we describe their play at all, and
 # how many before a percentage is published rather than a W-L. Both are defined
@@ -149,6 +162,11 @@ class CorpusRecord:
     # Lane records only, and only once enough of those games have timelines.
     gold_diff_14: float | None = None
     timeline_games: int = 0
+    # Which step of the fallback ladder this came from: "role" for a champion's
+    # own record, then "lane", "lane_pooled", "team". The page labels the weaker
+    # ones, because a team scope record shown as a lane record is a false claim.
+    basis: str = "lane"
+    patches: tuple[str, ...] = ()
 
 
 def rank_points(entry: RankedEntry) -> int:
@@ -270,11 +288,89 @@ class LiveGame:
     positions_inferred: bool = False
     # The patch the corpus records were read from, so the page can say so.
     corpus_patch: str | None = None
+    # Every patch the lane fallback was allowed to read, newest first.
+    corpus_patches: list[str] = field(default_factory=list)
     # Which games the player records were counted over: this queue, or every
     # queue we hold. The crawl is nearly all solo queue, so scoping a flex lobby
     # to flex would blank ten cards for nothing.
     record_basis: str = "all_queues"
     record_queue_id: int | None = None
+
+
+def _poolable_patches(held: list[str]) -> tuple[str, ...]:
+    """The newest patch, plus the one before it when it is close enough.
+
+    `available_slices` already orders by patch, newest first, so this only has
+    to decide whether the second one is near enough to describe the same game.
+    """
+    newest = held[0]
+    pool = [newest]
+    for patch in held[1:]:
+        if len(pool) >= MAX_POOLED_PATCHES:
+            break
+        a, b = patch_sort_key(newest), patch_sort_key(patch)
+        if a[0] == b[0] and a[1] - b[1] <= POOL_MAX_MINOR_GAP:
+            pool.append(patch)
+    return tuple(pool)
+
+
+def _pool(rows: list[MatchupStat], patches: tuple[str, ...], basis: str) -> CorpusRecord | None:
+    """Sum a matchup's rows, or return None when they are still too thin.
+
+    The gold lead is weighted by the timelines behind it, not averaged twice
+    over: 300 over six timelines pooled with -100 over two is 200, not 100.
+    """
+    if not rows:
+        return None
+    games = sum(r.games for r in rows)
+    if games < MIN_CORPUS_GAMES:
+        return None
+    timeline_games = sum(r.timeline_games for r in rows)
+    weighted = [r for r in rows if r.avg_gold_diff_14 is not None and r.timeline_games]
+    gold_diff = (
+        sum(r.avg_gold_diff_14 * r.timeline_games for r in weighted)
+        / sum(r.timeline_games for r in weighted)
+        if weighted and timeline_games >= MIN_CORPUS_GAMES
+        else None
+    )
+    return CorpusRecord(
+        games=games,
+        wins=sum(r.wins for r in rows),
+        # A TEAM row's gold lead is this champion's lead against its own laner
+        # in games where the named enemy was somewhere on the other team. It is
+        # not a lead against that enemy, so it is dropped rather than relabelled.
+        gold_diff_14=gold_diff if basis != "team" else None,
+        timeline_games=timeline_games if basis != "team" else 0,
+        basis=basis,
+        patches=tuple(p for p in patches if any(r.patch == p for r in rows)),
+    )
+
+
+def _best_matchup_record(
+    rows: list[MatchupStat],
+    champion_id: int,
+    enemy_id: int,
+    position: str | None,
+    patches: tuple[str, ...],
+) -> CorpusRecord | None:
+    """Walk the fallback ladder and stop at the first step that clears the floor."""
+    pair = [r for r in rows if r.champion_id == champion_id and r.enemy_champion_id == enemy_id]
+    lane = [r for r in pair if r.scope == "LANE" and r.team_position == position]
+
+    current = _pool([r for r in lane if r.patch == patches[0]], patches, "lane")
+    if current is not None:
+        return current
+    pooled = _pool(lane, patches, "lane_pooled")
+    if pooled is not None:
+        return pooled
+    # A TEAM row still carries this champion's own role: the scope drops the
+    # join on the *enemy's* position, not on ours. So this is still "this
+    # champion in this lane", against that enemy anywhere on the map.
+    return _pool(
+        [r for r in pair if r.scope == "TEAM" and r.team_position == position],
+        patches,
+        "team",
+    )
 
 
 def _main_position(counts: dict[str, int]) -> tuple[str | None, int]:
@@ -458,10 +554,10 @@ class LiveGameService:
             payload.get("mapId") == SUMMONERS_RIFT_MAP_ID
             and await self._infer_positions(participants)
         )
-        corpus_patch = (
+        corpus_patch, corpus_patches = (
             await self._attach_corpus_records(participants, queue_id)
             if positions_inferred
-            else None
+            else (None, [])
         )
         # After the positions, because "off their usual role" compares against
         # the position inferred above. Storage only, like the two before it, and
@@ -496,6 +592,7 @@ class LiveGameService:
             you_identified=any(p.puuid == puuid for p in participants),
             positions_inferred=positions_inferred,
             corpus_patch=corpus_patch,
+            corpus_patches=corpus_patches,
             record_basis=record_basis,
             record_queue_id=record_queue_id,
         )
@@ -575,23 +672,38 @@ class LiveGameService:
 
     async def _attach_corpus_records(
         self, participants: list[LiveParticipant], queue_id: int
-    ) -> str | None:
-        """Each pick in its role, and against its lane opponent, from stored games.
+    ) -> tuple[str | None, list[str]]:
+        """Each pick in its role, and against its lane opponent, from storage.
 
-        The newest patch held for the queue, and the champion page's own floor,
-        so a record shown here is one the champion page would also show.
-        Returns the patch read, or None when the corpus has nothing for the queue.
+        **The lane record is the page's one comparative number, and it used to
+        be missing three lanes in four.** Measured across forty real lobbies:
+        only 26% of lanes have a five game record on the newest patch. So the
+        read falls back in a stated order, and every record says which step it
+        came from, because a team scope record rendered as a lane record would
+        be a claim we cannot support:
+
+        1. `LANE` on the newest patch held for this queue        (26% of lanes)
+        2. `LANE` pooled with the previous patch held            (34%)
+        3. `TEAM` for the same champion pair, pooled the same way (35% have one)
+        4. nothing
+
+        Step 1 wins even when step 2 would be a bigger sample: a current patch
+        record must not be diluted by older rows under a label that says
+        current.
+
+        Returns the newest patch read and every patch the ladder was allowed to
+        touch, so the page can say so.
         """
         slices = [s for s in await available_slices(self.session) if s["queue_id"] == queue_id]
         if not slices:
-            return None
-        patch = slices[0]["patch"]
+            return None, []
+        patches = _poolable_patches([s["patch"] for s in slices])
         champions = {p.champion_id for p in participants}
 
         role_rows = (
             await self.session.execute(
                 select(ChampionStat).where(
-                    ChampionStat.patch == patch,
+                    ChampionStat.patch == patches[0],
                     ChampionStat.queue_id == queue_id,
                     ChampionStat.rank_bracket == ALL_BRACKETS,
                     ChampionStat.champion_id.in_(champions),
@@ -601,41 +713,37 @@ class LiveGameService:
         ).scalars()
         by_role = {(r.champion_id, r.team_position): r for r in role_rows}
 
-        lane_rows = (
+        # Both scopes and both patches in one query: `ix_matchup_lookup` leads
+        # with `patch`, so two patches are two index ranges. The five game floor
+        # is applied in Python rather than in SQL, because three games on each
+        # of two patches has to survive to be summed.
+        matchup_rows = (
             await self.session.execute(
                 select(MatchupStat).where(
-                    MatchupStat.patch == patch,
+                    MatchupStat.patch.in_(patches),
                     MatchupStat.queue_id == queue_id,
                     MatchupStat.rank_bracket == ALL_BRACKETS,
-                    MatchupStat.scope == "LANE",
+                    MatchupStat.scope.in_(("LANE", "TEAM")),
                     MatchupStat.champion_id.in_(champions),
                     MatchupStat.enemy_champion_id.in_(champions),
-                    MatchupStat.games >= MIN_CORPUS_GAMES,
                 )
             )
-        ).scalars()
-        by_lane = {(r.champion_id, r.enemy_champion_id, r.team_position): r for r in lane_rows}
+        ).scalars().all()
 
         opponent = {(p.team_id, p.position): p for p in participants}
         for p in participants:
             role = by_role.get((p.champion_id, p.position))
             if role is not None:
-                p.champion_record = CorpusRecord(games=role.games, wins=role.wins)
+                p.champion_record = CorpusRecord(
+                    games=role.games, wins=role.wins, basis="role", patches=(patches[0],)
+                )
             # Summoner's Rift teams are 100 and 200, so the other side is 300 - id.
             enemy = opponent.get((300 - p.team_id, p.position))
-            lane = by_lane.get((p.champion_id, enemy.champion_id, p.position)) if enemy else None
-            if lane is not None:
-                p.lane_record = CorpusRecord(
-                    games=lane.games,
-                    wins=lane.wins,
-                    gold_diff_14=(
-                        lane.avg_gold_diff_14
-                        if lane.timeline_games >= MIN_CORPUS_GAMES
-                        else None
-                    ),
-                    timeline_games=lane.timeline_games,
+            if enemy is not None:
+                p.lane_record = _best_matchup_record(
+                    matchup_rows, p.champion_id, enemy.champion_id, p.position, patches
                 )
-        return patch
+        return patches[0], list(patches)
 
     async def _attach_player_records(
         self, participants: list[LiveParticipant], queue_id: int

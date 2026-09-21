@@ -124,7 +124,12 @@ export interface LiveMastery {
   last_play_time: number | null
 }
 
-/** Always carries its size: a record is never shown without its games. */
+/** Which step of the lane fallback produced a record. A record always carries
+ *  its size, and anything below `lane` also carries its basis. Anything below `lane`
+ *  Anything below `lane` must be labelled where it is shown: a team scope
+ *  record rendered as a lane record is a claim the data does not support. */
+export type RecordBasis = 'role' | 'lane' | 'lane_pooled' | 'team'
+
 export interface CorpusRecord {
   games: number
   wins: number
@@ -132,6 +137,9 @@ export interface CorpusRecord {
   /** Lane records only, and only with enough timelines behind it. */
   gold_diff_14: number | null
   timeline_games: number
+  basis: RecordBasis
+  /** The patches this record was summed over, newest first. */
+  patches: string[]
 }
 
 export interface LiveBan {
@@ -186,6 +194,8 @@ export interface LiveGame {
   position_model: PositionModel | null
   /** The patch the champion and lane records were read from. */
   corpus_patch: string | null
+  /** Every patch the lane fallback was allowed to read, newest first. */
+  corpus_patches: string[]
   /** Which games each player's own record was counted over. The crawl is nearly
    *  all solo queue, so a flex lobby is counted over every queue and says so. */
   record_basis: 'queue' | 'all_queues'

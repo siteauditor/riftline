@@ -656,8 +656,9 @@ async def test_never_played_is_an_answer_and_a_failed_lookup_is_not(monkeypatch)
 @respx.mock
 async def test_corpus_records_follow_the_champion_page_floor(monkeypatch):
     """Records under the champion page's floor are withheld, a lane's gold lead
-    needs enough timelines of its own, and a TEAM matchup is never passed off
-    as the lane."""
+    needs enough timelines of its own, and a TEAM matchup is never passed off as
+    the lane **without saying so**: it is offered only when no lane record
+    clears the floor, and then it arrives labelled."""
     queue, patch = 99901, "T.9"
     monkeypatch.setattr("app.services.live.load_priors", lane_priors)
 
@@ -696,10 +697,14 @@ async def test_corpus_records_follow_the_champion_page_floor(monkeypatch):
     by_champion = {p.champion_id: p for p in game.participants}
 
     assert game.corpus_patch == patch
-    assert by_champion[266].champion_record == CorpusRecord(games=20, wins=12)
+    assert by_champion[266].champion_record == CorpusRecord(
+        games=20, wins=12, basis="role", patches=(patch,)
+    )
     assert by_champion[103].champion_record is None
+    # The lane record wins over the fifty game TEAM row for the same pair.
     assert by_champion[266].lane_record == CorpusRecord(
-        games=8, wins=5, gold_diff_14=250.0, timeline_games=6
+        games=8, wins=5, gold_diff_14=250.0, timeline_games=6,
+        basis="lane", patches=(patch,),
     )
     assert by_champion[103].lane_record.games == 8
     assert by_champion[103].lane_record.gold_diff_14 is None, "two timelines is not a lead"
@@ -750,3 +755,146 @@ async def test_the_live_endpoint_carries_lanes_skins_and_mastery(client, monkeyp
     # Still true with all of the above added: the spectator key stays here.
     assert "secret-not-ours-to-relay" not in response.text
     clear_mastery_cache()
+
+
+# ------------------------------------------------- the lane fallback ladder
+
+
+async def _fallback_lobby(monkeypatch, rows, *, queue: int, patches: list[str]):
+    """Drive one lobby against hand seeded matchup rows, and hand back the
+    records by champion."""
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+
+    async def slices(_session):
+        return [{"patch": patch, "queue_id": queue, "matches": 10} for patch in patches]
+
+    monkeypatch.setattr("app.services.live.available_slices", slices)
+
+    async with SessionLocal() as session:
+        session.add_all(rows)
+        await session.commit()
+
+    mock_spectator(spectator_game(full_roster(), queue_id=queue))
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+    return game, {p.champion_id: p for p in game.participants}
+
+
+def matchup(patch, queue, champion, enemy, role, games, wins, *, scope="LANE",
+            timelines=0, gold=None):
+    return MatchupStat(
+        patch=patch, queue_id=queue, rank_bracket="ALL", scope=scope,
+        team_position=role, champion_id=champion, enemy_champion_id=enemy,
+        games=games, wins=wins, timeline_games=timelines, avg_gold_diff_14=gold,
+    )
+
+
+@respx.mock
+async def test_a_current_patch_lane_record_is_not_diluted_by_an_older_one(monkeypatch):
+    """A record labelled as this patch has to be this patch. Measured coverage
+    is 26% on the newest patch alone, and buying the other 8% by mixing in older
+    rows under the same label would not be a fair trade."""
+    queue = 99903
+    game, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [
+            matchup("T.11", queue, 266, 122, "TOP", 10, 7),
+            matchup("T.10", queue, 266, 122, "TOP", 40, 20),
+        ],
+        queue=queue,
+        patches=["T.11", "T.10"],
+    )
+    record = by_champion[266].lane_record
+    assert record.basis == "lane"
+    assert (record.games, record.wins) == (10, 7)
+    assert record.patches == ("T.11",)
+    assert game.corpus_patches == ["T.11", "T.10"]
+
+
+@respx.mock
+async def test_two_thin_patches_pool_into_one_record(monkeypatch):
+    queue = 99913
+    _, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [
+            matchup("T.11", queue, 266, 122, "TOP", 3, 2),
+            matchup("T.10", queue, 266, 122, "TOP", 3, 1),
+        ],
+        queue=queue,
+        patches=["T.11", "T.10"],
+    )
+    record = by_champion[266].lane_record
+    assert record.basis == "lane_pooled"
+    assert (record.games, record.wins) == (6, 3)
+    assert record.patches == ("T.11", "T.10")
+
+
+@respx.mock
+async def test_pooling_applies_the_floor_to_the_total_not_to_each_patch(monkeypatch):
+    """Three games on each of two patches is six games. The floor used to live
+    in the WHERE clause, where neither row would have survived to be summed."""
+    queue = 99923
+    _, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [
+            matchup("T.11", queue, 266, 122, "TOP", 3, 2),
+            matchup("T.10", queue, 266, 122, "TOP", 1, 0),
+        ],
+        queue=queue,
+        patches=["T.11", "T.10"],
+    )
+    assert by_champion[266].lane_record is None
+
+
+@respx.mock
+async def test_the_pooled_gold_lead_is_weighted_by_its_timelines(monkeypatch):
+    """300 over six timelines pooled with -100 over two is 200, not 100: a mean
+    of means would let two games outvote six."""
+    queue = 99933
+    _, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [
+            matchup("T.11", queue, 266, 122, "TOP", 3, 2, timelines=6, gold=300.0),
+            matchup("T.10", queue, 266, 122, "TOP", 3, 1, timelines=2, gold=-100.0),
+        ],
+        queue=queue,
+        patches=["T.11", "T.10"],
+    )
+    assert by_champion[266].lane_record.gold_diff_14 == pytest.approx(200.0)
+
+
+@respx.mock
+async def test_a_team_scope_record_is_offered_last_and_never_carries_a_gold_lead(monkeypatch):
+    """A TEAM row's gold lead is this champion's lead against its own laner in
+    games where the named enemy was somewhere on the other team. It is not a
+    lead against that enemy, so it is dropped rather than relabelled."""
+    queue = 99943
+    _, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [matchup("T.11", queue, 266, 122, "TOP", 88, 50, scope="TEAM",
+                 timelines=40, gold=500.0)],
+        queue=queue,
+        patches=["T.11"],
+    )
+    record = by_champion[266].lane_record
+    assert record.basis == "team"
+    assert record.games == 88
+    assert record.gold_diff_14 is None
+    assert record.timeline_games == 0
+
+
+@respx.mock
+async def test_a_distant_patch_is_never_pooled(monkeypatch):
+    """The corpus is crawled rather than exhaustive, so the next patch held can
+    be a number or two down. Past that the items and the kits have moved."""
+    queue = 99953
+    _, by_champion = await _fallback_lobby(
+        monkeypatch,
+        [
+            matchup("T.11", queue, 266, 122, "TOP", 2, 1),
+            matchup("T.4", queue, 266, 122, "TOP", 40, 30),
+        ],
+        queue=queue,
+        patches=["T.11", "T.4"],
+    )
+    assert by_champion[266].lane_record is None

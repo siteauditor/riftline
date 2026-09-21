@@ -5,7 +5,13 @@ import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, RoleRecord, SkinArt } from './PlayerBits'
 import PlayerRecordChips from './PlayerRecordChips'
 import { BLUE, LANES, RED } from './sides'
-import type { CorpusRecord, LiveGame, LiveParticipant, Position } from '../../lib/api'
+import type {
+  CorpusRecord,
+  LiveGame,
+  LiveParticipant,
+  Position,
+  RecordBasis,
+} from '../../lib/api'
 import { pct, positionLabel } from '../../lib/format'
 
 /**
@@ -65,7 +71,6 @@ export default function LaneView({ game, platform, you }: { game: LiveGame; plat
                 blue={blue}
                 red={red}
                 confidentAt={confidentAt}
-                patch={game.corpus_patch}
               />
               <LaneCard
                 p={red}
@@ -186,13 +191,11 @@ function LaneCenter({
   blue,
   red,
   confidentAt,
-  patch,
 }: {
   lane: Position
   blue: LiveParticipant
   red: LiveParticipant
   confidentAt: number
-  patch: string | null
 }) {
   // Either side's placement can be the close call, and a lane is only as sure
   // as its less certain half.
@@ -215,30 +218,38 @@ function LaneCenter({
           likely
         </span>
       )}
-      {record && (
+      {record ? (
         <span
           className="mt-0.5 w-full"
-          title={
-            `${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}: ` +
-            `${record.wins} wins and ${record.games - record.wins} losses in our stored games` +
-            (patch ? ` on patch ${patch}` : '') +
-            '. This is the matchup, not these two players.' +
-            (record.gold_diff_14 != null
-              ? ` ${blue.champion.name} averages ${signed(Math.round(record.gold_diff_14))} gold at 14 minutes, over ${record.timeline_games} games with timelines.`
-              : '')
-          }
+          style={{ opacity: BASIS_WEIGHT[record.basis] }}
+          title={matchupTitle(blue, red, lane, record)}
         >
-          {/* Blue's share of the matchup's wins, as blue against red. */}
-          <span className="flex h-1 w-full overflow-hidden rounded-full bg-loss/70">
-            <span
-              className="h-full bg-win"
-              style={{ width: `${Math.round(record.win_rate * 100)}%` }}
-            />
-          </span>
+          {/* Blue's share of the matchup's wins, as blue against red. A weaker
+              basis is drawn as a dashed rule rather than a filled bar, so a
+              record of two champions who merely shared a game cannot be read
+              as a lane record at a glance. */}
+          {record.basis === 'team' ? (
+            <span className="block border-t border-dashed border-ink-faint" />
+          ) : (
+            <span className="flex h-1 w-full overflow-hidden rounded-full bg-loss/70">
+              <span
+                className="h-full bg-win"
+                style={{ width: `${Math.round(record.win_rate * 100)}%` }}
+              />
+            </span>
+          )}
           <span className="tnum mt-0.5 block text-[11px] text-ink-dim">
             {record.wins}-{record.games - record.wins}
           </span>
-          {record.gold_diff_14 != null && (
+          {BASIS_LABEL[record.basis] && (
+            <span className="block text-[10px] leading-tight text-ink-faint">
+              {BASIS_LABEL[record.basis]}
+            </span>
+          )}
+          {/* Dropped on a team basis rather than dimmed: a gold lead measured
+              against somebody else's laner is not a lead against this one. The
+              server drops it too; this is the second lock on the same door. */}
+          {record.basis !== 'team' && record.gold_diff_14 != null && (
             <span
               className="tnum block text-[10px]"
               style={{
@@ -250,8 +261,66 @@ function LaneCenter({
             </span>
           )}
         </span>
+      ) : (
+        // Named rather than left blank. Measured across forty real lobbies,
+        // only 26% of lanes have a record on the newest patch, so a silent gap
+        // here read as the page having failed to draw something.
+        <span
+          className="mt-0.5 text-[10px] text-ink-faint"
+          title={`We hold fewer than five stored games of ${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}, on this patch or the one before it.`}
+        >
+          no record yet
+        </span>
       )}
     </div>
+  )
+}
+
+
+// How loudly each step of the fallback ladder is allowed to speak. A pooled
+// record is a shade quieter than a current one, and a team scope record is
+// quieter again, because the three are not the same claim.
+const BASIS_WEIGHT: Record<RecordBasis, number> = {
+  role: 1,
+  lane: 1,
+  lane_pooled: 0.8,
+  team: 0.6,
+}
+
+const BASIS_LABEL: Record<RecordBasis, string> = {
+  role: '',
+  lane: '',
+  lane_pooled: '2 patches',
+  team: 'anywhere on the map',
+}
+
+function matchupTitle(
+  blue: LiveParticipant,
+  red: LiveParticipant,
+  lane: Position,
+  record: CorpusRecord,
+): string {
+  const where = record.patches.length > 1 ? `patches ${record.patches.join(' and ')}` : `patch ${record.patches[0] ?? ''}`
+  const gold =
+    record.gold_diff_14 != null
+      ? ` ${blue.champion.name} averages ${signed(Math.round(record.gold_diff_14))} gold at 14 minutes, over ${record.timeline_games} games with timelines.`
+      : ''
+  if (record.basis === 'team') {
+    return (
+      `We hold too few lane games of ${blue.champion.name} against ${red.champion.name} as ` +
+      `${positionLabel(lane)}, so this counts every stored game with both of them in it, in any ` +
+      `lane: ${record.wins} wins and ${record.games - record.wins} losses on ${where}. ` +
+      'It is not a lane record.'
+    )
+  }
+  const pooled =
+    record.basis === 'lane_pooled'
+      ? ' Not enough games on the newest patch alone, so two patches are pooled.'
+      : ''
+  return (
+    `${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}: ` +
+    `${record.wins} wins and ${record.games - record.wins} losses in our stored games on ${where}.` +
+    `${pooled} This is the matchup, not these two players.${gold}`
   )
 }
 

@@ -425,13 +425,23 @@ class LiveMasteryOut(BaseModel):
 
 
 class CorpusRecordOut(BaseModel):
-    """A record from the stored corpus. Always carries its size."""
+    """A record from the stored corpus. Always carries its size and its basis.
+
+    `basis` says which step of the lane fallback produced it: "role" for the
+    champion's own record, "lane" for this patch's head to head, "lane_pooled"
+    when the previous patch had to be pooled in, and "team" when the only rows
+    we hold are of the two champions in the same game rather than the same lane.
+    The page must label anything below "lane", because a team scope record shown
+    as a lane record is a claim the data does not support.
+    """
 
     games: int
     wins: int
     win_rate: float
     gold_diff_14: float | None = None
     timeline_games: int = 0
+    basis: str = "lane"
+    patches: list[str] = Field(default_factory=list)
 
 
 class LiveBanOut(BaseModel):
@@ -582,6 +592,8 @@ class LiveGameOut(BaseModel):
     position_model: PositionModelOut | None = None
     # The patch the champion and lane records were read from.
     corpus_patch: str | None = None
+    # Every patch the lane fallback was allowed to read, newest first.
+    corpus_patches: list[str] = Field(default_factory=list)
     # Which games each player's own record was counted over.
     record_basis: str = "all_queues"
     record_queue_id: int | None = None
@@ -1177,6 +1189,8 @@ def _corpus_record_out(record) -> CorpusRecordOut | None:
         win_rate=record.wins / record.games if record.games else 0.0,
         gold_diff_14=record.gold_diff_14,
         timeline_games=record.timeline_games,
+        basis=record.basis,
+        patches=list(record.patches),
     )
 
 
@@ -1330,6 +1344,7 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
             else None
         ),
         corpus_patch=game.corpus_patch,
+        corpus_patches=game.corpus_patches,
         record_basis=game.record_basis,
         record_queue_id=game.record_queue_id,
         # asdict, not vars: LobbyRank is a slots dataclass and has no __dict__.
