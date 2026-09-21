@@ -65,6 +65,9 @@ class LeaderboardResponse(BaseModel):
     # coverage is a property of which ladders we have crawled, and a table full
     # of unnamed rows should say why.
     named_on_page: int = 0
+    # True when names were left for later so the key keeps a reserve for
+    # player searches. The rest are waiting on Riot, not unknown.
+    names_held_back: bool = False
     fetched_at: int | None = None
     rows: list[LeaderboardRow] = Field(default_factory=list)
 
@@ -147,6 +150,7 @@ async def get_leaderboard(
         truncated=result.truncated,
         has_more=result.page * result.per_page < result.total_stored,
         named_on_page=result.named_on_page,
+        names_held_back=result.names_held_back,
         fetched_at=epoch_ms(result.fetched_at),
         rows=[
             LeaderboardRow(

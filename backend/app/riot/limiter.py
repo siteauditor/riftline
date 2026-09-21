@@ -219,6 +219,21 @@ class RateLimiter:
             deadline = time.monotonic() + max(0.0, retry_after)
             self._penalty[scope] = max(self._penalty.get(scope, 0.0), deadline)
 
+    def spare(self) -> int:
+        """Free slots in the longest application window right now.
+
+        The long window is the binding one on a development key (100 per two
+        minutes against 20 per second), and the short one empties within a
+        second, so reading it too would report a busy key during every burst.
+        Counts include what Riot reported for other processes on the key.
+        """
+        now = time.monotonic()
+        longest = max(self._app, key=lambda w: w.period, default=None)
+        if longest is None:
+            return 0
+        longest.prune(now)
+        return max(0, longest.limit - len(longest.hits))
+
     def snapshot(self) -> dict:
         """Current utilisation, for /health and the UI's rate-budget meter."""
         now = time.monotonic()

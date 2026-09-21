@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { PLATFORMS, api } from '../lib/api'
 import Crest from '../components/Crest'
@@ -28,6 +28,14 @@ const FALLBACK = {
   platforms: PLATFORMS,
 }
 const PER_PAGE = 50
+
+// Riot sends ladders without names, so each unnamed player costs one lookup,
+// and the server names up to 25 a request while the key allows. A page with
+// unnamed rows asks again on its own, this often and this many times, instead
+// of telling the reader to come back: on a Bronze page nobody is named from
+// our stored games, and 50 names are two requests' worth.
+const NAME_POLL_MS = 8_000
+const NAME_POLLS = 6
 
 export default function Leaderboard() {
   // Filters live in the URL, the way the champion page already does it, so a
@@ -68,22 +76,38 @@ export default function Leaderboard() {
   // Apex ignores the division server-side, so including it would key two
   // cache entries to one byte-identical response.
   const effectiveDivision = isApex ? 'I' : division
+  const queryKey = ['leaderboard', platform, queueId, tier, effectiveDivision, page]
+  const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey: ['leaderboard', platform, queueId, tier, effectiveDivision, page],
+    queryKey,
     queryFn: () =>
       api.leaderboard(platform, {
         queueId, tier, division: effectiveDivision, page, perPage: PER_PAGE,
       }),
     // The server caches a snapshot for fifteen minutes, so refetching faster
-    // than that buys nothing.
+    // than that buys nothing, apart from the names below.
     staleTime: 300_000,
     retry: false,
     // Keep the previous page on screen while the next loads, instead of
     // dropping to a spinner and jumping the scroll position on every click.
     placeholderData: (previous) => previous,
+    // Unnamed rows fill in while the page is open. `dataUpdateCount` is every
+    // answer for this key, the first included, so the page stops asking after
+    // NAME_POLLS more and names the rest on a later visit.
+    refetchInterval: (q) => {
+      const d = q.state.data
+      if (!d || d.named_on_page >= d.rows.length) return false
+      return q.state.dataUpdateCount <= NAME_POLLS ? NAME_POLL_MS : false
+    },
+    refetchIntervalInBackground: false,
   })
 
   const data = query.data
+  const answers = queryClient.getQueryState(queryKey)?.dataUpdateCount ?? 0
+  const unnamed = data ? data.rows.length - data.named_on_page : 0
+  // Still asking, and this is the page's own answer rather than the previous
+  // page shown while it loads.
+  const lookingUp = unnamed > 0 && answers <= NAME_POLLS && !query.isPlaceholderData
 
   // The ladder being read is the subject, so it sets the page's accent. On a
   // site about rank the colour carries information rather than decorating.
@@ -171,6 +195,12 @@ export default function Leaderboard() {
               : ''}
             {data.fetched_at && `, snapshot ${timeAgo(data.fetched_at)}`}
             {`, ${data.named_on_page} of ${data.rows.length} named here`}
+            {unnamed > 0 &&
+              (lookingUp
+                ? ', looking up the rest'
+                : data.names_held_back
+                  ? ", the rest wait on Riot's rate limit"
+                  : ', the rest fill in on a later visit')}
           </p>
         )}
       </div>
@@ -230,9 +260,9 @@ export default function Leaderboard() {
                         ) : (
                           <span
                             className="text-ink-faint"
-                            title="This account has not appeared in any match we store, so we do not know its name yet. Revisit and it will fill in."
+                            title="Riot sends ladders without names, so each one is looked up separately, a few at a time, within the rate limit Riot sets. Once found, a name is kept."
                           >
-                            Unknown player
+                            {lookingUp ? 'Looking up name' : 'Name not found yet'}
                           </span>
                         )}
                         {row.inactive && (

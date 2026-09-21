@@ -85,6 +85,9 @@ NAME_BUDGET_SECONDS = 4.0
 # How long refreshing a stale slice may wait for the limiter when a snapshot is
 # already held and could be served instead.
 REFRESH_WAIT_SECONDS = 5.0
+# Calls in the key's two-minute window that naming never touches, kept for the
+# lookups a visitor is actually waiting on: about four cold profiles' worth.
+NAME_RESERVE = 20
 
 
 @dataclass(slots=True)
@@ -125,6 +128,9 @@ class LadderPage:
     # True when the ladder continues past what we store, whether because the
     # row cap bit or because we stopped paging.
     truncated: bool = False
+    # True when naming stopped to leave the key's reserve alone, so the page
+    # can say the rest are waiting on Riot rather than unknown.
+    names_held_back: bool = False
     rows: list[LadderRow] = field(default_factory=list)
 
 
@@ -171,6 +177,8 @@ class LadderService:
         self.client = client
         self.settings = settings
         self.ranks = RankCache(session, client, settings)
+        # Set by `_resolve_names` when the key's reserve stopped it.
+        self.names_held_back = False
 
     # ------------------------------------------------------------- fetching
 
@@ -528,6 +536,7 @@ class LadderService:
             # row was named while it renders blank.
             named_on_page=sum(1 for r in rows if r.game_name and r.tag_line),
             fetched_at=age,
+            names_held_back=self.names_held_back,
             rows=rows,
         )
 
@@ -569,12 +578,22 @@ class LadderService:
 
         Writes what it learns onto ``Player``, so the cost is paid once per
         player for the life of the database, not once per page view.
+
+        Never with the key's last few calls. A name is a nicety and a Riot ID
+        lookup is the site's front door: a Bronze page names nobody from our
+        stored games, so it can spend 25 calls a view, and with the page now
+        asking again while unnamed rows remain, it would otherwise take the
+        whole two-minute budget and answer the next search with a rate limit.
+        Sets `names_held_back` when the reserve stopped it.
         """
         semaphore = asyncio.Semaphore(NAME_CONCURRENCY)
         found: dict[str, tuple[str | None, str | None]] = {}
 
         async def one(puuid: str) -> None:
             async with semaphore:
+                if self.client.limiter.spare() <= NAME_RESERVE:
+                    self.names_held_back = True
+                    return
                 try:
                     # account-v1 is a *regional* endpoint, and `account_region`
                     # is the one that collapses SEA onto ASIA. Hardcoding

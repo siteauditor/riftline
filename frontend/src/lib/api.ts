@@ -363,6 +363,9 @@ export interface LeaderboardResponse {
   truncated: boolean
   has_more: boolean
   named_on_page: number
+  /** True when names were left for later to keep the key's reserve for
+   *  player searches. Optional: a server one deploy behind does not send it. */
+  names_held_back?: boolean
   fetched_at: number | null
   rows: LeaderboardRow[]
 }

@@ -403,3 +403,33 @@ async def test_a_busy_key_serves_the_ladder_we_hold_instead_of_waiting():
 
     assert elapsed < 2.0, f"waited {elapsed:.1f}s for a refresh it could skip"
     assert [r.puuid for r in page.rows][:1] == [puuid]
+
+
+@respx.mock
+async def test_naming_leaves_the_keys_last_calls_for_player_searches():
+    """A Bronze page names nobody from stored games, so it can spend 25 calls a
+    view, and the page now asks again while rows are unnamed. Past the reserve
+    it stops and says so, rather than answering the next search with a limit."""
+    from app.services.ladders import NAME_RESERVE
+
+    puuids = [f"LAD-reserve{i}".ljust(78, "r") for i in range(5)]
+    mock_apex([apex_entry(p, 900 - i) for i, p in enumerate(puuids)])
+    account = respx.get(url__regex=r".*/riot/account/v1/accounts/by-puuid/.*").mock(
+        return_value=httpx.Response(200, json={"gameName": "N", "tagLine": "T"})
+    )
+    async with SessionLocal() as session:
+        await service(session).refresh(PLATFORM, tier="CHALLENGER")
+
+        busy = service(session)
+        # Riot reports the two-minute window as all but the reserve spent.
+        await busy.client.limiter.observe(
+            "x", {"X-App-Rate-Limit-Count": f"{100 - NAME_RESERVE}:120"}
+        )
+        held = await busy.page(PLATFORM, tier="CHALLENGER")
+
+        free = service(session)
+        named = await free.page(PLATFORM, tier="CHALLENGER")
+
+    assert account.call_count == len(puuids), "only the page with headroom spent calls"
+    assert (held.named_on_page, held.names_held_back) == (0, True)
+    assert (named.named_on_page, named.names_held_back) == (len(puuids), False)
