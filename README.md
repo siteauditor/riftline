@@ -70,6 +70,12 @@ no published shutdown date. Live-game lookup therefore sits behind
 `ENABLE_SPECTATOR` and the draft assistant is manual-input-first, so its removal
 costs a convenience rather than a feature.
 
+Everything the live page adds on top of the lobby is read from storage, so the
+day spectator goes dark the page loses the roster and nothing else. The one
+exception is resolving a finished game into its match, which spends at most
+three Riot calls per match id however many people are watching it
+(`LIVE_RESULT_COOLDOWN_SECONDS`, `LIVE_RESULT_MAX_ATTEMPTS`).
+
 ---
 
 ## Collecting data for tier lists and draft
@@ -217,6 +223,21 @@ header runs the subject's own splash art behind the type (`ArtHeader`), ranks
 show Riot's crests (`lib/rankArt.ts`), the corner radius is zero everywhere
 through one token, and colour has three sources only: hextech teal for the
 interface, gold for what was earned, and the rank being described.
+
+**The live game page is about the players, not only the champions.** Every
+identified player in a lobby carries what the corpus holds about them: their W-L
+and average Riftline score with the sample stated, their usual role and whether
+this game is off it, and their record on the champion they are on. A median of 9
+of 10 players in a stored lobby clear the three game floor. A lane record falls
+back in a stated order, this patch, then the previous one pooled in, then games
+where both champions were in the lobby rather than in the same lane, and the bar
+says which, because only 26% of lanes have a record on the newest patch alone.
+The page also says who has met before, as counts of stored games rather than a
+percentage, and it never predicts the game: about a third of every lobby hides
+its identity, which is not a third missing at random, and a test keeps any
+"win probability" off the wire. Zero of 31 production lookups found anybody in a
+game, so the idle state carries their last stored game, their form and what they
+have been playing rather than an empty box.
 
 **Draft suggestions are ranked by what the records support.** Every suggestion returns
 its baseline, every record behind it with its sample, and the mastery weighting. Each
