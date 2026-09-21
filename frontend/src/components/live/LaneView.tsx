@@ -26,6 +26,7 @@ export default function LaneView({ game, platform, you }: { game: LiveGame; plat
   const at = (team: number, lane: Position) =>
     game.participants.find((p) => p.team_id === team && p.position === lane)
   const confidentAt = game.position_model?.confident_at ?? 0.9
+  const accuracy = game.position_model?.accuracy ?? 0.929
 
   // Full width, like the rest of the page, with each card pulled in towards the
   // lane icon rather than out to its own edge. Pushed to the edges, the two
@@ -47,6 +48,12 @@ export default function LaneView({ game, platform, you }: { game: LiveGame; plat
           Red side
         </h3>
       </div>
+      {/* The one caveat that is about the layout in front of you, kept visible
+          while the rest moved into the disclosure at the bottom. */}
+      <p className="mb-2 text-[11px] text-ink-faint">
+        Riot publishes no positions, so these lanes are inferred. Measured on
+        held-out games, {pct(accuracy, 1)} of players land in the right one.
+      </p>
       <ul>
         {LANES.map((lane) => {
           const blue = at(BLUE, lane)

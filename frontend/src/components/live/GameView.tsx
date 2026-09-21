@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import Bans from './Bans'
 import LaneView from './LaneView'
@@ -14,12 +15,15 @@ export default function GameView({
   you,
   stale,
   ended = false,
+  poll,
 }: {
   game: LiveGame
   platform: string
   you: string
   stale: boolean
   ended?: boolean
+  /** The countdown and the check button, owned by the page that polls. */
+  poll?: ReactNode
 }) {
   return (
     <div className="space-y-5">
@@ -40,9 +44,15 @@ export default function GameView({
             Could not refresh; showing the last successful check
           </span>
         )}
+        {poll && <span className="ml-auto">{poll}</span>}
       </header>
 
       <LobbyBand game={game} you={you} />
+
+      {/* During champion select the picks are locked but nothing has happened
+          yet, so the bans are the only settled information the lobby has. They
+          move above the lanes until the game starts. */}
+      {game.phase === 'loading' && <Bans game={game} />}
 
       {game.positions_inferred ? (
         <LaneView game={game} platform={platform} you={you} />
@@ -50,7 +60,7 @@ export default function GameView({
         <TeamView game={game} platform={platform} you={you} />
       )}
 
-      <Bans game={game} />
+      {game.phase !== 'loading' && <Bans game={game} />}
       <Notes game={game} />
     </div>
   )
@@ -79,7 +89,7 @@ function GameClock({ game }: { game: LiveGame }) {
   }, [game.observed_at, game.game_length])
 
   if (game.phase === 'loading') {
-    return <span className="text-sm text-ink-dim">Champion select or loading</span>
+    return <span className="text-sm text-gold-bright">Champion select</span>
   }
   return (
     <span className="tnum text-sm text-ink-dim">

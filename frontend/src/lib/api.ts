@@ -147,6 +147,9 @@ export interface CorpusRecord {
 export interface LiveBan {
   champion: ChampionRef
   team_id: number
+  /** How often this patch bans them. Null where the corpus holds too few. */
+  ban_rate: number | null
+  ban_rate_games: number
 }
 
 /** How far an inferred position can be trusted. Measured on held-out games. */

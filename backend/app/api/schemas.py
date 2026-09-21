@@ -447,6 +447,10 @@ class CorpusRecordOut(BaseModel):
 class LiveBanOut(BaseModel):
     champion: ChampionRef
     team_id: int
+    # How often this patch bans that champion, from the rows the tier list
+    # reads. Null where the corpus holds too few games of them to say.
+    ban_rate: float | None = None
+    ban_rate_games: int = 0
 
 
 class PositionModelOut(BaseModel):
@@ -1458,6 +1462,8 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
                     id=c, name=sd.champion_name(c), icon_url=sd.champion_icon(c)
                 ),
                 team_id=team,
+                ban_rate=(game.ban_rates[c].ban_rate if c in game.ban_rates else None),
+                ban_rate_games=(game.ban_rates[c].games if c in game.ban_rates else 0),
             )
             for c, team in game.bans
         ],

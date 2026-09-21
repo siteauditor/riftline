@@ -386,6 +386,16 @@ class LobbyCompare:
     min_ranked_per_side: int
 
 
+@dataclass(frozen=True, slots=True)
+class BanRate:
+    """How often this patch bans a champion, from the same rows the tier list
+    reads. Shown during champion select, where the bans are the only settled
+    information a lobby has."""
+
+    ban_rate: float
+    games: int
+
+
 @dataclass(slots=True)
 class LiveGame:
     game_id: int
@@ -402,6 +412,8 @@ class LiveGame:
     banned_champion_ids: list[int] = field(default_factory=list)
     # (champion_id, team_id) in pick order, for showing each side's bans apart.
     bans: list[tuple[int, int]] = field(default_factory=list)
+    # Ban rates for those champions, where the corpus holds enough of them.
+    ban_rates: dict[int, BanRate] = field(default_factory=dict)
     participants: list[LiveParticipant] = field(default_factory=list)
     lobby_rank: LobbyRank | None = None
     # False when the player we looked up is themselves anonymised: Riot still
@@ -832,10 +844,15 @@ class LiveGameService:
             payload.get("mapId") == SUMMONERS_RIFT_MAP_ID
             and await self._infer_positions(participants)
         )
-        corpus_patch, corpus_patches = (
-            await self._attach_corpus_records(participants, queue_id)
+        banned_ids = [
+            int(b["championId"])
+            for b in (payload.get("bannedChampions") or [])
+            if isinstance(b.get("championId"), int) and b["championId"] > 0
+        ]
+        corpus_patch, corpus_patches, ban_rates = (
+            await self._attach_corpus_records(participants, queue_id, banned_ids)
             if positions_inferred
-            else (None, [])
+            else (None, [], {})
         )
         # After the positions, because "off their usual role" compares against
         # the position inferred above. Storage only, like the two before it, and
@@ -868,6 +885,7 @@ class LiveGameService:
             observed_at=observed_at_ms or int(time.time() * 1000),
             banned_champion_ids=[int(b["championId"]) for b in raw_bans],
             bans=[(int(b["championId"]), int(b.get("teamId") or 0)) for b in raw_bans],
+            ban_rates=ban_rates,
             participants=participants,
             you_identified=any(p.puuid == puuid for p in participants),
             positions_inferred=positions_inferred,
@@ -955,8 +973,9 @@ class LiveGameService:
                 log.warning("mastery lookup raised: %r", task.exception())
 
     async def _attach_corpus_records(
-        self, participants: list[LiveParticipant], queue_id: int
-    ) -> tuple[str | None, list[str]]:
+        self, participants: list[LiveParticipant], queue_id: int,
+        banned: list[int] | None = None,
+    ) -> tuple[str | None, list[str], dict[int, BanRate]]:
         """Each pick in its role, and against its lane opponent, from storage.
 
         **The lane record is the page's one comparative number, and it used to
@@ -978,11 +997,12 @@ class LiveGameService:
         Returns the newest patch read and every patch the ladder was allowed to
         touch, so the page can say so.
         """
+        banned = banned or []
         slices = [s for s in await available_slices(self.session) if s["queue_id"] == queue_id]
         if not slices:
-            return None, []
+            return None, [], {}
         patches = _poolable_patches([s["patch"] for s in slices])
-        champions = {p.champion_id for p in participants}
+        champions = {p.champion_id for p in participants} | set(banned)
 
         role_rows = (
             await self.session.execute(
@@ -995,7 +1015,15 @@ class LiveGameService:
                 )
             )
         ).scalars()
-        by_role = {(r.champion_id, r.team_position): r for r in role_rows}
+        by_role: dict[tuple[int, str | None], ChampionStat] = {}
+        # A champion's ban rate is measured over the whole pool rather than one
+        # role, so the roles are summed the way the tier list sums them.
+        ban_totals: dict[int, list[int]] = {}
+        for row in role_rows:
+            by_role[(row.champion_id, row.team_position)] = row
+            totals = ban_totals.setdefault(row.champion_id, [0, 0])
+            totals[0] += row.bans
+            totals[1] = max(totals[1], row.pool_games)
 
         # Both scopes and both patches in one query: `ix_matchup_lookup` leads
         # with `patch`, so two patches are two index ranges. The five game floor
@@ -1027,7 +1055,12 @@ class LiveGameService:
                 p.lane_record = _best_matchup_record(
                     matchup_rows, p.champion_id, enemy.champion_id, p.position, patches
                 )
-        return patches[0], list(patches)
+        rates = {
+            champion_id: BanRate(ban_rate=bans / pool, games=pool)
+            for champion_id, (bans, pool) in ban_totals.items()
+            if champion_id in banned and pool
+        }
+        return patches[0], list(patches), rates
 
     async def _attach_player_records(
         self, participants: list[LiveParticipant], queue_id: int

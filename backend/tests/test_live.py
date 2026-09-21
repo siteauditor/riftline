@@ -749,8 +749,15 @@ async def test_the_live_endpoint_carries_lanes_skins_and_mastery(client, monkeyp
     assert first["skin_tile_url"].endswith("/tile/skin/7")
     assert first["mastery"] == {"level": 5, "points": 40000, "last_play_time": None}
     assert first["mastery_known"] is True
+    # A ban carries its own rate where the corpus holds enough of that
+    # champion, and null rather than a zero where it does not.
     assert game["bans"] == [
-        {"champion": game["bans"][0]["champion"], "team_id": 100},
+        {
+            "champion": game["bans"][0]["champion"],
+            "team_id": 100,
+            "ban_rate": None,
+            "ban_rate_games": 0,
+        },
     ]
     # Still true with all of the above added: the spectator key stays here.
     assert "secret-not-ours-to-relay" not in response.text

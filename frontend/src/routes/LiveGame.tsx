@@ -15,6 +15,9 @@ import { useChampionArt } from '../lib/useChampionArt'
 import { useMatchHistory } from '../lib/useMatchHistory'
 
 const POLL_MS = 60_000
+// Champion select lasts a couple of minutes and then the lobby becomes a game,
+// so the page checks twice as often while it is in that window.
+const SELECT_POLL_MS = 30_000
 // Three asks for the result of a finished game, a minute apart. The server caps
 // the spend at the same number per match id, so extra tabs cost nothing.
 const RESULT_ATTEMPTS = 3
@@ -25,7 +28,8 @@ export default function LiveGamePage() {
   const query = useQuery({
     queryKey: ['live', platform, name, tag],
     queryFn: () => api.live(platform, name, tag),
-    refetchInterval: POLL_MS,
+    refetchInterval: (query) =>
+      query.state.data?.game?.phase === 'loading' ? SELECT_POLL_MS : POLL_MS,
     refetchIntervalInBackground: false,
     staleTime: 30_000,
   })
@@ -75,7 +79,7 @@ export default function LiveGamePage() {
   const poll = (
     <PollClock
       updatedAt={query.dataUpdatedAt}
-      intervalMs={POLL_MS}
+      intervalMs={data?.game?.phase === 'loading' ? SELECT_POLL_MS : POLL_MS}
       fetching={query.isFetching}
       onCheck={() => query.refetch()}
     />
@@ -152,6 +156,7 @@ export default function LiveGamePage() {
           platform={platform}
           you={data.puuid}
           stale={query.isError}
+          poll={poll}
         />
       )}
       </div>
