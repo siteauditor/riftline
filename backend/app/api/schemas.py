@@ -536,6 +536,8 @@ class LiveParticipantOut(BaseModel):
     # Always present, including zero: "we hold nothing" is an answer.
     stored_games: int = 0
     record: PlayerRecordOut | None = None
+    # Null on the searched player's own row and on anyone hidden.
+    shared_games: SharedGamesOut | None = None
 
 
 class LobbyRankOut(BaseModel):
@@ -567,6 +569,45 @@ class LobbyRankOut(BaseModel):
     unknown: int = 0
     queue_type: str
     queue_matches_game: bool = True
+
+
+class SharedGamesOut(BaseModel):
+    """Earlier stored games a player and the searched player were both in.
+
+    Counts only, at every sample size. These are single digit numbers, so a
+    percentage here would be a figure nobody should quote back. The wins are
+    always the searched player's.
+
+    `basis` is "stored_matches" and it matters: the crawler walks outward from
+    matches it already holds, so the people we hold games of are exactly the
+    people who appear together in them. These figures are an upper bound on what
+    a lobby outside the crawled bracket would show.
+    """
+
+    games: int
+    same_side: int
+    same_side_wins: int
+    opposite_side: int
+    opposite_side_wins: int
+    last_played: int | None = None
+    basis: str = "stored_matches"
+
+
+class SameTeamPairOut(BaseModel):
+    """Two players in this lobby who keep appearing on the same side.
+
+    Not called a duo, here or anywhere else on the wire. Two players in the same
+    small ranked pool meet constantly without ever pressing invite, so this is a
+    pattern in stored games and nothing more. Nothing is persisted: the pairing
+    is computed per request and lives in this response.
+    """
+
+    puuid_a: str
+    puuid_b: str
+    games: int
+    wins: int
+    last_played: int | None = None
+    basis: str = "stored_matches"
 
 
 class SideReadOut(BaseModel):
@@ -644,6 +685,8 @@ class LiveGameOut(BaseModel):
     record_queue_id: int | None = None
     # The two sides beside each other. Null off Summoner's Rift.
     sides: LobbyCompareOut | None = None
+    # Pairs that keep landing on the same side in stored games.
+    same_team_pairs: list[SameTeamPairOut] = Field(default_factory=list)
 
 
 class LastStoredGameOut(BaseModel):
@@ -1368,6 +1411,11 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
                 lane_record=_corpus_record_out(p.lane_record),
                 stored_games=p.stored_games,
                 record=_player_record_out(p.record),
+                shared_games=(
+                    SharedGamesOut(**dataclasses.asdict(p.shared_games))
+                    if p.shared_games
+                    else None
+                ),
             )
             for p in game.participants
         ],
@@ -1394,6 +1442,9 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
         corpus_patches=game.corpus_patches,
         record_basis=game.record_basis,
         record_queue_id=game.record_queue_id,
+        same_team_pairs=[
+            SameTeamPairOut(**dataclasses.asdict(pair)) for pair in game.same_team_pairs
+        ],
         sides=(
             LobbyCompareOut(
                 **{**dataclasses.asdict(game.sides), "sides": [

@@ -23,7 +23,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
+from sqlalchemy.orm import aliased
 
 from app.db.models import ChampionStat, Match, MatchParticipant, MatchupStat, RankedEntry
 from app.riot.client import RiotClient
@@ -63,6 +64,18 @@ APEX_TIER_NAMES = ("MASTER", "GRANDMASTER", "CHALLENGER")
 # the two pages cannot disagree about whether a record is worth showing. Shown
 # as a W-L record rather than a bare percentage, so a thin one looks thin.
 MIN_CORPUS_GAMES = 5
+
+# One earlier game together is worth reporting: the fact of a meeting is the
+# datum, and it ships with its own count of 1. Measured 2026-09-21 over thirty
+# recent stored lobbies: 313 of 1,350 pairs (23%) share an earlier stored match,
+# and at least one pair had met in every one of the thirty.
+MIN_SHARED_GAMES = 1
+
+# A pair keeps landing on the same side. Measured over the same thirty lobbies:
+# only 55 of 1,350 pairs sit together in two or more earlier matches, about two
+# per lobby. At one game the signal fires on a quarter of all pairs and is
+# ambient noise rather than a pattern.
+MIN_SAME_TEAM_GAMES = 2
 
 # Below this many identified players a side's rank is withheld. Six of ten is
 # the whole lobby's floor, and three of five is the same proportion at half the
@@ -241,6 +254,9 @@ class LiveParticipant:
     # and the page has to be able to tell them apart.
     stored_games: int = 0
     record: PlayerRecord | None = None
+    # What this player and the searched player have shared before. None on the
+    # searched player's own row, and on anyone with no puuid to look up.
+    shared_games: SharedGames | None = None
 
 
 @dataclass(slots=True)
@@ -277,6 +293,42 @@ class LobbyRank:
     # False for ARAM and friends, where the rank shown is solo queue standing
     # and not a rank in the queue actually being played.
     queue_matches_game: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SharedGames:
+    """Earlier stored games this player and the searched player were both in.
+
+    Counts only, at every sample size: these are single digit numbers, so a
+    percentage would be a figure nobody should quote. The wins are always the
+    searched player's, on either side of the pair.
+    """
+
+    games: int
+    same_side: int
+    same_side_wins: int
+    opposite_side: int
+    opposite_side_wins: int
+    last_played: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SameTeamPair:
+    """Two players in this lobby who keep appearing on the same side.
+
+    **Never called a duo, here or on the wire.** Two players in the same small
+    ranked pool meet constantly without ever pressing invite, and the crawler
+    walks outward from stored matches, so the people we hold games of are
+    exactly the people who appear together in them. This is a pattern in games
+    Riftline stored, and that is all it may be rendered as.
+    """
+
+    puuid_a: str
+    puuid_b: str
+    games: int
+    # Games the side those two shared actually won.
+    wins: int
+    last_played: int | None = None
 
 
 @dataclass(slots=True)
@@ -365,6 +417,8 @@ class LiveGame:
     # The two sides beside each other. None off Summoner's Rift, where there is
     # no pair of sides to compare.
     sides: LobbyCompare | None = None
+    # Pairs in this lobby that keep landing on the same side in stored games.
+    same_team_pairs: list[SameTeamPair] = field(default_factory=list)
     # Which games the player records were counted over: this queue, or every
     # queue we hold. The crawl is nearly all solo queue, so scoping a flex lobby
     # to flex would blank ten cards for nothing.
@@ -789,6 +843,8 @@ class LiveGameService:
         record_basis, record_queue_id = await self._attach_player_records(
             participants, queue_id
         )
+        match_id = f"{payload.get('platformId') or resolved.id.upper()}_{payload.get('gameId') or 0}"
+        same_team_pairs = await self._attach_shared_games(participants, puuid, match_id)
 
         raw_bans = sorted(
             (
@@ -819,6 +875,7 @@ class LiveGameService:
             corpus_patches=corpus_patches,
             record_basis=record_basis,
             record_queue_id=record_queue_id,
+            same_team_pairs=same_team_pairs,
         )
         game.lobby_rank = lobby_rank(participants, game.queue_id)
         # Pure arithmetic over what the readers above attached: no query, no
@@ -1095,6 +1152,92 @@ class LiveGameService:
                 ),
             )
         return basis, (queue_id if scoped else None)
+
+    async def _attach_shared_games(
+        self,
+        participants: list[LiveParticipant],
+        you_puuid: str,
+        this_match_id: str,
+    ) -> list[SameTeamPair]:
+        """Who in this lobby has met before, from stored matches.
+
+        One self join answers both questions: the searched player's nine pairs,
+        and every pair that keeps landing on the same side. Measured 3.1 ms for
+        one player against nine on the local corpus, against
+        `ix_participant_puuid_match`.
+
+        `a.puuid < b.puuid` dedupes the mirror row and halves the work, which
+        means the searched player can be on either side of a pair. Wins beside
+        them read straight off; wins against them have to be flipped when they
+        are the second half. That asymmetry is plausible when wrong and
+        invisible in review, so it has its own test.
+        """
+        identified = [p.puuid for p in participants if p.puuid]
+        if len(identified) < 2:
+            return []
+
+        a = aliased(MatchParticipant, name="a")
+        b = aliased(MatchParticipant, name="b")
+        same_side = a.team_id == b.team_id
+        stmt = (
+            select(
+                a.puuid,
+                b.puuid,
+                func.count().label("games"),
+                func.sum(case((same_side, 1), else_=0)).label("same_side"),
+                func.sum(case((and_(same_side, a.win), 1), else_=0)).label("same_wins"),
+                func.sum(case((and_(~same_side, a.win), 1), else_=0)).label("opposite_a_wins"),
+                func.max(Match.game_creation).label("last_played"),
+            )
+            .join(b, b.match_id == a.match_id)
+            .join(Match, Match.match_id == a.match_id)
+            .where(
+                a.puuid.in_(identified),
+                b.puuid.in_(identified),
+                # Canonical order: without it every pair comes back twice.
+                a.puuid < b.puuid,
+                Match.is_remake.is_(False),
+                # The game being watched cannot be in storage yet, but it will
+                # be the moment the result is fetched, and then a reload would
+                # report "you have met once" meaning this very game.
+                Match.match_id != this_match_id,
+            )
+            .group_by(a.puuid, b.puuid)
+        )
+        rows = (await self.session.execute(stmt)).all()
+
+        by_puuid = {p.puuid: p for p in participants if p.puuid}
+        pairs: list[SameTeamPair] = []
+        for pa, pb, games, same, same_wins, opposite_a_wins, last_played in rows:
+            same = same or 0
+            opposite = games - same
+            if same >= MIN_SAME_TEAM_GAMES:
+                pairs.append(
+                    SameTeamPair(
+                        puuid_a=pa,
+                        puuid_b=pb,
+                        games=same,
+                        wins=same_wins or 0,
+                        last_played=last_played,
+                    )
+                )
+            if games < MIN_SHARED_GAMES or you_puuid not in (pa, pb):
+                continue
+            other = by_puuid.get(pb if pa == you_puuid else pa)
+            if other is None:
+                continue
+            # `a.win` is the first half of the pair's result, so against them it
+            # is the searched player's only when they are that first half.
+            against_wins = (opposite_a_wins or 0) if pa == you_puuid else opposite - (opposite_a_wins or 0)
+            other.shared_games = SharedGames(
+                games=games,
+                same_side=same,
+                same_side_wins=same_wins or 0,
+                opposite_side=opposite,
+                opposite_side_wins=against_wins,
+                last_played=last_played,
+            )
+        return pairs
 
     async def _attach_ranks(
         self, participants: list[LiveParticipant], platform: Platform, payload: dict

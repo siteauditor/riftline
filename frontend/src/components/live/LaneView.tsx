@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import PositionIcon from '../PositionIcon'
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, RoleRecord, SkinArt } from './PlayerBits'
+import MetBefore from './MetBefore'
 import PlayerRecordChips from './PlayerRecordChips'
 import { BLUE, LANES, RED } from './sides'
 import type {
@@ -171,6 +172,7 @@ function LaneCard({
           }`}
         >
           <PlayerRecordChips p={p} championName={p.champion.name} />
+          <MetBefore shared={p.shared_games} platform={platform} name={name} tag={tag} />
         </div>
         <div
           className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${

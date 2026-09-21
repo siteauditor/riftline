@@ -157,9 +157,52 @@ export default function LobbyBand({
           ))}
         </p>
       )}
+
+      <SameSidePairs game={game} />
     </section>
   )
 }
+
+/**
+ * Pairs that keep landing on the same side, as a sentence.
+ *
+ * Deliberately not a line drawn between two cards: that breaks on every wrap,
+ * says nothing to a screen reader, and implies a relationship from three stored
+ * games. The wording stays on what we hold, and the hedge is the point: two
+ * players in one small ranked pool meet constantly without ever queueing
+ * together.
+ */
+function SameSidePairs({ game }: { game: LiveGame }) {
+  // Tolerant of a response without the field: during a deploy the bundle can
+  // reach a browser a few seconds before the API that fills it.
+  const pairs = game.same_team_pairs ?? []
+  if (pairs.length === 0) return null
+  const nameOf = (puuid: string) => {
+    const player = game.participants.find((p) => p.puuid === puuid)
+    return player?.riot_id?.split('#')[0] ?? player?.champion.name ?? 'a player'
+  }
+  return (
+    <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
+      {pairs.slice(0, 3).map((pair) => (
+        <span
+          key={`${pair.puuid_a}-${pair.puuid_b}`}
+          title={
+            `${nameOf(pair.puuid_a)} and ${nameOf(pair.puuid_b)} were on the same side in ` +
+            `${pair.games} of the stored games we hold with both of them, winning ${pair.wins}. ` +
+            'Riftline only sees the games it has crawled, so this is a pattern rather than a count ' +
+            'of how often they play together.'
+          }
+        >
+          <span className="text-ink-dim">
+            {nameOf(pair.puuid_a)} and {nameOf(pair.puuid_b)}
+          </span>{' '}
+          were on the same side in {pair.games} stored games. Possibly queued together.
+        </span>
+      ))}
+    </p>
+  )
+}
+
 
 function knownMastery(sides: SideRead[]): number {
   return sides.reduce((n, s) => n + s.off_champion_known, 0)

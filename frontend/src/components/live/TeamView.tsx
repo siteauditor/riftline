@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, SkinArt } from './PlayerBits'
+import MetBefore from './MetBefore'
 import PlayerRecordChips from './PlayerRecordChips'
 import type { LiveGame, LiveParticipant } from '../../lib/api'
 import { pct } from '../../lib/format'
@@ -107,6 +108,7 @@ function PlayerRow({
           stays on the lane cards where there is room for it. */}
       <span className="hidden shrink-0 items-center gap-2 sm:flex">
         <PlayerRecordChips p={p} championName={p.champion.name} dense />
+        <MetBefore shared={p.shared_games} platform={platform} name={name} tag={tag} />
       </span>
 
       <MasteryChip p={p} />

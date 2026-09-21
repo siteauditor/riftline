@@ -85,6 +85,8 @@ export interface LiveParticipant {
   stored_games: number
   /** What those games say about them, or null when we hold too few. */
   record: PlayerRecord | null
+  /** Null on the searched player's own row, and on anyone hidden. */
+  shared_games: SharedGames | null
 }
 
 export type Position = 'TOP' | 'JUNGLE' | 'MIDDLE' | 'BOTTOM' | 'UTILITY'
@@ -171,6 +173,32 @@ export interface LobbyRank {
   queue_matches_game: boolean
 }
 
+/** Earlier stored games a player and the searched player were both in.
+ *  Counts only, at any sample size: these are single digit numbers. The wins
+ *  are always the searched player's. */
+export interface SharedGames {
+  games: number
+  same_side: number
+  same_side_wins: number
+  opposite_side: number
+  opposite_side_wins: number
+  last_played: number | null
+  basis: string
+}
+
+/** Two players in this lobby who keep landing on the same side in stored games.
+ *  Not a duo: two players in one small ranked pool meet constantly without ever
+ *  pressing invite, and the crawler walks outward from matches it already holds,
+ *  so this is a pattern rather than a census. */
+export interface SameTeamPair {
+  puuid_a: string
+  puuid_b: string
+  games: number
+  wins: number
+  last_played: number | null
+  basis: string
+}
+
 /** One side of a live lobby, summed from what the lobby already shows. */
 export interface SideRead {
   team_id: number
@@ -238,6 +266,7 @@ export interface LiveGame {
   record_queue_id: number | null
   /** Null off Summoner's Rift, where there are no two sides to compare. */
   sides: LobbyCompare | null
+  same_team_pairs: SameTeamPair[]
 }
 
 /** The newest game Riftline holds for a player, for the page they see when they
