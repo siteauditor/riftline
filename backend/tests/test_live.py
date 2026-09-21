@@ -60,14 +60,19 @@ def spectator_participant(
     return row
 
 
-def spectator_game(participants, *, game_length=600, queue_id=420):
+def spectator_game(participants, *, game_length=600, queue_id=420, banned=(83,)):
     return {
         "gameId": 7986457870, "platformId": "EUW1", "gameQueueConfigId": queue_id,
         "gameMode": "CLASSIC", "mapId": 11, "gameType": "MATCHED",
         "gameStartTime": 1789647584224, "gameLength": game_length,
         "bannedChampions": [
-            {"championId": 83, "teamId": 100, "pickTurn": 1},
-            {"championId": -1, "teamId": 200, "pickTurn": 2},
+            *(
+                {"championId": champion, "teamId": 100, "pickTurn": i + 1}
+                for i, champion in enumerate(banned)
+            ),
+            # Spectator really sends this during champion select: a ban that has
+            # not been made yet.
+            {"championId": -1, "teamId": 200, "pickTurn": len(banned) + 1},
         ],
         "observers": {"encryptionKey": "secret-not-ours-to-relay"},
         "participants": participants,
@@ -794,6 +799,44 @@ def matchup(patch, queue, champion, enemy, role, games, wins, *, scope="LANE",
         team_position=role, champion_id=champion, enemy_champion_id=enemy,
         games=games, wins=wins, timeline_games=timelines, avg_gold_diff_14=gold,
     )
+
+
+@respx.mock
+async def test_a_ban_rate_cannot_exceed_one(monkeypatch):
+    """`bans` and `pool_games` are champion level figures repeated on every one
+    of a champion's role rows. Summed instead of taken once, a champion played
+    in five roles reads as banned five times as often, and a 170% ban rate
+    reached production for a few minutes before this test existed."""
+    queue = 99963
+    patch = "T.11"
+    monkeypatch.setattr("app.services.live.load_priors", lane_priors)
+
+    async def slices(_session):
+        return [{"patch": patch, "queue_id": queue, "matches": 10}]
+
+    monkeypatch.setattr("app.services.live.available_slices", slices)
+
+    banned_champion = 157
+    async with SessionLocal() as session:
+        session.add_all([
+            ChampionStat(
+                patch=patch, queue_id=queue, rank_bracket="ALL",
+                champion_id=banned_champion, team_position=position,
+                games=40, wins=20, pool_games=200, bans=120,
+            )
+            for position in ("TOP", "MIDDLE", "BOTTOM")
+        ])
+        await session.commit()
+
+    mock_spectator(
+        spectator_game(full_roster("banrate"), queue_id=queue, banned=[banned_champion])
+    )
+    async with SessionLocal() as session:
+        game = await service(session).for_puuid("z" * 78, PLATFORM, with_ranks=False)
+
+    rate = game.ban_rates[banned_champion]
+    assert rate.ban_rate == pytest.approx(0.6)
+    assert rate.games == 200
 
 
 @respx.mock

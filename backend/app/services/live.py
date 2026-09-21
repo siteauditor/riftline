@@ -1016,13 +1016,16 @@ class LiveGameService:
             )
         ).scalars()
         by_role: dict[tuple[int, str | None], ChampionStat] = {}
-        # A champion's ban rate is measured over the whole pool rather than one
-        # role, so the roles are summed the way the tier list sums them.
+        # Both figures are champion level rather than role level: `bans` and
+        # `pool_games` carry the same value on every one of a champion's role
+        # rows, so these are the maximum rather than the sum. Summed, a champion
+        # played in five roles came out banned five times as often, which is how
+        # a 170% ban rate reached production for a few minutes.
         ban_totals: dict[int, list[int]] = {}
         for row in role_rows:
             by_role[(row.champion_id, row.team_position)] = row
             totals = ban_totals.setdefault(row.champion_id, [0, 0])
-            totals[0] += row.bans
+            totals[0] = max(totals[0], row.bans)
             totals[1] = max(totals[1], row.pool_games)
 
         # Both scopes and both patches in one query: `ix_matchup_lookup` leads
