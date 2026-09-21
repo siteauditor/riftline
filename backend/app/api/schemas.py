@@ -392,6 +392,11 @@ class MatchHistoryResponse(BaseModel):
     count: int
     # True when Riot returned a full page, meaning more history exists.
     has_more: bool = False
+    # "riot" for history as Riot lists it; "stored" for a champion filter,
+    # which Riot cannot do, read from the games we hold.
+    source: str = "riot"
+    # With "stored": how many games match in all.
+    stored_total: int | None = None
 
 
 class MasteryEntry(BaseModel):

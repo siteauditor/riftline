@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -15,6 +15,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
+import { intParam, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 
 const QUEUES = [
@@ -74,9 +75,14 @@ function value(row: ChampionPlayed, key: SortKey): number | null {
  */
 export default function PlayerChampions() {
   const { platform = '', name = '', tag = '' } = useParams()
-  const [queue, setQueue] = useState<number | null>(null)
-  const [sort, setSort] = useState<SortKey>('games')
-  const [descending, setDescending] = useState(true)
+  // In the URL, so the table comes back as it was left after opening a
+  // champion or a filtered history.
+  const [search, setSearch] = useSearchParams()
+  const queue = intParam(search, 'queue', 0) || null
+  const sort: SortKey = COLUMNS.find((c) => c.key === search.get('sort'))?.key ?? 'games'
+  const descending = search.get('dir') !== 'asc'
+  const setView = (patch: { queue?: number | null; sort?: SortKey; dir?: 'asc' | 'desc' }) =>
+    setSearch((prev) => withParams(prev, patch, { sort: 'games', dir: 'desc' }), { replace: true })
 
   const query = useQuery({
     queryKey: ['analytics', platform, name, tag, { queue, limit: LIMIT }],
@@ -98,11 +104,8 @@ export default function PlayerChampions() {
   }, [query.data, sort, descending])
 
   function sortBy(key: SortKey) {
-    if (key === sort) setDescending((d) => !d)
-    else {
-      setSort(key)
-      setDescending(true)
-    }
+    if (key === sort) setView({ dir: descending ? 'asc' : 'desc' })
+    else setView({ sort: key, dir: 'desc' })
   }
 
   const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
@@ -131,7 +134,7 @@ export default function PlayerChampions() {
           <button
             key={q.label}
             type="button"
-            onClick={() => setQueue(q.id)}
+            onClick={() => setView({ queue: q.id })}
             aria-pressed={queue === q.id}
             className={`border-b-2 px-3 pb-1.5 pt-1 font-display font-600 transition-colors ${
               queue === q.id
@@ -205,7 +208,14 @@ export default function PlayerChampions() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <ChampionRow key={row.champion.id} row={row} />
+                  <ChampionRow
+                    key={row.champion.id}
+                    row={row}
+                    historyHref={`${base}?${withParams(new URLSearchParams(), {
+                      champion: row.champion.id,
+                      queue,
+                    }).toString()}`}
+                  />
                 ))}
               </tbody>
             </table>
@@ -226,7 +236,7 @@ export default function PlayerChampions() {
   )
 }
 
-function ChampionRow({ row }: { row: ChampionPlayed }) {
+function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: string }) {
   const losses = row.games - row.wins
   return (
     <tr className="border-b border-line-soft">
@@ -257,7 +267,13 @@ function ChampionRow({ row }: { row: ChampionPlayed }) {
         </span>
       </td>
       <td className="tnum py-2 pl-3 text-right">
-        <span className="text-ink">{row.games}</span>
+        <Link
+          to={historyHref}
+          title={`These ${row.games} games in the match history`}
+          className="text-ink underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright hover:decoration-gold"
+        >
+          {row.games}
+        </Link>
         <span className="block text-[11px] text-ink-faint">
           {row.wins}W {losses}L
         </span>

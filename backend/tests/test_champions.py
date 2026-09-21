@@ -136,9 +136,59 @@ async def test_lane_and_team_counters_answer_different_questions(client, corpus)
     assert lane == {enemy_mid}
     # ...while the whole enemy team is what decides the game.
     assert team == set(RED)
-    # Worst first: "weak against" is the question people arrive with.
-    rates = [p["confidence_win_rate"] for p in body["counters"]["team"]]
-    assert rates == sorted(rates)
+    # Worst first: "weak against" is the question people arrive with, read
+    # from the middle of each range.
+    middles = [p["confidence_win_rate"] + p["confidence_high"] for p in body["counters"]["team"]]
+    assert middles == sorted(middles)
+    assert all(p["confidence_win_rate"] <= p["win_rate"] <= p["confidence_high"]
+               for p in body["counters"]["team"])
+
+
+async def test_hardest_matchups_are_ranked_by_the_middle_of_the_range(client):
+    """Measured on the live Jinx page: Viktor at 3-3 was the 4th hardest lane
+    and Samira at 3-2 the 6th, because the bottom of a six-game range is low
+    whatever the record. A 14-26 matchup is the hard one, and a 31-29 one is
+    not, however many games back it. And the list is not cut at 15, or most
+    opponents could not be looked up."""
+    from sqlalchemy import func, select
+
+    from app.db.models import Match, MatchupStat
+
+    patch = "C1.50"
+    async with SessionLocal() as session:
+        seeded = (
+            await session.execute(select(func.count(Match.match_id)).where(Match.patch == patch))
+        ).scalar()
+    if not seeded:
+        positions = ("MIDDLE", "JUNGLE", "TOP", "BOTTOM", "UTILITY")
+        await seed(patch, [
+            [participant(c, p, 100, i % 2 == 0) for c, p in zip(BLUE, positions, strict=True)]
+            + [participant(c, p, 200, i % 2 == 1) for c, p in zip(RED, positions, strict=True)]
+            for i in range(6)
+        ])
+        thin, solid, big = 112, 7, 99  # Viktor, LeBlanc, Lux
+        fillers = [1, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+        rows = [(thin, 6, 3), (solid, 40, 14), (big, 60, 31)] + [(f, 20, 12) for f in fillers]
+        async with SessionLocal() as session:
+            await rebuild_champion_stats(session, patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS)
+            for enemy, games, wins in rows:
+                session.add(MatchupStat(
+                    patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS, scope="LANE",
+                    team_position="MIDDLE", champion_id=SUBJECT, enemy_champion_id=enemy,
+                    games=games, wins=wins,
+                ))
+            await session.commit()
+
+    body = (await client.get(f"/api/champions/{SUBJECT}?patch={patch}&min_games=5")).json()
+    lane = body["counters"]["lane"]
+    order = [p["champion"]["id"] for p in lane]
+
+    assert len(lane) == 20, "every matchup over the floor, not the first 15"
+    # By the bottom of the range the 3-3 came first.
+    assert order[0] == 7, "14-26 is the hardest matchup"
+    # By the top of the range the 31-29 came before the 3-3, only because
+    # more games made its range narrower.
+    assert order.index(112) < order.index(99)
 
 
 async def test_synergies_list_allies_best_first(client, corpus):

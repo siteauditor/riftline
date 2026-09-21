@@ -1,4 +1,5 @@
 import type { ItemSummary } from '../../lib/api'
+import { foldName } from '../../lib/searchParams'
 
 /**
  * Filters by what an item gives, over Riot's own item tags.
@@ -23,11 +24,20 @@ export const STAT_FILTERS = [
 
 export type StatFilterKey = (typeof STAT_FILTERS)[number]['key']
 
-export function matchesFilter(item: ItemSummary, key: StatFilterKey | null, query: string): boolean {
-  if (query && !item.name.toLowerCase().includes(query)) return false
-  if (!key) return true
-  const filter = STAT_FILTERS.find((f) => f.key === key)
-  return !filter || filter.tags.some((tag) => item.tags.includes(tag))
+export const isStatFilterKey = (value: string): value is StatFilterKey =>
+  STAT_FILTERS.some((f) => f.key === value)
+
+/**
+ * Whether an item gives every chosen stat and its name holds the (folded)
+ * query. Every, not any: "attack damage and crit" is the question a build
+ * asks, and one chip at a time could not ask it.
+ */
+export function matchesFilter(item: ItemSummary, keys: readonly StatFilterKey[], query: string): boolean {
+  if (query && !foldName(item.name).includes(query)) return false
+  return keys.every((key) => {
+    const filter = STAT_FILTERS.find((f) => f.key === key)
+    return !filter || filter.tags.some((tag) => item.tags.includes(tag))
+  })
 }
 
 /** "1st item" to "4th or later", for the slot a finished item was bought in. */

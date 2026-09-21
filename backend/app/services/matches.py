@@ -102,6 +102,14 @@ class HistoryPage:
     id_count: int = 0
 
 
+@dataclass(slots=True)
+class StoredHistoryPage:
+    """One page of a player's stored games, and how many there are in all."""
+
+    matches: list[Match] = field(default_factory=list)
+    total: int = 0
+
+
 class MatchService:
     def __init__(
         self,
@@ -367,6 +375,52 @@ class MatchService:
         )
         matches = await self.ensure_matches(ids, platform.regional)
         return HistoryPage(matches=matches, id_count=len(ids))
+
+    async def stored_history(
+        self,
+        puuid: str,
+        *,
+        champion_id: int,
+        queue: int | None = None,
+        start: int = 0,
+        count: int = 20,
+    ) -> StoredHistoryPage:
+        """This player's games on one champion, **from storage only**, newest first.
+
+        Riot's history endpoint filters by queue, type and time, never by
+        champion, so a champion filter can only be read from the games we hold.
+        It costs no Riot call, and the response says it is stored games.
+
+        Remakes are left out, as `played_by` leaves them out, so the count
+        matches the one the champions table shows beside the link here.
+        """
+        conditions = [
+            MatchParticipant.puuid == puuid,
+            MatchParticipant.champion_id == champion_id,
+            Match.is_remake.is_(False),
+        ]
+        if queue is not None:
+            conditions.append(Match.queue_id == queue)
+        base = (
+            select(Match.match_id)
+            .join(MatchParticipant, MatchParticipant.match_id == Match.match_id)
+            .where(*conditions)
+        )
+        total = (
+            await self.session.execute(select(func.count()).select_from(base.subquery()))
+        ).scalar() or 0
+        ids = list(
+            (
+                await self.session.execute(
+                    # Match id second, so games stored with the same start time
+                    # still page in one fixed order.
+                    base.order_by(Match.game_creation.desc(), Match.match_id.desc())
+                    .offset(start)
+                    .limit(count)
+                )
+            ).scalars()
+        )
+        return StoredHistoryPage(matches=await self._load(ids), total=int(total))
 
     # --------------------------------------------------------------- analytics
 

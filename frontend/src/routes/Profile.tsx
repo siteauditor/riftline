@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
@@ -24,15 +24,25 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
+import { intParam, withParams } from '../lib/searchParams'
 import { rememberSearch } from '../lib/storage'
 
 
+// Riot's history filter takes one queue id. Arena is left out because Riot
+// splits it across several (1700, 1710, 1750), so a chip for one would miss
+// games from the others.
 const QUEUE_FILTERS = [
   { id: null, label: 'All' },
   { id: 420, label: 'Solo/Duo' },
   { id: 440, label: 'Flex' },
+  { id: 400, label: 'Normal' },
+  { id: 480, label: 'Swiftplay' },
   { id: 450, label: 'ARAM' },
 ]
+
+// The analytics endpoint's ceiling, and the key the champions tab and the
+// mastery page already use, so the three share one stored-games answer.
+const PLAYED_LIMIT = 1000
 
 // Matches the server's refresh floor (REFRESH_FLOOR_SECONDS): an Update inside
 // it would be answered from the cache, so the button waits it out instead of
@@ -69,7 +79,13 @@ function useNow(intervalMs: number): number {
 
 export default function Profile() {
   const { platform = '', name = '', tag = '' } = useParams()
-  const [queue, setQueue] = useState<number | null>(null)
+  // In the URL, so a filtered history survives a reload, a shared link, and
+  // the way back from an item or another player opened out of a game.
+  const [search, setSearch] = useSearchParams()
+  const queue = intParam(search, 'queue', 0) || null
+  const championFilter = intParam(search, 'champion', 0) || null
+  const setFilter = (patch: { queue?: number | null; champion?: number | null }) =>
+    setSearch((prev) => withParams(prev, patch), { replace: true })
   const queryClient = useQueryClient()
 
   const profileQuery = useQuery({
@@ -95,7 +111,19 @@ export default function Profile() {
   // first.
   const { query: matchesQuery, matches } = useMatchHistory(platform, name, tag, {
     queue,
+    champion: championFilter,
     enabled: profileQuery.isSuccess,
+  })
+  const stored = matchesQuery.data?.pages[0]?.source === 'stored'
+  const storedTotal = matchesQuery.data?.pages[0]?.stored_total ?? null
+
+  // The champions this player has stored games on, for the champion filter.
+  // Storage only, so it costs no Riot call.
+  const playedQuery = useQuery({
+    queryKey: ['analytics', platform, name, tag, { queue: null, limit: PLAYED_LIMIT }],
+    queryFn: () => api.analytics(platform, name, tag, { queue: null, limit: PLAYED_LIMIT }),
+    enabled: profileQuery.isSuccess,
+    retry: false,
   })
 
   // Read after the history, not beside it. The analytics describe stored games,
@@ -117,6 +145,8 @@ export default function Profile() {
     queryFn: api.champions,
     staleTime: 6 * 60 * 60 * 1000,
   })
+  const championName =
+    champions.data?.champions.find((c) => c.id === championFilter)?.name ?? 'this champion'
 
   if (profileQuery.isLoading) {
     return (
@@ -263,11 +293,11 @@ export default function Profile() {
               <StrengthsPanel profiles={analyticsQuery.data.score_profile} />
             )}
 
-            <div className="flex items-center gap-1 text-sm">
+            <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-sm">
               {QUEUE_FILTERS.map((f) => (
                 <button
                   key={f.label}
-                  onClick={() => setQueue(f.id)}
+                  onClick={() => setFilter({ queue: f.id })}
                   aria-pressed={queue === f.id}
                   className={`border-b-2 px-3 pb-1.5 pt-1 font-display font-600 transition-colors ${
                     queue === f.id
@@ -278,12 +308,44 @@ export default function Profile() {
                   {f.label}
                 </button>
               ))}
-              {matchesQuery.isFetching && !matchesQuery.isFetchingNextPage && (
-                <span className="ml-auto">
-                  <Spinner />
-                </span>
-              )}
+              <label className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-ink-faint">Champion</span>
+                <select
+                  value={championFilter ?? ''}
+                  onChange={(e) => setFilter({ champion: Number(e.target.value) || null })}
+                  className="control max-w-[11rem]"
+                >
+                  <option value="">All champions</option>
+                  {/* A link can name a champion with no stored games yet. */}
+                  {championFilter &&
+                    !playedQuery.data?.champions.some((c) => c.champion.id === championFilter) && (
+                      <option value={championFilter}>{championName}</option>
+                    )}
+                  {(playedQuery.data?.champions ?? []).map((c) => (
+                    <option key={c.champion.id} value={c.champion.id}>
+                      {c.champion.name} ({c.games})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {matchesQuery.isFetching && !matchesQuery.isFetchingNextPage && <Spinner />}
             </div>
+
+            {championFilter && stored && storedTotal !== null && (
+              <p className="border-l-2 border-gold/50 py-1 pl-3 text-xs leading-relaxed text-ink-dim">
+                {storedTotal.toLocaleString()} {championName} {storedTotal === 1 ? 'game' : 'games'}{' '}
+                we hold{queue ? ` in ${QUEUE_FILTERS.find((f) => f.id === queue)?.label ?? 'this queue'}` : ''}.
+                Riot cannot filter history by champion, so older games show here once more of
+                the history has been loaded.{' '}
+                <button
+                  type="button"
+                  onClick={() => setFilter({ champion: null })}
+                  className="underline decoration-line underline-offset-2 hover:text-gold-bright"
+                >
+                  Show all champions
+                </button>
+              </p>
+            )}
 
             {matchesQuery.isLoading && <MatchListSkeleton />}
 
@@ -296,8 +358,12 @@ export default function Profile() {
 
             {matchesQuery.isSuccess && matches.length === 0 && (
               <EmptyState
-                title="No games here"
-                body="Nothing in this queue yet. Try a different filter, or check another region."
+                title={championFilter ? `No stored ${championName} games here` : 'No games here'}
+                body={
+                  championFilter
+                    ? 'Nothing stored for this champion in this queue. Load more history under All champions, or pick another queue.'
+                    : 'Nothing in this queue yet. Try a different filter, or check another region.'
+                }
               />
             )}
 
@@ -319,15 +385,20 @@ export default function Profile() {
                 className="w-full frame py-2.5 text-sm font-500 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-60"
               >
                 {matchesQuery.isFetchingNextPage
-                  ? 'Loading games from Riot…'
-                  : 'Load 20 more'}
+                  ? stored
+                    ? 'Loading…'
+                    : 'Loading games from Riot…'
+                  : stored
+                    ? 'Show 20 more'
+                    : 'Load 20 more'}
               </button>
             )}
 
             {matches.length > 0 && (
               <p className="pt-1 text-xs text-ink-faint">
-                {compact(matches.length)} games loaded. New games are fetched from Riot
-                once, then served from storage.
+                {stored && storedTotal !== null
+                  ? `${compact(matches.length)} of ${compact(storedTotal)} shown, all from storage.`
+                  : `${compact(matches.length)} games loaded. New games are fetched from Riot once, then served from storage.`}
               </p>
             )}
           </div>
@@ -363,6 +434,8 @@ function LadderChip({ ladder }: { ladder: NonNullable<ProfileData['ladder']> }) 
     platform: ladder.platform,
     tier: ladder.tier,
     page: String(Math.ceil(ladder.tier_position / LADDER_PAGE)),
+    // The ladder marks and scrolls to the row, so the player is not one of 50.
+    rank: String(ladder.tier_position),
   })
   const tier = tierLabel(ladder.tier)
   const label =

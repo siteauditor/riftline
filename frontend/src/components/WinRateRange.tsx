@@ -24,11 +24,18 @@ export default function WinRateRange({
   low,
   high,
   games,
+  size = 'lg',
+  rankedOn = 'low',
 }: {
   rate: number
   low: number
   high: number
   games: number
+  /** `sm` for a row of text-sm, as in the matchup tables. */
+  size?: 'lg' | 'sm'
+  /** What the surrounding list is ordered by: the tier list reads the low
+   *  end, the matchup tables the middle. */
+  rankedOn?: 'low' | 'middle'
 }) {
   // Gold only when even the low end is a winning rate: that is a pick the
   // sample actually backs, not one that merely happened to win.
@@ -38,11 +45,22 @@ export default function WinRateRange({
       className="inline-flex flex-col items-end gap-1"
       title={
         `${pct(rate, 1)} over ${games.toLocaleString()} games. The sample supports ` +
-        `anything from ${pct(low, 1)} to ${pct(high, 1)}, and the list ranks on the low end.`
+        `anything from ${pct(low, 1)} to ${pct(high, 1)}, and the list ranks on ${
+          rankedOn === 'low' ? 'the low end' : 'the middle of that'
+        }.`
       }
     >
-      <span className="tnum display text-xl font-700 leading-none text-ink">{pct(rate, 1)}</span>
-      <span className="relative block h-1.5 w-28 rounded-full bg-raised" aria-hidden>
+      <span
+        className={`tnum display leading-none text-ink ${
+          size === 'sm' ? 'text-[15px] font-600' : 'text-xl font-700'
+        }`}
+      >
+        {pct(rate, 1)}
+      </span>
+      <span
+        className={`relative block rounded-full bg-raised ${size === 'sm' ? 'h-1 w-20' : 'h-1.5 w-28'}`}
+        aria-hidden
+      >
         <span
           className="absolute inset-y-0 rounded-full"
           style={{

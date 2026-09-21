@@ -51,8 +51,9 @@ from app.services.static_data import Ability, StaticDataService
 router = APIRouter(prefix="/api/champions", tags=["champions"])
 
 # Enough to be useful, small enough that the page stays one quick response.
+# Matchups and synergies are not capped: at 15 most opponents could not be
+# looked up at all, and a full list for one role is a few kilobytes.
 FACET_LIMIT = 12
-PAIR_LIMIT = 15
 
 
 class ChampionInfo(ChampionRef):
@@ -132,6 +133,8 @@ class PairEntry(BaseModel):
     wins: int
     win_rate: float
     confidence_win_rate: float
+    # The top of the same range. Pairs are ordered by the middle of the two.
+    confidence_high: float = 1.0
     # Only set for synergies: which lane the ally was in.
     position: str | None = None
     # From timelines, so null until the matchup's games have been backfilled.
@@ -468,6 +471,7 @@ def _pair_entry(
         wins=wins,
         win_rate=wins / games if games else 0.0,
         confidence_win_rate=wilson_lower_bound(wins, games),
+        confidence_high=wilson_upper_bound(wins, games),
         position=position,
         avg_laning_score=avg_laning_score,
         avg_gold_diff_14=avg_gold_diff_14,
@@ -690,10 +694,15 @@ async def get_champion(
                 timeline_games=row.timeline_games,
             )
         )
-    # Worst first: "weak against" is the question people come here with, and
-    # ordering by the confidence bound keeps a 0-2 fluke from topping the list.
+    # Worst first, because "weak against" is the question people come here
+    # with, and by the middle of the range the sample supports, which is the
+    # record pulled toward 50% by about four games. The bottom of the range
+    # rewarded thin samples: on the live Jinx page Viktor at 3-3 was the 4th
+    # hardest lane and Samira at 3-2 the 6th. The top of the range, tried next,
+    # rewarded big ones: Yunara at 10-9 (52.6%) came 2nd hardest, only because
+    # its range was the narrowest.
     for rows_ in by_scope.values():
-        rows_.sort(key=lambda p: p.confidence_win_rate)
+        rows_.sort(key=lambda p: (p.confidence_win_rate + p.confidence_high, -p.games))
 
     synergy_rows = list(
         (
@@ -732,10 +741,10 @@ async def get_champion(
         laning=laning,
         spells=entries("spells"),
         counters=CounterSection(
-            lane=by_scope.get("LANE", [])[:PAIR_LIMIT],
-            team=by_scope.get("TEAM", [])[:PAIR_LIMIT],
+            lane=by_scope.get("LANE", []),
+            team=by_scope.get("TEAM", []),
         ),
-        synergies=synergies[:PAIR_LIMIT],
+        synergies=synergies,
     )
 
 

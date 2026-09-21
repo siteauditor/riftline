@@ -1,13 +1,18 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
 import { ErrorView, Spinner } from '../components/StateViews'
-import { matchesFilter, STAT_FILTERS, type StatFilterKey } from '../components/items/groups'
+import {
+  isStatFilterKey,
+  matchesFilter,
+  STAT_FILTERS,
+  type StatFilterKey,
+} from '../components/items/groups'
 import { api, type ItemSummary } from '../lib/api'
 import { pct } from '../lib/format'
-import { useDebounced } from '../lib/useDebounced'
+import { foldName, useSearchText, withParams } from '../lib/searchParams'
 
 /**
  * Every item sold on Summoner's Rift, in the sections a player thinks in.
@@ -18,9 +23,20 @@ import { useDebounced } from '../lib/useDebounced'
  * list is opened with.
  */
 export default function Items() {
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<StatFilterKey | null>(null)
-  const needle = useDebounced(query, 120).trim().toLowerCase()
+  // In the URL, so a filtered list survives opening an item and coming back.
+  const [search, setSearch] = useSearchParams()
+  const [query, setQuery] = useSearchText('q', 120)
+  const needle = foldName(query)
+  // Memoised on the parameter's text: the list below refilters only when it changes.
+  const statText = search.get('stat') ?? ''
+  const chosen: StatFilterKey[] = useMemo(
+    () => statText.split(',').filter(isStatFilterKey),
+    [statText],
+  )
+  const setChosen = (keys: StatFilterKey[]) =>
+    setSearch((prev) => withParams(prev, { stat: keys }), { replace: true })
+  const toggle = (key: StatFilterKey) =>
+    setChosen(chosen.includes(key) ? chosen.filter((k) => k !== key) : [...chosen, key])
 
   const list = useQuery({ queryKey: ['items'], queryFn: api.items, staleTime: 10 * 60 * 1000 })
 
@@ -28,9 +44,9 @@ export default function Items() {
     () =>
       (list.data?.sections ?? []).map((s) => ({
         ...s,
-        shown: s.items.filter((i) => matchesFilter(i, filter, needle)),
+        shown: s.items.filter((i) => matchesFilter(i, chosen, needle)),
       })),
-    [list.data, filter, needle],
+    [list.data, chosen, needle],
   )
   const total = sections.reduce((n, s) => n + s.items.length, 0)
   const shown = sections.reduce((n, s) => n + s.shown.length, 0)
@@ -63,15 +79,19 @@ export default function Items() {
               className="control h-8 w-52 text-sm placeholder:text-ink-faint"
             />
           </label>
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by what an item gives">
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="group"
+            aria-label="Filter by what an item gives, every chosen stat"
+          >
             {STAT_FILTERS.map((f) => (
               <button
                 key={f.key}
                 type="button"
-                aria-pressed={filter === f.key}
-                onClick={() => setFilter(filter === f.key ? null : f.key)}
+                aria-pressed={chosen.includes(f.key)}
+                onClick={() => toggle(f.key)}
                 className={`border px-2 py-0.5 text-xs transition-colors ${
-                  filter === f.key
+                  chosen.includes(f.key)
                     ? 'border-gold text-gold-bright'
                     : 'border-line text-ink-dim hover:text-ink'
                 }`}
@@ -79,6 +99,15 @@ export default function Items() {
                 {f.label}
               </button>
             ))}
+            {chosen.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setChosen([])}
+                className="px-1 text-xs text-ink-faint underline decoration-line underline-offset-2 hover:text-gold-bright"
+              >
+                Clear
+              </button>
+            )}
           </div>
           {list.data && (
             <span className="tnum ml-auto text-xs text-ink-faint">
@@ -102,7 +131,7 @@ export default function Items() {
               type="button"
               onClick={() => {
                 setQuery('')
-                setFilter(null)
+                setChosen([])
               }}
               className="underline decoration-line underline-offset-2 hover:text-gold-bright"
             >

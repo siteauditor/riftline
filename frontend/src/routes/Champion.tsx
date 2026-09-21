@@ -7,7 +7,7 @@ import AbilitiesPanel from '../components/champion/AbilitiesPanel'
 import BuildPanel from '../components/champion/BuildPanel'
 import ChampionTabs from '../components/champion/ChampionTabs'
 import LaningPanel from '../components/champion/LaningPanel'
-import PairTable from '../components/champion/PairTable'
+import PairTable, { PairControls, type PairOrder } from '../components/champion/PairTable'
 import PlayersPanel from '../components/champion/PlayersPanel'
 import RunePanel from '../components/champion/RunePanel'
 import SkinsPanel from '../components/champion/SkinsPanel'
@@ -15,8 +15,18 @@ import StoryPanel from '../components/champion/StoryPanel'
 import { parseTab, type ChampionTab } from '../components/champion/tabs'
 import { api, POSITIONS, type ChampionDetail, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
+import {
+  SLICE_DEFAULTS,
+  sliceFromParams,
+  sliceLink,
+  sliceParams,
+  useSearchText,
+  withParams,
+} from '../lib/searchParams'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
+// The champion page's own sample floor, and the default the URL leaves out.
+const MIN_GAMES = 5
 
 export default function Champion() {
   const { championId = '' } = useParams()
@@ -25,13 +35,12 @@ export default function Champion() {
 
   // Slice state lives in the URL so a champion page stays deep-linkable and the
   // back button behaves.
-  const slice: SliceValue = {
-    patch: search.get('patch'),
-    queueId: Number(search.get('queue_id')) || 420,
-    position: search.get('position'),
-    bracket: search.get('bracket'),
-    minGames: Number(search.get('min_games')) || 5,
-  }
+  const slice: SliceValue = sliceFromParams(search, MIN_GAMES)
+  // The counters and synergies controls too, so back from an opponent's page
+  // returns to the same list rather than to the top fifteen.
+  const [pairQuery, setPairQuery] = useSearchText('q')
+  const pairOrder: PairOrder | null =
+    search.get('order') === 'best' ? 'best' : search.get('order') === 'worst' ? 'worst' : null
 
   const query = useQuery({
     queryKey: ['champion', championId, slice],
@@ -61,29 +70,27 @@ export default function Champion() {
     enabled: tab === 'players',
   })
 
-  const KEYS: Record<keyof SliceValue, string> = {
-    patch: 'patch',
-    queueId: 'queue_id',
-    position: 'position',
-    bracket: 'bracket',
-    minGames: 'min_games',
-  }
-
   function updateSlice(next: Partial<SliceValue>) {
-    const params = new URLSearchParams(search)
-    for (const [field, value] of Object.entries(next)) {
-      const key = KEYS[field as keyof SliceValue]
-      if (value === null || value === undefined || value === '') params.delete(key)
-      else params.set(key, String(value))
-    }
-    setSearch(params, { replace: true })
+    setSearch(
+      (prev) =>
+        withParams(prev, sliceParams(next), { ...SLICE_DEFAULTS, min_games: String(MIN_GAMES) }),
+      { replace: true },
+    )
   }
 
   function selectTab(next: ChampionTab) {
-    const params = new URLSearchParams(search)
-    params.set('tab', next)
-    setSearch(params, { replace: true })
+    // A search typed on one tab means nothing on the next.
+    setSearch((prev) => withParams(prev, { tab: next, q: null, order: null }), { replace: true })
   }
+
+  function setPairOrder(order: PairOrder, byDefault: PairOrder) {
+    setSearch((prev) => withParams(prev, { order }, { order: byDefault }), { replace: true })
+  }
+
+  // Where a pair row links: the other champion on the slice being read, in
+  // the lane they were in when it is known.
+  const pairLink = (id: number, position: string | null) =>
+    `/champions/${id}${sliceLink({ ...slice, position })}`
 
   if (query.isLoading && profileQuery.isLoading) {
     return (
@@ -220,31 +227,76 @@ export default function Champion() {
             )
           ) : null}
 
-          {d && tab === 'build' && <BuildPanel builds={d.builds} spells={d.spells} />}
+          {d && tab === 'build' && (
+            <BuildPanel
+              builds={d.builds}
+              spells={d.spells}
+              itemSearch={sliceLink({ patch: slice.patch, queueId: slice.queueId, bracket: slice.bracket })}
+            />
+          )}
           {d && tab === 'runes' && <RunePanel runes={d.runes} />}
           {d && tab === 'laning' && <LaningPanel laning={d.laning} championName={info.name} />}
           {d && tab === 'counters' && (
-            <div className="grid gap-5 lg:grid-cols-2">
-              <PairTable
-                title="Hardest lane matchups"
-                hint={`${info.name} against the enemy ${positionLabel(d.position)}, worst first.`}
-                rows={d.counters.lane}
-                showGold
+            <>
+              <PairControls
+                query={pairQuery}
+                onQuery={setPairQuery}
+                order={pairOrder ?? 'worst'}
+                onOrder={(o) => setPairOrder(o, 'worst')}
+                worstLabel="Hardest first"
+                bestLabel="Easiest first"
+                placeholder="Find an opponent"
               />
-              <PairTable
-                title="Hardest against the whole team"
-                hint="Every enemy, not just the laner. A pick can be fine in lane and hopeless into the composition."
-                rows={d.counters.team}
-              />
-            </div>
+              <div className="grid gap-5 lg:grid-cols-2">
+                <PairTable
+                  title={pairOrder === 'best' ? 'Easiest lane matchups' : 'Hardest lane matchups'}
+                  hint={`${info.name} against the enemy ${positionLabel(d.position)}, ${
+                    pairOrder === 'best' ? 'best' : 'worst'
+                  } first.`}
+                  rows={d.counters.lane}
+                  order={pairOrder ?? 'worst'}
+                  query={pairQuery}
+                  showGold
+                  linkFor={(row) => pairLink(row.champion.id, d.position)}
+                />
+                <PairTable
+                  title={
+                    pairOrder === 'best'
+                      ? 'Easiest against the whole team'
+                      : 'Hardest against the whole team'
+                  }
+                  hint="Every enemy, not just the laner. A pick can be fine in lane and hopeless into the composition."
+                  rows={d.counters.team}
+                  order={pairOrder ?? 'worst'}
+                  query={pairQuery}
+                  linkFor={(row) => pairLink(row.champion.id, null)}
+                />
+              </div>
+            </>
           )}
           {d && tab === 'synergies' && (
-            <PairTable
-              title="Best allies"
-              hint="Teammates this champion wins alongside most often, best first."
-              rows={d.synergies}
-              showPosition
-            />
+            <>
+              <PairControls
+                query={pairQuery}
+                onQuery={setPairQuery}
+                order={pairOrder ?? 'best'}
+                onOrder={(o) => setPairOrder(o, 'best')}
+                worstLabel="Worst first"
+                bestLabel="Best first"
+                placeholder="Find an ally"
+              />
+              <PairTable
+                title={pairOrder === 'worst' ? 'Worst allies' : 'Best allies'}
+                hint={`Teammates this champion wins alongside ${
+                  pairOrder === 'worst' ? 'least' : 'most'
+                } often, ${pairOrder === 'worst' ? 'worst' : 'best'} first.`}
+                rows={d.synergies}
+                order={pairOrder ?? 'best'}
+                query={pairQuery}
+                showPosition
+                linkFor={(row) => pairLink(row.champion.id, row.position)}
+              />
+            </>
           )}
 
           {tab === 'players' &&

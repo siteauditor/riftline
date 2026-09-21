@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -12,8 +12,8 @@ import { Stat, StatCell, StatStrip } from '../components/Stat'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import { api } from '../lib/api'
 import { compact, pct, timeAgo } from '../lib/format'
+import { foldName, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
-import { useDebounced } from '../lib/useDebounced'
 
 /** The analytics ceiling the champions tab already asks for. Same key, same
  *  options, so the two pages share one cache entry and one request. */
@@ -21,13 +21,18 @@ const ANALYTICS_LIMIT = 1000
 
 export default function Mastery() {
   const { platform = '', name = '', tag = '' } = useParams()
-  const [query, setQuery] = useState('')
-  const [recentOnly, setRecentOnly] = useState(false)
+  // In the URL, so the filter survives opening a champion and coming back.
+  const [search, setSearch] = useSearchParams()
+  const [query, setQuery] = useSearchText('q', 120)
+  const recentOnly = search.get('recent') === '1'
+  const setRecentOnly = (on: boolean) =>
+    setSearch((prev) => withParams(prev, { recent: on }), { replace: true })
   const [selected, setSelected] = useState<number | null>(null)
   // One reading, taken when the page mounts, so the bands and the filter cannot
   // disagree about where "the last 30 days" starts mid render.
   const [now] = useState(() => Date.now())
-  const filter = useDebounced(query, 120).trim().toLowerCase()
+  // Folded, so "kaisa" finds Kai'Sa as it does on the tier list.
+  const filter = foldName(query)
 
   const masteryQuery = useQuery({
     queryKey: ['mastery', platform, name, tag],
@@ -66,7 +71,7 @@ export default function Mastery() {
     const recentSince = now - 30 * 86_400_000
     return pool.champions.filter(
       (c) =>
-        (!filter || c.name.toLowerCase().includes(filter)) &&
+        (!filter || foldName(c.name).includes(filter)) &&
         (!recentOnly || (c.lastPlayed !== null && c.lastPlayed >= recentSince)),
     )
   }, [pool.champions, filter, recentOnly, now])

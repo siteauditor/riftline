@@ -584,6 +584,11 @@ export interface MatchHistory {
   start: number
   count: number
   has_more: boolean
+  /** "stored" for a champion filter, which Riot cannot do and storage can.
+   *  Optional: a server one deploy behind does not send it. */
+  source?: 'riot' | 'stored'
+  /** With "stored": how many games match in all. */
+  stored_total?: number | null
 }
 
 export interface MasteryEntry {
@@ -797,6 +802,8 @@ export interface PairEntry {
   wins: number
   win_rate: number
   confidence_win_rate: number
+  /** The top of the same range. Pairs are ordered by the middle of the two. */
+  confidence_high: number
   /** Only present on synergies: which lane the ally was in. */
   position: string | null
   /** From timelines; null until the matchup's games have been backfilled. */
@@ -1362,12 +1369,13 @@ export const api = {
     platform: string,
     name: string,
     tag: string,
-    opts: { start?: number; count?: number; queue?: number | null } = {},
+    opts: { start?: number; count?: number; queue?: number | null; champion?: number | null } = {},
   ) => {
     const params = new URLSearchParams()
     if (opts.start) params.set('start', String(opts.start))
     if (opts.count) params.set('count', String(opts.count))
     if (opts.queue) params.set('queue', String(opts.queue))
+    if (opts.champion) params.set('champion', String(opts.champion))
     const qs = params.toString()
     return request<MatchHistory>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/matches${qs ? `?${qs}` : ''}`,

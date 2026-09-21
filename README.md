@@ -391,6 +391,22 @@ Counters come in two scopes. `LANE` is the opponent in your lane, which is what
 "counters" usually means. `TEAM` is the champion against all five enemies, which
 is what actually decides games and what the draft assistant was missing.
 
+Matchups are ordered by the **middle** of the Wilson interval, which is the record
+pulled toward 50% by about four games, and read either way (hardest or easiest
+first). Both ends were tried and both failed on the live Jinx page: by the bottom,
+Viktor at 3-3 was the 4th hardest lane, because a six-game range reaches low
+whatever the record; by the top, Yunara at 10-9 (52.6%) came 2nd, because more
+games made its range the narrowest. Every matchup above the floor is returned,
+not the first 15, so any opponent can be searched for.
+
+Every list keeps its filters, sort, search and page in the URL, so a reload, a
+shared link or the back button returns the same view (the tier list used to fall
+back to All roles on the way back from a champion). Filter changes replace the
+history entry and page changes add one, so back steps through pages but not
+through every tweak. Match history filters by champion from **stored games
+only**: Riot's history endpoint filters by queue and time, never by champion, so
+the list says how many games it holds and costs no Riot call.
+
 ### The champion, not just the numbers
 
 The page has two groups of tabs. **The numbers** (Build, Runes, Laning,

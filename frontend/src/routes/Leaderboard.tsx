@@ -1,12 +1,14 @@
-import type { CSSProperties } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { PLATFORMS, api, type LeaderboardResponse } from '../lib/api'
 import Crest from '../components/Crest'
+import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel, timeAgo } from '../lib/format'
+import { intParam, withParams } from '../lib/searchParams'
 
 /**
  * Shown while `/leaderboard/slices` is in flight, so the filters are usable on
@@ -61,27 +63,23 @@ export default function Leaderboard() {
   })
   const slices = slicesQuery.data ?? FALLBACK
 
-  // URL params are user input. `Number('abc')` is NaN, `Math.max(1, NaN)` is
-  // NaN, and `String(NaN)` went on the wire as `page=NaN` for FastAPI to reject
-  // with a 422 that surfaced as "Something went wrong".
-  const intParam = (key: string, fallback: number) => {
-    const value = Number(search.get(key))
-    return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
-  }
   const platform = search.get('platform') ?? 'euw1'
   const tier = (search.get('tier') ?? 'CHALLENGER').toUpperCase()
   const division = (search.get('division') ?? 'I').toUpperCase()
-  const queueId = intParam('queue', 420)
-  const page = intParam('page', 1)
+  const queueId = intParam(search, 'queue', 420)
+  const page = intParam(search, 'page', 1)
+  // A rank to point at: set by "Go to rank" and by a profile's ladder link.
+  const rank = intParam(search, 'rank', 0) || null
   const isApex = slices.apex_tiers.includes(tier)
+  const navigate = useNavigate()
 
-  const set = (patch: Record<string, string>) => {
-    const next = new URLSearchParams(search)
-    for (const [k, v] of Object.entries(patch)) next.set(k, v)
-    // Any filter change invalidates the page number.
-    if (!('page' in patch)) next.set('page', '1')
-    setSearch(next, { replace: true })
-  }
+  // A filter change replaces the history entry and starts from page 1. A page
+  // is a link (see `pageHref`), which pushes one, so back returns to the page
+  // before; with `replace` for pages too, back from page 2 left the ladder.
+  const set = (patch: Record<string, string>) =>
+    setSearch((prev) => withParams(prev, { ...patch, page: null, rank: null }), { replace: true })
+  const pageHref = (n: number, pointAt: number | null = null) =>
+    `?${withParams(search, { page: n, rank: pointAt }, { page: '1' }).toString()}`
 
   // Apex ignores the division server-side, so including it would key two
   // cache entries to one byte-identical response.
@@ -122,6 +120,39 @@ export default function Leaderboard() {
   // Still asking, and this is the page's own answer rather than the previous
   // page shown while it loads.
   const lookingUp = pending > 0 && answers <= NAME_POLLS && !query.isPlaceholderData
+
+  // A new page starts at its first row. The window used to stay where Next
+  // was clicked, at the bottom, so page 2 opened on rank 100 with rank 51's
+  // row 1,693px above the screen (measured on the live Challenger ladder).
+  const top = useRef<HTMLDivElement>(null)
+  const shownPage = useRef(page)
+  useEffect(() => {
+    if (shownPage.current === page) return
+    shownPage.current = page
+    const el = top.current
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' })
+  }, [page])
+
+  // The row asked for, once this page's own rows are on screen.
+  const pointed = useRef<number | null>(null)
+  useEffect(() => {
+    if (!rank) {
+      pointed.current = null
+      return
+    }
+    if (!data || query.isPlaceholderData || pointed.current === rank) return
+    const row = document.querySelector(`[data-rank="${rank}"]`)
+    if (row) {
+      pointed.current = rank
+      row.scrollIntoView({ block: 'center' })
+    }
+  }, [rank, data, query.isPlaceholderData])
+
+  const pageCount = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
+  const rowsLabel =
+    data && data.rows.length > 0
+      ? `ranks ${data.rows[0].position.toLocaleString()} to ${data.rows[data.rows.length - 1].position.toLocaleString()}`
+      : null
 
   // The ladder being read is the subject, so it sets the page's accent. On a
   // site about rank the colour carries information rather than decorating.
@@ -227,6 +258,20 @@ export default function Leaderboard() {
 
       {data && (
         <>
+          <div ref={top} className="scroll-mt-20">
+            <Pager
+              page={page}
+              pageCount={pageCount}
+              hrefFor={(n) => pageHref(n)}
+              aside={
+                <GoToRank
+                  onGo={(target) => navigate(pageHref(Math.ceil(target / PER_PAGE), target))}
+                />
+              }
+            >
+              {rowsLabel}
+            </Pager>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[520px] border-collapse text-sm">
               <thead>
@@ -256,7 +301,13 @@ export default function Leaderboard() {
                   return (
                     <tr
                       key={row.puuid}
-                      className="lift border-b border-line-soft"
+                      data-rank={row.position}
+                      aria-current={row.position === rank ? 'true' : undefined}
+                      className={`lift border-b border-line-soft ${
+                        row.position === rank
+                          ? 'bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]'
+                          : ''
+                      }`}
                     >
                       <td className="tnum display py-2.5 text-right text-base font-600 text-ink-faint">
                         {row.position}
@@ -343,34 +394,66 @@ export default function Leaderboard() {
 
           {data.rows.length === 0 && (
             <p className="py-6 text-center text-sm text-ink-faint">
-              Nothing on this page. {data.total > 0
-                ? `This ladder holds ${compact(data.total)} rows.`
-                : 'This ladder is empty right now.'}
+              Nothing on this page.{' '}
+              {data.total > 0 ? (
+                <>
+                  This ladder holds {compact(data.total)} rows, so it ends on{' '}
+                  <Link
+                    to={pageHref(pageCount)}
+                    className="underline decoration-line underline-offset-2 hover:text-gold-bright"
+                  >
+                    page {pageCount}
+                  </Link>
+                  .
+                </>
+              ) : (
+                'This ladder is empty right now.'
+              )}
             </p>
           )}
 
-          <div className="flex items-center justify-between text-xs">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={() => set({ page: String(page - 1) })}
-              className="rounded-sm border border-line px-3 py-1.5 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:pointer-events-none disabled:opacity-35"
-            >
-              Previous
-            </button>
-            <span className="tnum text-ink-faint">Page {page}</span>
-            <button
-              type="button"
-              disabled={!data.has_more}
-              onClick={() => set({ page: String(page + 1) })}
-              className="rounded-sm border border-line px-3 py-1.5 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:pointer-events-none disabled:opacity-35"
-            >
-              Next
-            </button>
-          </div>
+          {data.rows.length > 0 && (
+            <Pager page={page} pageCount={pageCount} hrefFor={(n) => pageHref(n)}>
+              {rowsLabel}
+            </Pager>
+          )}
         </>
       )}
     </div>
+  )
+}
+
+/** Jump to the page holding a rank, and point at its row. */
+function GoToRank({ onGo }: { onGo: (rank: number) => void }) {
+  const [value, setValue] = useState('')
+  return (
+    <form
+      className="flex items-center gap-1.5 text-xs"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const target = Math.floor(Number(value))
+        if (Number.isFinite(target) && target >= 1) onGo(target)
+      }}
+    >
+      <label className="flex items-center gap-1.5">
+        <span className="text-ink-faint">Go to rank</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          name="rank"
+          className="control tnum w-20"
+        />
+      </label>
+      <button
+        type="submit"
+        className="rounded-sm border border-line px-2.5 py-1 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright"
+      >
+        Go
+      </button>
+    </form>
   )
 }
 

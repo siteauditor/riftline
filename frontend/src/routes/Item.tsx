@@ -11,15 +11,14 @@ import RecipeTree from '../components/items/RecipeTree'
 import { points } from '../components/items/groups'
 import { api, type ItemDetail, type ItemFigures } from '../lib/api'
 import { compact, pct } from '../lib/format'
+import { sliceFromParams, sliceLink, sliceParams, withParams } from '../lib/searchParams'
 
 export default function Item() {
   const { itemId = '' } = useParams()
   const [search, setSearch] = useSearchParams()
-  const slice = {
-    patch: search.get('patch'),
-    queueId: Number(search.get('queue_id')) || 420,
-    bracket: search.get('bracket'),
-  }
+  // Patch, queue and bracket only: an item page has no role or sample floor.
+  const { patch, queueId, bracket } = sliceFromParams(search, 1)
+  const slice = { patch, queueId, bracket }
 
   const query = useQuery({
     queryKey: ['item', itemId, slice],
@@ -28,19 +27,12 @@ export default function Item() {
   })
 
   function updateSlice(next: Partial<SliceValue>) {
-    const params = new URLSearchParams(search)
-    const keys: Partial<Record<keyof SliceValue, string>> = {
-      patch: 'patch',
-      queueId: 'queue_id',
-      bracket: 'bracket',
-    }
-    for (const [field, value] of Object.entries(next)) {
-      const key = keys[field as keyof SliceValue]
-      if (!key) continue
-      if (value === null || value === undefined || value === '') params.delete(key)
-      else params.set(key, String(value))
-    }
-    setSearch(params, { replace: true })
+    const { patch, queueId, bracket } = next
+    setSearch(
+      (prev) =>
+        withParams(prev, sliceParams({ patch, queueId, bracket }), { queue: '420', bracket: 'ALL' }),
+      { replace: true },
+    )
   }
 
   if (query.isLoading) {
@@ -144,7 +136,7 @@ export default function Item() {
                 <Headline figures={figures} finished={finished} />
                 <ItemTiming figures={figures} finished={finished} />
                 <ItemSlots figures={figures} />
-                <ItemChampions figures={figures} finished={finished} />
+                <ItemChampions figures={figures} finished={finished} linkSuffix={sliceLink(slice)} />
               </>
             ) : (
               <p className="max-w-prose border-l-2 border-line pl-3 text-sm leading-relaxed text-ink-dim">

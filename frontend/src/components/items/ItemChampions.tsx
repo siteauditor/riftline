@@ -6,7 +6,16 @@ import { slotLabel } from './groups'
 import { Delta } from './ItemSlots'
 
 /** Who buys it: the champions with the most purchases, and how it does for each. */
-export default function ItemChampions({ figures, finished }: { figures: ItemFigures; finished: boolean }) {
+export default function ItemChampions({
+  figures,
+  finished,
+  linkSuffix = '',
+}: {
+  figures: ItemFigures
+  finished: boolean
+  /** The slice being read, carried to each champion's page. */
+  linkSuffix?: string
+}) {
   if (figures.champions.length === 0) return null
   return (
     <section>
@@ -34,7 +43,7 @@ export default function ItemChampions({ figures, finished }: { figures: ItemFigu
             {figures.champions.map((c) => (
               <tr key={c.champion.id} className="lift border-b border-line-soft">
                 <td className="py-1.5">
-                  <Link to={`/champions/${c.champion.id}`} className="group flex items-center gap-2">
+                  <Link to={`/champions/${c.champion.id}${linkSuffix}`} className="group flex items-center gap-2">
                     {c.champion.icon_url && (
                       <img
                         src={c.champion.icon_url}

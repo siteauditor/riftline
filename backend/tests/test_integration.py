@@ -1152,3 +1152,63 @@ async def test_the_asked_shard_is_used_when_the_account_is_on_it():
             player.summoner_level = None
             assert (await service.effective_platform(player, euw1)).id == "sg2"
             assert ids.called
+
+
+# ------------------------------------------------------- champion filter
+
+
+@respx.mock
+async def test_a_champion_filter_reads_stored_games_and_calls_riot_for_no_match(client):
+    """Riot's history cannot filter by champion, so the filter is the games we
+    hold: newest first, paged by offset, with the total, and no match-v5 call.
+    Neeko and Nidalee because the suite's other tests store Ahri for Caps."""
+    neeko, nidalee = 518, 76
+    specs = [
+        ("EUW1_9100000001", neeko, 420),
+        ("EUW1_9100000002", neeko, 420),
+        ("EUW1_9100000003", neeko, 420),
+        ("EUW1_9100000004", neeko, 440),
+        ("EUW1_9100000005", nidalee, 420),
+    ]
+    payloads = [fx.match(mid, champion_id=champ, queue=queue) for mid, champ, queue in specs]
+    mock_riot(matches=payloads, match_ids=[mid for mid, _, _ in specs])
+
+    loaded = await client.get("/api/summoner/euw1/Caps/EUW/matches?count=5")
+    assert loaded.status_code == 200
+    assert loaded.json()["source"] == "riot"
+
+    def match_calls() -> int:
+        return sum(1 for call in respx.calls if "/lol/match/v5/" in str(call.request.url))
+
+    before = match_calls()
+
+    body = (await client.get(f"/api/summoner/euw1/Caps/EUW/matches?champion={neeko}")).json()
+    assert body["source"] == "stored"
+    assert body["stored_total"] == 4
+    assert [m["match_id"] for m in body["matches"]] == [
+        "EUW1_9100000004", "EUW1_9100000003", "EUW1_9100000002", "EUW1_9100000001",
+    ]
+    assert {m["champion"]["id"] for m in body["matches"]} == {neeko}
+    assert body["has_more"] is False
+
+    flex = (
+        await client.get(f"/api/summoner/euw1/Caps/EUW/matches?champion={neeko}&queue=440")
+    ).json()
+    assert [m["match_id"] for m in flex["matches"]] == ["EUW1_9100000004"]
+    assert flex["stored_total"] == 1
+
+    first = (
+        await client.get(f"/api/summoner/euw1/Caps/EUW/matches?champion={neeko}&count=2")
+    ).json()
+    second = (
+        await client.get(
+            f"/api/summoner/euw1/Caps/EUW/matches?champion={neeko}&count=2&start=2"
+        )
+    ).json()
+    assert first["has_more"] is True
+    assert second["has_more"] is False
+    pages = [m["match_id"] for m in first["matches"] + second["matches"]]
+    assert pages == [m["match_id"] for m in body["matches"]], "two pages, no overlap"
+
+    assert match_calls() == before, "a champion filter spends no match call"
+

@@ -23,13 +23,21 @@ export function useMatchHistory(
   platform: string,
   name: string,
   tag: string,
-  { queue = null, enabled = true }: { queue?: number | null; enabled?: boolean } = {},
+  {
+    queue = null,
+    champion = null,
+    enabled = true,
+  }: { queue?: number | null; champion?: number | null; enabled?: boolean } = {},
 ) {
   const query = useInfiniteQuery({
-    queryKey: ['matches', platform, name, tag, queue],
+    // The champion is last, so the unfiltered history keeps the key the live
+    // page shares.
+    queryKey: champion
+      ? ['matches', platform, name, tag, queue, champion]
+      : ['matches', platform, name, tag, queue],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      api.matches(platform, name, tag, { start: pageParam, count: MATCH_PAGE, queue }),
+      api.matches(platform, name, tag, { start: pageParam, count: MATCH_PAGE, queue, champion }),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * MATCH_PAGE : undefined,
     enabled,

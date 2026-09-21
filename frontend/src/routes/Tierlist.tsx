@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -9,7 +9,15 @@ import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
 import { api, type ChampionMetaRow, type MetaResponse } from '../lib/api'
 import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
-import { foldRiotName } from '../lib/storage'
+import {
+  foldName,
+  SLICE_DEFAULTS,
+  sliceFromParams,
+  sliceLink,
+  sliceParams,
+  useSearchText,
+  withParams,
+} from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 
 /**
@@ -34,7 +42,18 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
 // stomps, so the cell shows a dash rather than a number.
 const GOLD_FLOOR = 10
 
-type SortKey = 'confidence_win_rate' | 'win_rate' | 'pick_rate' | 'ban_rate' | 'games' | 'gold'
+// The tier list's own sample floor, and the default the URL leaves out.
+const MIN_GAMES = 20
+
+type SortKey =
+  | 'confidence_win_rate'
+  | 'win_rate'
+  | 'pick_rate'
+  | 'ban_rate'
+  | 'games'
+  | 'gold'
+  | 'avg_kda'
+  | 'avg_cs_per_min'
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: 'confidence_win_rate', label: 'Win rate, low end' },
@@ -43,7 +62,13 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: 'ban_rate', label: 'Ban rate' },
   { key: 'games', label: 'Games' },
   { key: 'gold', label: 'Gold at 14' },
+  { key: 'avg_kda', label: 'KDA' },
+  { key: 'avg_cs_per_min', label: 'CS per minute' },
 ]
+const DEFAULT_SORT: SortKey = 'confidence_win_rate'
+
+const parseSort = (value: string | null): SortKey =>
+  SORTS.find((s) => s.key === value)?.key ?? DEFAULT_SORT
 
 function goldAt14(row: ChampionMetaRow): number | null {
   return row.timeline_games >= GOLD_FLOOR ? row.avg_gold_diff_14 : null
@@ -55,19 +80,24 @@ function sortValue(row: ChampionMetaRow, key: SortKey): number | null {
   return key === 'gold' ? goldAt14(row) : row[key]
 }
 
-/** Case, accents, spaces and punctuation folded: "kaisa" finds Kai'Sa. */
-const fold = (name: string) => foldRiotName(name).replace(/[^\p{L}\p{N}]/gu, '')
-
 export default function Tierlist() {
-  const [slice, setSlice] = useState<SliceValue>({
-    patch: null,
-    queueId: 420,
-    position: null,
-    bracket: null,
-    minGames: 20,
-  })
-  const [sort, setSort] = useState<SortKey>('confidence_win_rate')
-  const [search, setSearch] = useState('')
+  // Everything that shapes the list lives in the URL. In component state it
+  // was lost on the way back from a champion: pick Jungle, open Skarner, press
+  // back, and the list was on All roles again (reproduced on the live site).
+  const [params, setParams] = useSearchParams()
+  // No bracket: the list hides "Crawled from" and describes its lobbies instead.
+  const slice: SliceValue = { ...sliceFromParams(params, MIN_GAMES), bracket: null }
+  const sort = parseSort(params.get('sort'))
+  const [search, setSearch] = useSearchText('q')
+
+  const updateSlice = (next: Partial<SliceValue>) =>
+    setParams(
+      (prev) =>
+        withParams(prev, sliceParams(next), { ...SLICE_DEFAULTS, min_games: String(MIN_GAMES) }),
+      { replace: true },
+    )
+  const setSort = (key: SortKey) =>
+    setParams((prev) => withParams(prev, { sort: key }, { sort: DEFAULT_SORT }), { replace: true })
 
   const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
   const meta = useQuery({
@@ -92,8 +122,13 @@ export default function Tierlist() {
     return rows.map((row, i) => ({ row, place: i + 1 }))
   }, [meta.data, sort])
 
-  const query = fold(search)
-  const shown = query ? ranked.filter(({ row }) => fold(row.champion.name).includes(query)) : ranked
+  const query = foldName(search)
+  const shown = query
+    ? ranked.filter(({ row }) => foldName(row.champion.name).includes(query))
+    : ranked
+  const queueName = slice.queueId === 440 ? 'ranked flex' : 'ranked solo'
+  const linkFor = (row: ChampionMetaRow) =>
+    `/champions/${row.champion.id}${sliceLink({ ...slice, position: row.position })}`
   const rows = ranked.map((r) => r.row)
 
   const empty = corpus.data && corpus.data.total_matches === 0
@@ -104,7 +139,9 @@ export default function Tierlist() {
     <div>
       <ArtHeader art={heroArt}>
         <p className="eyebrow">
-          {meta.data ? `Patch ${meta.data.patch} · ranked solo` : 'Ranked solo'}
+          {meta.data
+            ? `Patch ${meta.data.patch}, ${queueName}`
+            : queueName.charAt(0).toUpperCase() + queueName.slice(1)}
         </p>
         <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
           Champion tier list
@@ -130,7 +167,7 @@ export default function Tierlist() {
           <div className="mt-5">
             <SliceFilters
               value={slice}
-              onChange={(next) => setSlice((s) => ({ ...s, ...next }))}
+              onChange={updateSlice}
               allowAllPositions
               hideBracket
               summary={
@@ -217,8 +254,9 @@ export default function Tierlist() {
                     sort={sort}
                     onSort={setSort}
                     showRole={!position}
+                    linkFor={linkFor}
                   />
-                  <Cards rows={shown} showRole={!position} />
+                  <Cards rows={shown} showRole={!position} linkFor={linkFor} />
                 </>
               )}
             </>
@@ -359,6 +397,8 @@ const COLUMNS: { key: SortKey; label: string; hint: string }[] = [
   { key: 'ban_rate', label: 'Ban', hint: 'Share of games this champion was banned' },
   { key: 'games', label: 'Games', hint: 'Sample size' },
   { key: 'gold', label: 'Gold @14', hint: 'Average gold lead at 14 minutes' },
+  { key: 'avg_kda', label: 'KDA', hint: 'Kills and assists per death' },
+  { key: 'avg_cs_per_min', label: 'CS/m', hint: 'Minions and monsters per minute' },
 ]
 
 function Table({
@@ -366,11 +406,13 @@ function Table({
   sort,
   onSort,
   showRole,
+  linkFor,
 }: {
   rows: { row: ChampionMetaRow; place: number }[]
   sort: SortKey
   onSort: (key: SortKey) => void
   showRole: boolean
+  linkFor: (row: ChampionMetaRow) => string
 }) {
   return (
     <div className="mt-3 hidden overflow-x-auto md:block">
@@ -399,8 +441,6 @@ function Table({
                 </button>
               </th>
             ))}
-            <th className="py-2.5 text-right font-500">KDA</th>
-            <th className="py-2.5 text-right font-500">CS/m</th>
           </tr>
         </thead>
         <tbody>
@@ -414,10 +454,7 @@ function Table({
                 <TierBadge tier={row.tier} />
               </td>
               <td className="py-2.5">
-                <Link
-                  to={`/champions/${row.champion.id}?position=${row.position}`}
-                  className="group block"
-                >
+                <Link to={linkFor(row)} className="group block">
                   <ChampionCell row={row} showRole={showRole} />
                 </Link>
               </td>
@@ -458,18 +495,17 @@ function Table({
 function Cards({
   rows,
   showRole,
+  linkFor,
 }: {
   rows: { row: ChampionMetaRow; place: number }[]
   showRole: boolean
+  linkFor: (row: ChampionMetaRow) => string
 }) {
   return (
     <ul className="mt-3 md:hidden">
       {rows.map(({ row, place }) => (
         <li key={`${row.champion.id}-${row.position}`} className="border-b border-line-soft">
-          <Link
-            to={`/champions/${row.champion.id}?position=${row.position}`}
-            className="group block py-3"
-          >
+          <Link to={linkFor(row)} className="group block py-3">
             <span className="grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5">
               <span className="tnum text-xs text-ink-faint">{place}</span>
               <TierBadge tier={row.tier} />

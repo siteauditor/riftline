@@ -8,6 +8,8 @@ import { compact, pct, winRateColor } from '../../lib/format'
 interface Props {
   builds: ChampionDetail['builds']
   spells: FacetEntry[]
+  /** Carried to the item pages, so an item opens on the patch and queue read here. */
+  itemSearch?: string
 }
 
 /**
@@ -19,7 +21,7 @@ interface Props {
  * build path because it reads match timelines, which we do not fetch yet.
  * Presenting these as a path would be inventing data.
  */
-export default function BuildPanel({ builds, spells }: Props) {
+export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
   const empty =
     builds.complete.length === 0 &&
     builds.items.length === 0 &&
@@ -54,7 +56,7 @@ export default function BuildPanel({ builds, spells }: Props) {
           <ul className="border-t border-line-soft">
             {builds.path.map((entry) => (
               <li key={entry.ids.join()}>
-                <FacetRow entry={entry} wide ordered />
+                <FacetRow itemSearch={itemSearch} entry={entry} wide ordered />
               </li>
             ))}
           </ul>
@@ -65,7 +67,7 @@ export default function BuildPanel({ builds, spells }: Props) {
         <Section title="Most built items" hint="Counted individually, so this survives a small sample best.">
           <div className="grid grid-cols-2 border-t border-line-soft sm:grid-cols-3 lg:grid-cols-4">
             {builds.items.map((entry) => (
-              <FacetRow key={entry.ids.join()} entry={entry} />
+              <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
             ))}
           </div>
         </Section>
@@ -76,7 +78,7 @@ export default function BuildPanel({ builds, spells }: Props) {
           <ul className="border-t border-line-soft">
             {builds.complete.map((entry) => (
               <li key={entry.ids.join()}>
-                <FacetRow entry={entry} wide />
+                <FacetRow itemSearch={itemSearch} entry={entry} wide />
               </li>
             ))}
           </ul>
@@ -88,7 +90,7 @@ export default function BuildPanel({ builds, spells }: Props) {
           <Section title="Boots">
             <div className="border-t border-line-soft">
               {builds.boots.map((entry) => (
-                <FacetRow key={entry.ids.join()} entry={entry} />
+                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
               ))}
             </div>
           </Section>
@@ -98,7 +100,7 @@ export default function BuildPanel({ builds, spells }: Props) {
           <Section title="Summoner spells">
             <div className="border-t border-line-soft">
               {spells.map((entry) => (
-                <FacetRow key={entry.ids.join()} entry={entry} />
+                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
               ))}
             </div>
           </Section>
@@ -133,11 +135,13 @@ function FacetRow({
   entry,
   wide,
   ordered,
+  itemSearch = '',
 }: {
   entry: FacetEntry
   wide?: boolean
   /** Draw arrows between icons, for a sequence rather than a set. */
   ordered?: boolean
+  itemSearch?: string
 }) {
   // Items link to their page in the item guide; summoner spells have none.
   const icons = [
@@ -155,7 +159,7 @@ function FacetRow({
               </span>
             )}
             {item ? (
-              <ItemIcon item={ref} size={28} className="rounded-sm bg-raised" />
+              <ItemIcon item={ref} size={28} className="rounded-sm bg-raised" search={itemSearch} />
             ) : (
               <span
                 className="size-7 overflow-hidden rounded-sm bg-raised"

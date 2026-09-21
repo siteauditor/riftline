@@ -18,12 +18,15 @@ export default function ItemIcon({
   item,
   size,
   className = '',
+  search = '',
 }: {
   item: ItemLike | null
   /** Pixels. */
   size: number
   /** The box's own look (radius, background), which differs by place. */
   className?: string
+  /** A query string for the item page, e.g. the patch and queue being read. */
+  search?: string
 }) {
   const box = `block shrink-0 overflow-hidden ${className}`
   const style = { width: size, height: size }
@@ -32,7 +35,7 @@ export default function ItemIcon({
   }
   return (
     <Link
-      to={`/items/${item.id}`}
+      to={`/items/${item.id}${search}`}
       title={item.name ?? undefined}
       aria-label={item.name ?? `Item ${item.id}`}
       className={`${box} outline-offset-1 transition-[filter] hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-bright`}

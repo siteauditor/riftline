@@ -171,11 +171,15 @@ async def get_matches(
     start: int = Query(0, ge=0, le=900),
     count: int = Query(20, ge=1, le=100),
     queue: int | None = Query(None, description="Riot queue id, e.g. 420 for Solo/Duo."),
+    champion: int | None = Query(
+        None, ge=1, description="Champion id. Read from stored games: Riot cannot filter by it."
+    ),
 ) -> MatchHistoryResponse:
     """Match history.
 
     Cold pages are slow by design: each new match is one request against a
     budget of 100 per two minutes. Already-seen matches are served from storage.
+    With `champion`, the page is stored games only and makes no match calls.
     """
     player = await players.resolve(platform, game_name, tag_line)
     # Read the identifier out of the ORM object now. Storing matches can hit a
@@ -183,6 +187,24 @@ async def get_matches(
     # session -- including this `player`. Touching it afterwards would emit a
     # lazy SELECT and fail with MissingGreenlet.
     puuid = player.puuid
+
+    if champion is not None:
+        stored = await matches.stored_history(
+            puuid, champion_id=champion, queue=queue, start=start, count=count
+        )
+        return MatchHistoryResponse(
+            puuid=puuid,
+            matches=[
+                summary
+                for match in stored.matches
+                if (summary := to_match_summary(match, puuid, sd)) is not None
+            ],
+            start=start,
+            count=count,
+            has_more=start + count < stored.total,
+            source="stored",
+            stored_total=stored.total,
+        )
 
     page = await matches.history(puuid, platform, start=start, count=count, queue=queue)
     summaries: list[MatchSummary] = []
