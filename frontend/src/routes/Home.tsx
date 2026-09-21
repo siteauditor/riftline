@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import PositionIcon from '../components/PositionIcon'
 import SearchBar from '../components/SearchBar'
+import { SectionTitle } from '../components/Stat'
 import {
   api,
   POSITIONS,
@@ -63,20 +65,31 @@ export default function Home() {
     retry: false,
   })
 
+  // The hero's art is the strongest pick on the patch: the page's own subject,
+  // not a stock background.
+  const champions = useQuery({
+    queryKey: ['champions'],
+    queryFn: api.champions,
+    staleTime: 6 * 60 * 60 * 1000,
+  })
+  const leadChampion = meta.data?.rows[0]?.champion.id
+  const heroArt =
+    champions.data?.champions.find((c) => c.id === leadChampion)?.art_url ?? null
+
   return (
     <div>
-      <section className="border-b border-line-soft">
-        <div className="mx-auto max-w-[1280px] px-4 pb-12 pt-20 sm:pt-28">
+      <ArtHeader art={heroArt} tall>
+        <div className="pb-2 pt-6 sm:pt-10">
           {/* Broken by hand. Left to a measure, the rag landed on "read at /
               a glance", which splits the phrase that carries the meaning. */}
-          <h1 className="display text-[clamp(2.6rem,6.5vw,4.5rem)] font-700 text-ink">
-            Every game you have played,
+          <h1 className="display text-[clamp(2.7rem,7vw,5rem)] font-800 uppercase leading-[0.92] tracking-[-0.01em] text-ink">
+            Every game you
             <br />
-            read at a glance.
+            have played
           </h1>
-          <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-ink-dim">
+          <p className="mt-3 max-w-[46ch] text-[15px] leading-relaxed text-ink-dim">
             Rank, match history, champion mastery and the meta, for any League of
-            Legends player. Search a Riot ID to start.
+            Legends player, with a score on every game. Search a Riot ID to start.
           </p>
 
           <div className="mt-8 max-w-xl">
@@ -87,7 +100,7 @@ export default function Home() {
 
           {corpus.data && <CorpusLine corpus={corpus.data} />}
         </div>
-      </section>
+      </ArtHeader>
 
       <WhatsHere hasBestGames={(best.data?.games.length ?? 0) > 0} />
 
@@ -266,15 +279,15 @@ function BestPicks({
 
   return (
     <section className="mx-auto max-w-[1280px] px-4 pt-10">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="display text-2xl font-600 text-ink">Best pick in each role</h2>
-        <Link
-          to="/tierlist"
-          className="text-sm text-ink-dim transition-colors hover:text-gold-bright"
-        >
-          See the full tier list
-        </Link>
-      </div>
+      <SectionTitle
+        eyebrow="Patch meta"
+        title="Best pick in each role"
+        aside={
+          <Link to="/tierlist" className="transition-colors hover:text-accent-bright">
+            See the full tier list
+          </Link>
+        }
+      />
       <p className="mt-1 max-w-[62ch] text-sm text-ink-dim">
         The highest win rate each role's sample actually supports, over 40 games or
         more{meta.data ? `, on patch ${meta.data.patch}` : ''}. A champion at 3-0 is
@@ -365,7 +378,7 @@ function BestGames({
 
   return (
     <section id="best-games" className="mx-auto max-w-[1280px] scroll-mt-20 px-4 py-10">
-      <h2 className="display text-2xl font-600 text-ink">Best games this week</h2>
+      <SectionTitle eyebrow="Seven days" title="Best games this week" />
       <p className="mt-1 max-w-[62ch] text-sm text-ink-dim">
         The highest Riftline score in each role over the last{' '}
         {best.data?.days ?? 7} days of ranked solo

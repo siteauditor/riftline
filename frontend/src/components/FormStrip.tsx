@@ -70,7 +70,7 @@ export default function FormStrip({ matches }: Props) {
   return (
     <section
       aria-label="Recent form"
-      className="rounded-sm border border-line bg-panel px-4 py-3.5"
+      className="frame px-4 py-3.5"
     >
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="display text-base font-600 text-ink">

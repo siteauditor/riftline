@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { api, type RankHistory, type RankInfo } from '../lib/api'
+import { emblemUrl } from '../lib/rankArt'
 import { pct, tierColor, tierLabel } from '../lib/format'
 
 interface PlayerKey {
@@ -65,7 +66,7 @@ export default function RankCard({
       style={{ '--accent': color } as CSSProperties}
     >
       <header className="flex items-center justify-between border-b border-line-soft px-4 py-2.5">
-        <h2 className="display text-sm font-600 text-ink-dim">{rank.queue_label}</h2>
+        <h2 className="eyebrow">{rank.queue_label}</h2>
         {rank.hot_streak && (
           <span className="rounded-sm bg-gold/15 px-1.5 py-0.5 text-[11px] font-600 text-gold-bright">
             Hot streak
@@ -76,19 +77,32 @@ export default function RankCard({
       <div className="px-4 py-3.5">
         {ranked ? (
           <>
-            <p
-              className="display text-[28px] font-700 leading-none"
-              style={{ color }}
-            >
-              {tierLabel(rank.tier, rank.division)}
-            </p>
-
-            <p className="mt-1.5 text-sm text-ink-dim">
-              <span className="tnum font-600 text-ink">
-                {rank.league_points.toLocaleString()}
-              </span>{' '}
-              LP
-            </p>
+            <div className="flex items-center gap-3">
+              {/* The emblem is the one place a rank is the subject rather than
+                  a label, so it gets the full crest and the tier's own glow. */}
+              <img
+                src={emblemUrl(rank.tier!)}
+                alt=""
+                aria-hidden
+                loading="lazy"
+                className="size-16 shrink-0"
+                style={{ filter: `drop-shadow(0 0 10px color-mix(in srgb, ${color} 40%, transparent))` }}
+              />
+              <div className="min-w-0">
+                <p
+                  className="display text-[26px] font-700 uppercase leading-none tracking-tight"
+                  style={{ color }}
+                >
+                  {tierLabel(rank.tier, rank.division)}
+                </p>
+                <p className="mt-1.5 text-sm text-ink-dim">
+                  <span className="tnum font-600 text-ink">
+                    {rank.league_points.toLocaleString()}
+                  </span>{' '}
+                  LP
+                </p>
+              </div>
+            </div>
 
             <div className="mt-3.5">
               <div className="flex h-1.5 overflow-hidden rounded-full bg-raised">

@@ -12,6 +12,7 @@ import {
   type Position,
 } from '../lib/api'
 import PositionIcon from '../components/PositionIcon'
+import ArtHeader from '../components/ArtHeader'
 import ProfileTabs from '../components/ProfileTabs'
 import RankBadge from '../components/RankBadge'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
@@ -24,6 +25,7 @@ import {
   tierLabel,
   timeAgo,
 } from '../lib/format'
+import { useChampionArt } from '../lib/useChampionArt'
 
 const POLL_MS = 60_000
 const LANES: Position[] = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']
@@ -59,23 +61,33 @@ export default function LiveGamePage() {
   }
   const lastGame = seen?.player === player ? seen.game : null
   const ended = Boolean(data && !data.in_game && lastGame)
+  // The champion the searched player is on, in the live game or in the one
+  // that just ended: this page is about them, so the art is theirs.
+  const shown = data?.game ?? lastGame
+  const heroArt = useChampionArt(
+    shown?.participants.find((p) => p.puuid && p.puuid === data?.puuid)?.champion.id,
+  )
 
   // One shell around every branch, matching the other routes: without it the
   // page sits flush against the viewport edge while the header stays centred.
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-6">
+    <div>
       {/* The same header the other two tabs carry. Without it this page was a
           strip of tabs and an empty box, with nothing saying whose it was. */}
-      <header className="mb-5 flex flex-wrap items-center gap-4 border-b border-line-soft pb-5">
-        <div>
-          <h1 className="display text-[clamp(1.9rem,4vw,2.6rem)] font-700 text-ink">
-            {name}
-            <span className="ml-1.5 text-lg font-600 text-ink-faint">#{tag}</span>
-          </h1>
-          <p className="mt-0.5 text-sm text-ink-dim">Live game</p>
+      <ArtHeader art={heroArt}>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="min-w-0">
+            <p className="eyebrow">Live game</p>
+            <h1 className="display mt-1 text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
+              {name}
+              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
+            </h1>
+          </div>
+          <ProfileTabs platform={platform} name={name} tag={tag} />
         </div>
-        <ProfileTabs platform={platform} name={name} tag={tag} />
-      </header>
+      </ArtHeader>
+
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       {query.isLoading && <Spinner label="Checking for a live game" />}
       {/* Only when there is nothing to show. A refetch failure keeps `data`, so
@@ -103,6 +115,7 @@ export default function LiveGamePage() {
           stale={query.isError}
         />
       )}
+      </div>
     </div>
   )
 }
@@ -761,7 +774,7 @@ function PlayerRow({
 
   return (
     <li
-      className={`flex items-center gap-2.5 border-b border-l-2 border-line-soft px-2 py-2 transition-colors hover:bg-raised/30 ${
+      className={`flex items-center gap-2.5 border-b border-l-2 border-line-soft px-2 py-2 lift ${
         isYou ? 'border-l-gold bg-gold/[0.06]' : 'border-l-transparent'
       }`}
     >

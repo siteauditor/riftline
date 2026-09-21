@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import ChampionPicker from '../components/ChampionPicker'
 import PositionIcon from '../components/PositionIcon'
 import { EmptyState, ErrorView } from '../components/StateViews'
@@ -16,6 +17,7 @@ import {
 } from '../lib/api'
 import { compact, parseRiotId, pct, positionLabel } from '../lib/format'
 import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
+import { useChampionArt } from '../lib/useChampionArt'
 import { useDebounced } from '../lib/useDebounced'
 
 const COMFORT_LEVELS = [
@@ -116,19 +118,24 @@ export default function Draft() {
   const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
   const empty = corpus.data && corpus.data.total_matches === 0
   const boardIsSet = allies.length + enemies.length + bans.length > 0 || lane !== null
+  // Who you are facing, or failing that what the list is telling you to pick.
+  const heroArt = useChampionArt(lane ?? draft.data?.suggestions[0]?.champion.id)
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-6">
-      <header className="border-b border-line-soft pb-5">
-        <h1 className="display text-[clamp(1.9rem,4vw,2.6rem)] font-700 text-ink">
+    <div>
+      <ArtHeader art={heroArt}>
+        <p className="eyebrow">{positionLabel(position)} · pick phase</p>
+        <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
           Draft assistant
         </h1>
-        <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-dim">
+        <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink-dim">
           Pick your role, then fill in the draft as it happens. Suggestions are ranked by
           what the records can support, not by what a handful of games claims, and every
           row shows where its number came from.
         </p>
-      </header>
+      </ArtHeader>
+
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       {empty ? (
         <div className="mt-6">
@@ -284,6 +291,7 @@ export default function Draft() {
         </div>
       )}
     </div>
+    </div>
   )
 }
 
@@ -434,7 +442,7 @@ function SuggestionRow({ suggestion: s, place }: { suggestion: DraftSuggestion; 
   const capped = Math.abs(uncapped - s.context_lift) > 0.0005
 
   return (
-    <li className="border-b border-line-soft px-1 py-2.5 transition-colors hover:bg-raised/30">
+    <li className="border-b border-line-soft px-1 py-2.5 lift">
       <div className="flex gap-3">
         <span className="tnum w-5 shrink-0 pt-1 text-xs text-ink-faint">{place}</span>
         {s.champion.icon_url && (
@@ -516,7 +524,7 @@ function Bans({ data }: { data: DraftResponse }) {
   if (data.ban_candidates.length === 0) return null
   return (
     <section>
-      <h2 className="display text-sm font-600 text-ink-dim">Worth banning</h2>
+      <h2 className="eyebrow">Worth banning</h2>
       <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
         {data.bans_read_the_draft
           ? 'Strongest against the champions your team has locked in.'
@@ -551,7 +559,7 @@ function Bans({ data }: { data: DraftResponse }) {
 function HowScored({ data }: { data: DraftResponse }) {
   const m = data.model
   return (
-    <details className="rounded-sm border border-line bg-panel px-4 py-3 text-xs leading-relaxed text-ink-dim">
+    <details className="frame px-4 py-3 text-xs leading-relaxed text-ink-dim">
       <summary className="cursor-pointer text-ink">How this is scored</summary>
       <p className="mt-2">
         Every champion starts at the win rate its own sample can defend in this role on

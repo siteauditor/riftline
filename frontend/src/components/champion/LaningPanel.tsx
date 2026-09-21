@@ -41,7 +41,7 @@ export default function LaningPanel({ laning, skills, championName }: Props) {
             </p>
           </div>
 
-          <div className="rounded-sm border border-line bg-panel px-4 py-3.5">
+          <div className="frame px-4 py-3.5">
             {/* The share bar is the number: 52:48 is legible at a glance in a
                 way "0.52" is not. */}
             <div className="flex items-baseline justify-between text-sm">
@@ -140,7 +140,7 @@ function Diff({
 
 function SkillRow({ entry, arrows }: { entry: FacetEntry; arrows?: boolean }) {
   return (
-    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 transition-colors hover:bg-raised/30">
+    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
       <div className="flex flex-wrap items-center gap-1">
         {entry.ids.map((slot, i) => (
           <span key={i} className="flex items-center gap-1">

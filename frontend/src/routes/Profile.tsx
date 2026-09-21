@@ -9,6 +9,8 @@ import {
 } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
+import ArtHeader from '../components/ArtHeader'
+import Crest from '../components/Crest'
 import FormStrip from '../components/FormStrip'
 import MatchRow from '../components/MatchRow'
 import ProfileTabs from '../components/ProfileTabs'
@@ -115,6 +117,14 @@ export default function Profile() {
     retry: false,
   })
 
+  // The header's art is the champion they play most, from the games we hold:
+  // the subject of the page rather than a backdrop.
+  const champions = useQuery({
+    queryKey: ['champions'],
+    queryFn: api.champions,
+    staleTime: 6 * 60 * 60 * 1000,
+  })
+
   const matches: MatchSummary[] = useMemo(
     () => matchesQuery.data?.pages.flatMap((p) => p.matches) ?? [],
     [matchesQuery.data],
@@ -147,6 +157,9 @@ export default function Profile() {
   const headline = profile.ranks.find((r) => r.tier) ?? null
   const accent = tierColor(headline?.tier)
   const player = { platform, name, tag }
+  const topChampion = analyticsQuery.data?.champions[0]?.champion.id
+  const heroArt =
+    champions.data?.champions.find((c) => c.id === topChampion)?.art_url ?? null
 
   async function refreshAll() {
     const fresh = await api.profile(platform, name, tag, true)
@@ -170,39 +183,47 @@ export default function Profile() {
         cyan here and an Iron player grey, so the colour is telling you
         something before you have read a word.
       */}
-      <header className="border-b border-line-soft bg-panel/40">
-        <div className="accent-edge mx-auto flex max-w-[1280px] flex-wrap items-center gap-4 py-5 pl-4 pr-4">
+      <ArtHeader art={heroArt}>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
           {profile.profile_icon_url && (
             <img
               src={profile.profile_icon_url}
               alt=""
-              className="size-14 rounded-sm ring-1 ring-line"
+              className="size-16 shrink-0 ring-1 ring-line"
             />
           )}
           <div className="min-w-0">
-            <h1 className="display text-[clamp(1.8rem,4vw,2.6rem)] font-700 text-ink">
+            <h1 className="display text-[clamp(1.9rem,4.5vw,3rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
               {profile.game_name}
-              <span className="ml-1 text-ink-faint">#{profile.tag_line}</span>
+              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">
+                #{profile.tag_line}
+              </span>
             </h1>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-dim">
+            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-ink-dim">
               {headline && (
-                <span className="display text-base font-600" style={{ color: accent }}>
-                  {tierLabel(headline.tier, headline.division)}
-                  <span className="tnum ml-1.5 text-ink-dim">
+                <span className="flex items-center gap-1.5">
+                  <Crest tier={headline.tier} division={headline.division} size="sm" />
+                  <span
+                    className="display text-base font-700 uppercase tracking-wide"
+                    style={{ color: accent }}
+                  >
+                    {tierLabel(headline.tier, headline.division)}
+                  </span>
+                  <span className="tnum text-ink-dim">
                     {headline.league_points.toLocaleString()} LP
                   </span>
                 </span>
               )}
               {profile.ladder && <LadderChip ladder={profile.ladder} />}
-              <span className="text-ink-faint">Level {profile.summoner_level ?? '–'}</span>
-              <span className="text-ink-faint">{profile.platform_label}</span>
+              <span className="eyebrow">Level {profile.summoner_level ?? '–'}</span>
+              <span className="eyebrow">{profile.platform_label}</span>
             </p>
             <UpdateControl updatedAt={profile.updated_at} onUpdate={refreshAll} />
           </div>
 
           <ProfileTabs platform={platform} name={name} tag={tag} />
         </div>
-      </header>
+      </ArtHeader>
 
       <div className="mx-auto max-w-[1280px] px-4 pb-10 pt-6">
         {/*
@@ -307,7 +328,7 @@ export default function Profile() {
               <button
                 onClick={() => matchesQuery.fetchNextPage()}
                 disabled={matchesQuery.isFetchingNextPage}
-                className="w-full rounded-sm border border-line bg-panel py-2.5 text-sm font-500 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-60"
+                className="w-full frame py-2.5 text-sm font-500 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-60"
               >
                 {matchesQuery.isFetchingNextPage
                   ? 'Loading games from Riot…'
@@ -441,9 +462,9 @@ function MostPlayed({
   const top = analytics.champions.slice(0, 5)
   if (top.length === 0) return null
   return (
-    <section className="rounded-sm border border-line bg-panel">
+    <section className="frame">
       <header className="flex items-baseline justify-between border-b border-line-soft px-4 py-2.5">
-        <h2 className="display text-sm font-600 text-ink-dim">
+        <h2 className="eyebrow">
           Most played, {analytics.games_analysed} stored games
         </h2>
       </header>

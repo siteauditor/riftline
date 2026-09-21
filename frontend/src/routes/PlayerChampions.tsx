@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import PositionIcon from '../components/PositionIcon'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
@@ -14,6 +15,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
+import { useChampionArt } from '../lib/useChampionArt'
 
 const QUEUES = [
   { id: null, label: 'All' },
@@ -104,20 +106,25 @@ export default function PlayerChampions() {
   }
 
   const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  const heroArt = useChampionArt(query.data?.champions[0]?.champion.id)
   const data = query.data
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-6">
-      <header className="flex flex-wrap items-center gap-4 border-b border-line-soft pb-5">
-        <div>
-          <h1 className="display text-[clamp(1.9rem,4vw,2.6rem)] font-700 text-ink">
-            {name}
-            <span className="ml-1.5 text-lg font-600 text-ink-faint">#{tag}</span>
-          </h1>
-          <p className="mt-0.5 text-sm text-ink-dim">Champions</p>
+    <div>
+      <ArtHeader art={heroArt}>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="min-w-0">
+            <p className="eyebrow">Champions played</p>
+            <h1 className="display mt-1 text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
+              {name}
+              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
+            </h1>
+          </div>
+          <ProfileTabs platform={platform} name={name} tag={tag} />
         </div>
-        <ProfileTabs platform={platform} name={name} tag={tag} />
-      </header>
+      </ArtHeader>
+
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       <div className="mt-5 flex items-center gap-1 text-sm">
         {QUEUES.map((q) => (
@@ -214,6 +221,7 @@ export default function PlayerChampions() {
           </p>
         </>
       )}
+    </div>
     </div>
   )
 }

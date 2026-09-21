@@ -94,7 +94,10 @@ export default function Champion() {
 
         <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-4 pb-6 pt-20 sm:pt-32 lg:flex-row lg:items-end">
           <div className="min-w-0">
-            <h1 className="display text-[clamp(2.5rem,7vw,4.25rem)] font-700 text-ink">
+            <p className="eyebrow">
+              {positionLabel(d.position)} · patch {d.patch}
+            </p>
+            <h1 className="display text-[clamp(2.5rem,7vw,4.25rem)] font-800 uppercase leading-[0.9] tracking-[-0.02em] text-ink">
               {d.champion.name}
             </h1>
             <p className="mt-1 text-sm text-ink-dim">

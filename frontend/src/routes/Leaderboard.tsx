@@ -6,6 +6,7 @@ import { PLATFORMS, api } from '../lib/api'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel, timeAgo } from '../lib/format'
+import { emblemUrl } from '../lib/rankArt'
 
 /**
  * Shown while `/leaderboard/slices` is in flight, so the filters are usable on
@@ -101,18 +102,30 @@ export default function Leaderboard() {
       className="mx-auto max-w-[1060px] space-y-5 px-4 py-6"
       style={{ '--accent': accent } as CSSProperties}
     >
-      <header className="accent-edge pl-4">
-        <h1
-          className="display text-[clamp(2rem,4.5vw,2.9rem)] font-700"
-          style={{ color: accent }}
-        >
-          {tierLabel(tier, division)}
-        </h1>
-        <p className="mt-1 max-w-[70ch] text-sm leading-relaxed text-ink-dim">
-          {regionLabel}, {queueLabel}. Riot's ladder carries no names, so a player
-          reads as unknown until we have seen them in a stored match or looked
-          them up, which happens gradually as pages are viewed.
-        </p>
+      <header className="flex items-center gap-4">
+        {/* The ladder's own emblem: on this page the rank is the subject. */}
+        <img
+          src={emblemUrl(tier)}
+          alt=""
+          aria-hidden
+          loading="lazy"
+          className="hidden size-20 shrink-0 sm:block"
+          style={{ filter: `drop-shadow(0 0 12px color-mix(in srgb, ${accent} 40%, transparent))` }}
+        />
+        <div className="min-w-0">
+          <p className="eyebrow">{regionLabel} ladder</p>
+          <h1
+            className="display text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em]"
+            style={{ color: accent }}
+          >
+            {tierLabel(tier, division)}
+          </h1>
+          <p className="mt-2 max-w-[70ch] text-sm leading-relaxed text-ink-dim">
+            {queueLabel}. Riot's ladder carries no names, so a player
+            reads as unknown until we have seen them in a stored match or looked
+            them up, which happens gradually as pages are viewed.
+          </p>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
@@ -203,7 +216,7 @@ export default function Leaderboard() {
                   return (
                     <tr
                       key={row.puuid}
-                      className="border-b border-line-soft transition-colors hover:bg-raised/40"
+                      className="lift border-b border-line-soft"
                     >
                       <td className="tnum display py-2.5 text-right text-base font-600 text-ink-faint">
                         {row.position}

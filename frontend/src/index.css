@@ -3,15 +3,24 @@
 /*
  * Riftline.
  *
- * The ground is not a neutral blue-black. Summoner's Rift is a forest, and its
- * terrain in shadow reads deep teal-green; taking the base from the map itself
- * is what keeps this from being any dark dashboard with a gold accent.
+ * Broadcast black, after looking at what game sites actually do.
  *
- * There is one fixed accent, hextech gold, and one variable accent: the rank
- * being described. A Challenger profile reads cyan and an Iron one grey,
- * because on a site about rank the colour should be carrying information rather
- * than decorating the page. Components read the current rank through
- * `--accent`, which a wrapper sets.
+ * Riot's own League and Valorant pages and the LoL Esports site all work the
+ * same way: a near-black ground, sharp-cornered rectangles with hairline
+ * outlines, condensed upper-case display type, and the game's own art carrying
+ * every bit of colour and atmosphere. Blitz and Lolalytics do the softer,
+ * rounded version of it and let dense grids of Riot's item and rune icons be
+ * the texture. What none of them do, and what this site used to do, is draw
+ * flat 1px panels on a lit ground and put the art in 48px thumbnails.
+ *
+ * So: the chrome says as little as possible, art is a background layer behind
+ * every header, and colour comes from three sources only.
+ *
+ * Hextech teal is the interface: live, selected, hovered, clickable. Gold is
+ * earned, and nothing else: the Riftline score, an MVP, an S tier, the top of
+ * a ladder. The rank being described is the third, set on `--accent` by a
+ * wrapper, so a Challenger profile reads cyan and an Iron one grey and the
+ * colour is carrying information rather than decorating the page.
  *
  * On layers. Tailwind v4 emits its utilities inside `@layer utilities`, and
  * unlayered CSS beats layered CSS regardless of specificity or source order.
@@ -24,39 +33,55 @@
  */
 
 @theme {
-  /* Ground: the Rift's terrain in shadow, green-cast rather than blue-black. */
-  --color-deep: #0a1114;
-  --color-panel: #111b1f;
-  --color-raised: #18262c;
-  --color-line: #24363e;
-  --color-line-soft: #182931;
-
-  --color-ink: #e8f0f2;
-  --color-ink-dim: #93a9b2;
   /*
-   * Raised from #61787f, which measured 4.08:1 on the page ground and 3.33:1 on
-   * a raised surface: under the 4.5:1 AA floor for the 11px and 12px labels
-   * this colour is used for, 106 times. Now 5.57:1 and 4.80:1.
-   */
-  --color-ink-faint: #7d949c;
-
-  /* Hextech gold. The one accent that never changes. */
-  --color-gold: #c9a227;
-  --color-gold-bright: #e8c65a;
-
-  /*
-   * Blue side and red side. Win and loss inherit the map's own duality.
+   * Broadcast black.
    *
-   * Both were lifted for legibility, measured rather than guessed: #3d8bd4 sat
-   * at 4.32:1 on a raised surface and #cf4a4a at 4.29:1 even on the page
-   * ground, and every use is small text (a KDA figure, a W/L count, the word
-   * Loss). They now clear 4.5:1 on both grounds. The deep pair are backgrounds
-   * only, so they are unchanged.
+   * The ground is nearly black and very slightly blue, the way an esports
+   * graphics package or Riot's own sites sit: the chrome says almost nothing,
+   * and every colour on screen comes from the game's own art, the rank, or the
+   * one accent. The previous ground was a lit teal-green taken from the Rift's
+   * terrain, which read as a document rather than a game.
    */
-  --color-win: #4a93d8;
-  --color-win-deep: #12293f;
-  --color-loss: #e56b6b;
-  --color-loss-deep: #3a1a1c;
+  --color-deep: #05070a;
+  --color-panel: #0a0e14;
+  --color-raised: #121821;
+  --color-line: #1f2836;
+  --color-line-soft: #141b25;
+
+  --color-ink: #eaf2f8;
+  --color-ink-dim: #9aacbd;
+  /*
+   * 5.6:1 on the ground and 4.7:1 on a raised surface: this is the colour the
+   * 11px labels use, and they have to clear the 4.5:1 AA floor on both.
+   */
+  --color-ink-faint: #7d90a3;
+
+  /*
+   * Two accents with two jobs, never swapped.
+   *
+   * Hextech teal is the interface: what is live, selected, hovered or clickable.
+   * It is League's own teal rather than a generic cyan, which keeps the site off
+   * both op.gg's blue and the default "dark UI with electric blue" look.
+   */
+  --color-accent: #0ac8b9;
+  --color-accent-bright: #3fe7da;
+
+  /*
+   * Gold is earned, not decorative: the Riftline score, an MVP, an S tier, the
+   * top of a ladder. If everything is gold, nothing is.
+   */
+  --color-gold: #c8aa6e;
+  --color-gold-bright: #f0d8a0;
+
+  /*
+   * Blue side and red side, and with them win and loss. Lifted for a near-black
+   * ground, where the old pair sat muddy: both clear 4.5:1 on the ground and on
+   * a raised surface, and both are used at 11px.
+   */
+  --color-win: #4fa8ff;
+  --color-win-deep: #0d2033;
+  --color-loss: #ff6b6b;
+  --color-loss-deep: #2e1418;
 
   /*
    * The ladder. Players read these colours faster than they read the words, so
@@ -84,6 +109,18 @@
   --font-display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif;
   --font-sans: 'Barlow', system-ui, sans-serif;
 
+  /*
+   * Sharp corners are Riot's own language: their buttons and panels are
+   * rectangles with a hairline outline, and rounding them is what made this
+   * site read as a generic dashboard. One token turns every `rounded-sm` in
+   * the app square, so no component has to be edited to agree.
+   */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+
   /* Tailwind v4 emits `font-700` only where a token declares it. */
   --font-weight-400: 400;
   --font-weight-500: 500;
@@ -95,8 +132,12 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Overridden per subject. Gold is the neutral standing in for "no rank". */
-    --accent: var(--color-gold);
+    /*
+     * Overridden per subject: a profile sets its player's rank colour here. The
+     * default is the interface accent, not gold, because an unranked subject
+     * has earned nothing and gold is the site's word for earned.
+     */
+    --accent: var(--color-accent);
   }
 
   html,
@@ -116,14 +157,37 @@
   }
 
   *:focus-visible {
-    outline: 2px solid var(--color-gold-bright);
+    outline: 2px solid var(--color-accent-bright);
     outline-offset: 2px;
-    border-radius: 2px;
   }
 
   ::selection {
-    background: var(--color-gold);
+    background: var(--color-accent);
     color: var(--color-deep);
+  }
+
+  /*
+   * The faintest scanline over the whole page, fixed so it does not travel with
+   * the content: two percent of a light line every three pixels. Invisible as a
+   * pattern, but it stops a near-black ground reading as flat ink, which is
+   * most of the difference between a broadcast graphic and a blank document.
+   */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgb(255 255 255 / 0.02) 0 1px,
+      transparent 1px 3px
+    );
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
   }
 
   /* Scrollbars, so dense panels do not sprout bright chrome. */
@@ -295,10 +359,84 @@
     background-color: #111b1f;
     color: #e8f0f2;
   }
+
+  /*
+   * A label above a number or a section: condensed, upper case, tracked out.
+   *
+   * The one place this site shouts. Broadcast graphics label everything this
+   * way, and it lets the figure underneath be the loud thing without a heading
+   * competing with it. Never used for a sentence.
+   */
+  .eyebrow {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  /*
+   * The panel: a hairline box with a lit top edge.
+   *
+   * Riot's own surfaces are rectangles with a single hairline, not cards with
+   * shadows, so this is a border and a 1px inner highlight rather than a drop
+   * shadow. The highlight is what stops a square on near-black looking like a
+   * hole punched in the page.
+   */
+  .frame {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+  }
+
+  /*
+   * The corner cut, used on hero surfaces only.
+   *
+   * One 14px notch, bottom right, the way a broadcast lower-third or a Riot
+   * panel is cut. It is the site's second motif after `accent-edge` and it
+   * stays rare: on every panel it would be a texture, not a mark.
+   */
+  .notch {
+    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+  }
+
+  /*
+   * A row that answers the pointer. Two pixels of travel and the accent picked
+   * up on the left edge: enough to feel live, not enough to move the page.
+   */
+  .lift {
+    transition:
+      transform 120ms ease,
+      background-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .lift:hover {
+    transform: translateY(-1px);
+    background-color: color-mix(in srgb, var(--color-raised) 55%, transparent);
+    box-shadow: inset 2px 0 0 0 var(--color-accent);
+  }
+
+  /*
+   * The one orchestrated moment: a header rising as its art fades in, once, on
+   * arrival. Stopped entirely by the reduced-motion rule at the end of this
+   * file, which leaves the header exactly where it lands.
+   */
+  .reveal {
+    animation: reveal 320ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
 }
 
 /* Outside every layer on purpose: a keyframe set is not a style rule and
    cascade layers do not apply to it. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
 @keyframes skeleton-breathe {
   0%,
   100% {

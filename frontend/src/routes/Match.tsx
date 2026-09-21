@@ -1,11 +1,13 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import PositionIcon from '../components/PositionIcon'
 import Scoreboard from '../components/match/Scoreboard'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { api } from '../lib/api'
 import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../lib/format'
+import { useChampionArt } from '../lib/useChampionArt'
 
 /**
  * One stored game on its own page.
@@ -28,6 +30,12 @@ export default function Match() {
     staleTime: Infinity,
     retry: false,
   })
+
+  // Read before the loading and error branches: a hook cannot run only
+  // sometimes. The subject is the player the link named, so the art is theirs.
+  const heroArt = useChampionArt(
+    query.data?.teams.flat().find((p) => p.puuid === subjectPuuid)?.champion.id,
+  )
 
   if (query.isLoading) {
     return (
@@ -54,10 +62,11 @@ export default function Match() {
   })
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-8">
+    <div>
+      <ArtHeader art={heroArt}>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
-          <h1 className="display text-3xl font-700 text-ink sm:text-4xl">
+          <h1 className="display text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
             {subject && riotId ? (
               <>
                 <Link
@@ -106,9 +115,12 @@ export default function Match() {
           </div>
         )}
       </div>
+      </ArtHeader>
 
-      <div className="mt-6 rounded-sm border border-line-soft bg-panel/40">
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
+      <div className="frame">
         <Scoreboard matchId={matchId} subjectPuuid={subjectPuuid} platform={platform} />
+      </div>
       </div>
     </div>
   )

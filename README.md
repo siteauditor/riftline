@@ -206,6 +206,18 @@ region. On 16.18, 95% were Master+ lobbies. That replaced the "Crawled from" fil
 there, which recorded where the crawler started rather than a rank, and filtered
 almost nothing (Challenger was 1,403 of 1,593 games).
 
+**The look is broadcast black, and it was researched rather than invented.**
+Riot's own League and Valorant sites and LoL Esports all share one language: a
+near-black ground, sharp-cornered rectangles with hairline outlines, condensed
+upper-case display type, and the game's art carrying the colour. Blitz and
+Lolalytics do the rounded version and let dense grids of Riot's item and rune
+icons be the texture. This site used to draw flat panels on a lit teal ground
+with the art in 48px thumbnails, which read as a spreadsheet. Now every page
+header runs the subject's own splash art behind the type (`ArtHeader`), ranks
+show Riot's crests (`lib/rankArt.ts`), the corner radius is zero everywhere
+through one token, and colour has three sources only: hextech teal for the
+interface, gold for what was earned, and the rank being described.
+
 **Draft suggestions are ranked by what the records support.** Every suggestion returns
 its baseline, every record behind it with its sample, and the mastery weighting. Each
 record is first shrunk toward the champion's own baseline in proportion to sample size,

@@ -24,7 +24,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-40 border-b border-line-soft bg-deep/95 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-line bg-deep/90 backdrop-blur">
         {/* `min-w-0` and a scrollable nav: nothing in this row could shrink,
             so adding a third link pushed the whole document into horizontal
             scroll below about 390px, and the sticky background stopped at the
@@ -34,8 +34,8 @@ export default function App() {
             to="/"
             className="shrink-0 font-display text-lg font-800 tracking-tight text-ink hover:text-gold-bright"
           >
-            {PRODUCT_NAME}
-            <span className="text-gold">.</span>
+            <span className="uppercase tracking-[0.06em]">{PRODUCT_NAME}</span>
+            <span className="text-accent">.</span>
           </Link>
 
           <nav className="-mb-px flex min-w-0 flex-shrink items-stretch gap-1 overflow-x-auto text-sm">
@@ -48,9 +48,9 @@ export default function App() {
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `flex h-14 shrink-0 items-center border-b-2 px-2.5 font-display font-600 transition-colors ${
+                  `flex h-14 shrink-0 items-center border-b-2 px-2.5 font-display text-[13px] font-600 uppercase tracking-[0.12em] transition-colors ${
                     isActive
-                      ? 'border-gold text-gold-bright'
+                      ? 'border-accent text-accent-bright'
                       : 'border-transparent text-ink-dim hover:text-ink'
                   }`
                 }
@@ -68,7 +68,9 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-4 text-xs text-ink-faint">
             {health?.static_data_version && (
-              <span className="hidden sm:inline">Patch {health.static_data_version}</span>
+              <span className="eyebrow hidden sm:inline">
+                Patch {health.static_data_version}
+              </span>
             )}
             {health && !health.riot_key_configured && (
               <span className="rounded-sm border border-loss/40 bg-loss-deep px-2 py-1 text-loss">

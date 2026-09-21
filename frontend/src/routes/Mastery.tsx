@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import ProfileTabs from '../components/ProfileTabs'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { api, type ChampionStatic, type MasteryEntry } from '../lib/api'
 import { compact, pct, timeAgo } from '../lib/format'
+import { useChampionArt } from '../lib/useChampionArt'
 
 /**
  * Mastery level -> colour.
@@ -115,6 +117,13 @@ export default function Mastery() {
     return sorted
   }, [cells, role, showUnplayed, sort])
 
+  // Their deepest champion: the one this page is really about. Read before the
+  // loading and error branches, because a hook cannot run only sometimes.
+  const heroArt = useChampionArt(
+    [...(masteryQuery.data?.entries ?? [])].sort((a, b) => b.points - a.points)[0]
+      ?.champion.id,
+  )
+
   if (masteryQuery.isLoading || championsQuery.isLoading) {
     return (
       <div className="mx-auto max-w-[1280px] px-4 py-10">
@@ -140,17 +149,21 @@ export default function Mastery() {
   const played = cells.filter((c) => c.points > 0).length
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-6">
-      <header className="flex flex-wrap items-center gap-4 border-b border-line-soft pb-5">
-        <div>
-          <h1 className="display text-[clamp(1.9rem,4vw,2.6rem)] font-700 text-ink">
-            {name}
-            <span className="ml-1.5 text-lg font-600 text-ink-faint">#{tag}</span>
-          </h1>
-          <p className="mt-0.5 text-sm text-ink-dim">Champion mastery</p>
+    <div>
+      <ArtHeader art={heroArt}>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <div className="min-w-0">
+            <p className="eyebrow">Champion mastery</p>
+            <h1 className="display mt-1 text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
+              {name}
+              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
+            </h1>
+          </div>
+          <ProfileTabs platform={platform} name={name} tag={tag} />
         </div>
-        <ProfileTabs platform={platform} name={name} tag={tag} />
-      </header>
+      </ArtHeader>
+
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       {/* Summary */}
       <div className="mt-5 grid grid-cols-2 gap-y-4 sm:grid-cols-3">
@@ -270,6 +283,7 @@ export default function Mastery() {
       </div>
 
       {selected && <ChampionDetail cell={selected} onClose={() => setSelected(null)} />}
+      </div>
     </div>
   )
 }

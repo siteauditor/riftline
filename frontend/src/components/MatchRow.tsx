@@ -54,10 +54,10 @@ export default function MatchRow({
       className="border-b border-l-[3px] border-line-soft border-l-transparent"
       style={{ borderLeftColor: edge, background: `linear-gradient(0deg, ${tint}, ${tint})` }}
     >
-    <div className="grid grid-cols-1 gap-x-4 gap-y-3 px-3 py-3 transition-colors hover:bg-raised/30 sm:grid-cols-[104px_auto_1fr_auto]">
+    <div className="grid grid-cols-1 gap-x-4 gap-y-3 px-3 py-3 lift sm:grid-cols-[104px_auto_1fr_auto]">
       {/* Context */}
       <div className="flex items-baseline gap-2 sm:block">
-        <p className="truncate text-xs font-600 text-ink">{match.queue_name}</p>
+        <p className="eyebrow truncate text-ink-dim">{match.queue_name}</p>
         <p className="text-xs text-ink-faint">{timeAgo(match.game_creation)}</p>
         {/* Measured, unlike the crawl bracket, but measured *late*: Riot keeps
             no historical rank, so this is where these players sit today, not

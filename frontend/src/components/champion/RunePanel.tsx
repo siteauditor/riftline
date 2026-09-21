@@ -55,7 +55,7 @@ export default function RunePanel({ runes }: { runes: ChampionDetail['runes'] })
 
 function RuneRow({ entry }: { entry: FacetEntry }) {
   return (
-    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 transition-colors hover:bg-raised/30">
+    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
       <div className="flex shrink-0 flex-wrap gap-1">
         {entry.runes.map((rune, i) => (
           <span

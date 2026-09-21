@@ -140,7 +140,7 @@ function FacetRow({
 }) {
   const icons = [...entry.items, ...entry.spells]
   return (
-    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 transition-colors hover:bg-raised/30">
+    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
       <div className="flex shrink-0 gap-1">
         {icons.map((ref, i) => (
           <span key={`${ref.id}-${i}`} className="flex items-center gap-1">

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import ArtHeader from '../components/ArtHeader'
 import PositionIcon from '../components/PositionIcon'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
@@ -9,6 +10,7 @@ import WinRateRange from '../components/WinRateRange'
 import { api, type ChampionMetaRow, type MetaResponse } from '../lib/api'
 import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
 import { foldRiotName } from '../lib/storage'
+import { useChampionArt } from '../lib/useChampionArt'
 
 /**
  * Tier badges: a ramp of treatments, not just of hues.
@@ -95,19 +97,26 @@ export default function Tierlist() {
   const rows = ranked.map((r) => r.row)
 
   const empty = corpus.data && corpus.data.total_matches === 0
+  // The art is whatever currently tops the list: the page's own subject.
+  const heroArt = useChampionArt(ranked[0]?.row.champion.id)
 
   return (
-    <div className="mx-auto max-w-[1280px] px-4 py-6">
-      <header className="border-b border-line-soft pb-5">
-        <h1 className="display text-[clamp(1.9rem,4vw,2.6rem)] font-700 text-ink">
+    <div>
+      <ArtHeader art={heroArt}>
+        <p className="eyebrow">
+          {meta.data ? `Patch ${meta.data.patch} · ranked solo` : 'Ranked solo'}
+        </p>
+        <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
           Champion tier list
         </h1>
-        <p className="mt-1 max-w-prose text-sm leading-relaxed text-ink-dim">
+        <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink-dim">
           Ranked by the low end of the win rate each sample supports, not by raw win
           rate, and tiered within each role. A champion at 3-0 is not the strongest in
           the game, and this list doesn't pretend otherwise.
         </p>
-      </header>
+      </ArtHeader>
+
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       {empty ? (
         <div className="mt-6">
@@ -216,6 +225,7 @@ export default function Tierlist() {
           )}
         </>
       )}
+    </div>
     </div>
   )
 }
@@ -397,7 +407,7 @@ function Table({
           {rows.map(({ row, place }) => (
             <tr
               key={`${row.champion.id}-${row.position}`}
-              className="border-b border-line-soft transition-colors hover:bg-raised/40"
+              className="lift border-b border-line-soft"
             >
               <td className="tnum py-2.5 text-xs text-ink-faint">{place}</td>
               <td className="py-2.5">

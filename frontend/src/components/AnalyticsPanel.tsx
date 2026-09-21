@@ -31,9 +31,9 @@ export default function AnalyticsPanel({ data }: { data: Analytics | undefined }
   })
 
   return (
-    <section className="rounded-sm border border-line bg-panel">
+    <section className="frame">
       <header className="border-b border-line-soft px-4 py-2.5">
-        <h2 className="display text-sm font-600 text-ink-dim">Play style</h2>
+        <h2 className="eyebrow">Play style</h2>
       </header>
 
       <div className="space-y-4 px-4 py-3">

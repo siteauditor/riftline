@@ -69,7 +69,7 @@ export default function PairTable({ title, hint, rows, showPosition, showGold }:
             {rows.map((row) => (
               <tr
                 key={`${row.champion.id}-${row.position ?? ''}`}
-                className="border-b border-line-soft transition-colors hover:bg-raised/40"
+                className="lift border-b border-line-soft"
               >
                 <td className="py-1.5">
                   <Link

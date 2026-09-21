@@ -202,7 +202,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   return (
     <form onSubmit={onSubmit} className="relative w-full">
       <div
-        className={`flex items-stretch overflow-hidden rounded-sm border border-line bg-panel transition-colors focus-within:border-gold ${
+        className={`flex items-stretch overflow-hidden frame transition-colors focus-within:border-gold ${
           large ? 'h-14' : 'h-10'
         }`}
       >
@@ -267,7 +267,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
 
         <button
           type="submit"
-          className={`bg-gold px-5 font-display font-700 text-deep transition-colors hover:bg-gold-bright ${
+          className={`bg-accent px-5 font-display font-700 uppercase tracking-[0.12em] text-deep transition-colors hover:bg-accent-bright ${
             large ? 'text-sm' : 'text-xs'
           }`}
         >
@@ -276,7 +276,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
       </div>
 
       {showList && (
-        <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden rounded-sm border border-line bg-panel shadow-[0_16px_40px_-12px_rgb(0_0_0/0.7)]">
+        <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden frame shadow-[0_16px_40px_-12px_rgb(0_0_0/0.7)]">
           {!text && (
             <p id={`${listId}-label`} className="px-3 pb-1 pt-2 text-xs text-ink-faint">
               Recent

@@ -49,7 +49,7 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
       <span className="mb-1 block text-xs text-ink-faint">{label}</span>
 
       {selected ? (
-        <div className="flex h-10 items-center gap-2 rounded-sm border border-line bg-panel px-2">
+        <div className="flex h-10 items-center gap-2 frame px-2">
           {selected.icon_url && (
             <img src={selected.icon_url} alt="" className="size-7 rounded-sm" />
           )}
@@ -81,7 +81,7 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
       )}
 
       {open && !selected && matches.length > 0 && (
-        <ul className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-sm border border-line bg-panel py-1 shadow-xl">
+        <ul className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto frame py-1 shadow-xl">
           {matches.map((c) => (
             <li key={c.id}>
               <button

@@ -39,9 +39,9 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
   const weakest = role.components[role.components.length - 1]
 
   return (
-    <section className="rounded-sm border border-line bg-panel">
+    <section className="frame">
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line-soft px-4 py-2.5">
-        <h2 className="display text-sm font-600 text-ink-dim">
+        <h2 className="eyebrow">
           How they play {positionLabel(role.position)}
         </h2>
         {ready.length > 1 && (
