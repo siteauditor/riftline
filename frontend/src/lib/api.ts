@@ -80,9 +80,43 @@ export interface LiveParticipant {
   champion_record: CorpusRecord | null
   /** This champion against the lane opponent, from our stored games. */
   lane_record: CorpusRecord | null
+  /** How many games we hold for this player. Always present, including zero:
+   *  "we hold nothing" and "we hold two" are different facts. */
+  stored_games: number
+  /** What those games say about them, or null when we hold too few. */
+  record: PlayerRecord | null
 }
 
 export type Position = 'TOP' | 'JUNGLE' | 'MIDDLE' | 'BOTTOM' | 'UTILITY'
+
+/** A player's own record from the games Riftline has stored. Withheld rather
+ *  than zeroed: `stored_games` on the participant says how little we hold. */
+export interface PlayedRecord {
+  games: number
+  wins: number
+  losses: number
+  /** Null under 10 games: one game would move it ten points. */
+  win_rate: number | null
+  scored_games: number
+  avg_score: number | null
+  score_enough: boolean
+  last_played: number | null
+  first_played: number | null
+}
+
+export interface PlayerRecord {
+  overall: PlayedRecord
+  /** Null means we hold no stored game of theirs on this champion. That is not
+   *  "they have never played it": mastery answers that. */
+  on_champion: PlayedRecord | null
+  main_position: Position | null
+  main_position_games: number
+  positioned_games: number
+  /** Null whenever either side of the comparison is unknown. */
+  on_main_position: boolean | null
+  min_games: number
+  min_games_for_win_rate: number
+}
 
 export interface LiveMastery {
   level: number
@@ -152,6 +186,10 @@ export interface LiveGame {
   position_model: PositionModel | null
   /** The patch the champion and lane records were read from. */
   corpus_patch: string | null
+  /** Which games each player's own record was counted over. The crawl is nearly
+   *  all solo queue, so a flex lobby is counted over every queue and says so. */
+  record_basis: 'queue' | 'all_queues'
+  record_queue_id: number | null
 }
 
 /** The newest game Riftline holds for a player, for the page they see when they

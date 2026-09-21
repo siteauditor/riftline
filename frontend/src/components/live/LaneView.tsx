@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import PositionIcon from '../PositionIcon'
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, RoleRecord, SkinArt } from './PlayerBits'
+import PlayerRecordChips from './PlayerRecordChips'
 import { BLUE, LANES, RED } from './sides'
 import type { CorpusRecord, LiveGame, LiveParticipant, Position } from '../../lib/api'
 import { pct, positionLabel } from '../../lib/format'
@@ -25,7 +26,9 @@ export default function LaneView({ game, platform, you }: { game: LiveGame; plat
   // nothing on screen said which two were facing each other.
   return (
     <section>
-      <div className="mb-1 grid grid-cols-[1fr_3.5rem_1fr] items-end gap-2 border-b border-line pb-1.5 sm:grid-cols-[1fr_6rem_1fr] sm:gap-3">
+      {/* Side headings belong to the two column layout. Below sm each lane
+          stacks, so the sides are labelled on the cards themselves instead. */}
+      <div className="mb-1 hidden grid-cols-[1fr_6rem_1fr] items-end gap-3 border-b border-line pb-1.5 sm:grid">
         <h3
           className="display text-right text-base font-600"
           style={{ color: 'var(--color-win)' }}
@@ -43,9 +46,13 @@ export default function LaneView({ game, platform, you }: { game: LiveGame; plat
           const red = at(RED, lane)
           if (!blue || !red) return null
           return (
+            // Measured at 390: a three column lane gives each card about
+            // 143px, minus a 48px portrait, so roughly 88px of text. That fits
+            // one short chip per line and nothing else, which is why the lane
+            // stacks here and the centre becomes a divider between the two.
             <li
               key={lane}
-              className="grid grid-cols-[1fr_3.5rem_1fr] items-center gap-2 border-b border-line-soft py-2 sm:grid-cols-[1fr_6rem_1fr] sm:gap-3"
+              className="grid items-center gap-2 border-b border-line-soft py-2 sm:grid-cols-[1fr_6rem_1fr] sm:gap-3"
             >
               <LaneCard
                 p={blue}
@@ -88,17 +95,22 @@ function LaneCard({
   const [name, tag] = (p.riot_id ?? '').split('#')
   const linkable = Boolean(p.riot_id && name && tag)
   // Blue is the mirrored side: its art sits on the right, beside the lane icon,
-  // so both champions in a lane face each other across it.
+  // so both champions in a lane face each other across it. Only from sm: when
+  // the lane stacks, a mirrored card is just a card that reads backwards.
   const mirrored = side === 'blue'
 
   return (
     // The cell pushes the card towards the lane icon; the card itself is only
     // as wide as its content, so the "you" outline fits the player, not the
     // whole half of the row.
-    <div className={`flex min-w-0 ${mirrored ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex min-w-0 ${mirrored ? 'sm:justify-end' : 'justify-start'}`}>
     <div
-      className={`flex min-w-0 max-w-full items-center gap-2.5 rounded-sm px-1.5 py-1 ${
-        mirrored ? 'flex-row-reverse text-right' : ''
+      // Stacked, the two cards in a lane are one above the other and nothing
+      // says which side is which, so on a phone each carries its side's colour
+      // as a rule. From sm the columns say it instead.
+      style={{ borderLeftColor: mirrored ? 'var(--color-win)' : 'var(--color-loss)' }}
+      className={`flex min-w-0 max-w-full items-center gap-2.5 rounded-sm border-l-2 py-1 pl-2 pr-1.5 sm:border-l-0 sm:px-1.5 ${
+        mirrored ? 'sm:flex-row-reverse sm:text-right' : ''
       } ${isYou ? 'bg-gold/[0.07] ring-1 ring-gold/40' : ''}`}
     >
       {/* The skin this player is wearing, from spectator's own record of it:
@@ -127,7 +139,7 @@ function LaneCard({
         </p>
         <div
           className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${
-            mirrored ? 'justify-end' : ''
+            mirrored ? 'sm:justify-end' : ''
           }`}
         >
           <RankBadge
@@ -146,9 +158,18 @@ function LaneCard({
           )}
           <MasteryChip p={p} />
         </div>
+        {/* The player, rather than the champion: everything above this line
+            describes the pick or the season, and nothing described them. */}
         <div
           className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${
-            mirrored ? 'justify-end' : ''
+            mirrored ? 'sm:justify-end' : ''
+          }`}
+        >
+          <PlayerRecordChips p={p} championName={p.champion.name} />
+        </div>
+        <div
+          className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 ${
+            mirrored ? 'sm:justify-end' : ''
           }`}
         >
           <Loadout p={p} />

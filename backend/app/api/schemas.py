@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import ChampionMastery, Match, MatchParticipant, Player, RankedEntry
 from app.riot.routing import Platform
+from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
 from app.services.roles import CONFIDENT_AT, MEASURED_ACCURACY, MEASURED_PLAYERS
 from app.services.scores import (
     BADGES_BY_ID,
@@ -29,6 +30,7 @@ from app.services.scores import (
 from app.services.static_data import StaticDataService
 
 if TYPE_CHECKING:
+    from app.services.live import PlayedRecord, PlayerRecord
     from app.services.matches import PlayedRow
 
 # Ranked tiers, lowest to highest. Used for sorting and for the rank-bracket filter.
@@ -60,6 +62,12 @@ RANKED_QUEUE_BY_ID = {420: "RANKED_SOLO_5x5", 440: "RANKED_FLEX_SR"}
 # Stored matches use the same floor, so the two cannot disagree about what
 # counts as enough to label.
 MIN_RANKED_FOR_LOBBY_RANK = 6
+
+# The floors the live page applies to a player's own record. Declared here, and
+# read by `app/services/live.py`, because that module imports this one: the
+# import cannot run the other way.
+MIN_RECORD_GAMES = 3
+MIN_GAMES_FOR_WIN_RATE = 10
 
 QUEUE_LABELS = {
     "RANKED_SOLO_5x5": "Ranked Solo/Duo",
@@ -439,6 +447,49 @@ class PositionModelOut(BaseModel):
     confident_at: float
 
 
+class PlayedRecordOut(BaseModel):
+    """A player's own record from stored games, always with its size."""
+
+    games: int
+    wins: int
+    losses: int
+    # Null under ten games, where one game moves the figure by ten points. The
+    # W-L above is always there, so a thin record reads as "2-1", never "67%".
+    win_rate: float | None = None
+    scored_games: int = 0
+    avg_score: float | None = None
+    # False when the average is published but thin, mirroring RoleScoreProfile.
+    score_enough: bool = False
+    last_played: int | None = None
+    first_played: int | None = None
+
+
+class PlayerRecordOut(BaseModel):
+    """What Riftline holds about one player in a live lobby.
+
+    Withheld rather than zeroed: a player we hold too little for has no record
+    at all and `stored_games` on the participant says how little. A record full
+    of zeroes would render as somebody who loses every game.
+
+    These are the games **we have crawled**, not their season. The crawler walks
+    outward from stored matches, so a player in a bracket we crawl has far more
+    here than one outside it.
+    """
+
+    overall: PlayedRecordOut
+    # Null means we hold no stored game of theirs on this champion. That is not
+    # "they have never played it": mastery answers that, over their whole
+    # history rather than over what we crawled.
+    on_champion: PlayedRecordOut | None = None
+    main_position: str | None = None
+    main_position_games: int = 0
+    positioned_games: int = 0
+    # Null whenever either side of the comparison is unknown.
+    on_main_position: bool | None = None
+    min_games: int = MIN_RECORD_GAMES
+    min_games_for_win_rate: int = MIN_GAMES_FOR_WIN_RATE
+
+
 class LiveParticipantOut(BaseModel):
     """One player in a live game.
 
@@ -472,6 +523,9 @@ class LiveParticipantOut(BaseModel):
     mastery_known: bool = False
     champion_record: CorpusRecordOut | None = None
     lane_record: CorpusRecordOut | None = None
+    # Always present, including zero: "we hold nothing" is an answer.
+    stored_games: int = 0
+    record: PlayerRecordOut | None = None
 
 
 class LobbyRankOut(BaseModel):
@@ -528,6 +582,9 @@ class LiveGameOut(BaseModel):
     position_model: PositionModelOut | None = None
     # The patch the champion and lane records were read from.
     corpus_patch: str | None = None
+    # Which games each player's own record was counted over.
+    record_basis: str = "all_queues"
+    record_queue_id: int | None = None
 
 
 class LastStoredGameOut(BaseModel):
@@ -1152,6 +1209,37 @@ def to_idle_summary(
     )
 
 
+def _played_record_out(record: PlayedRecord | None) -> PlayedRecordOut | None:
+    if record is None:
+        return None
+    return PlayedRecordOut(
+        games=record.games,
+        wins=record.wins,
+        losses=record.losses,
+        win_rate=record.win_rate,
+        scored_games=record.scored_games,
+        avg_score=record.avg_score,
+        score_enough=record.scored_games >= MIN_SCORED_FOR_PROFILE,
+        last_played=record.last_played,
+        first_played=record.first_played,
+    )
+
+
+def _player_record_out(record: PlayerRecord | None) -> PlayerRecordOut | None:
+    if record is None:
+        return None
+    overall = _played_record_out(record.overall)
+    assert overall is not None
+    return PlayerRecordOut(
+        overall=overall,
+        on_champion=_played_record_out(record.on_champion),
+        main_position=record.main_position,
+        main_position_games=record.main_position_games,
+        positioned_games=record.positioned_games,
+        on_main_position=record.on_main_position,
+    )
+
+
 def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
     """Live game to wire format.
 
@@ -1217,6 +1305,8 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
                 mastery_known=p.mastery_known,
                 champion_record=_corpus_record_out(p.champion_record),
                 lane_record=_corpus_record_out(p.lane_record),
+                stored_games=p.stored_games,
+                record=_player_record_out(p.record),
             )
             for p in game.participants
         ],
@@ -1240,6 +1330,8 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
             else None
         ),
         corpus_patch=game.corpus_patch,
+        record_basis=game.record_basis,
+        record_queue_id=game.record_queue_id,
         # asdict, not vars: LobbyRank is a slots dataclass and has no __dict__.
         lobby_rank=(
             LobbyRankOut(**dataclasses.asdict(game.lobby_rank))

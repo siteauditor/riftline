@@ -113,7 +113,7 @@ def tier_for(rank_index: int, total: int) -> str | None:
     return next((label for cut, label in _TIER_CUTS if position < cut), "D")
 
 
-def _win_as_int():
+def win_as_int():
     """Count wins portably.
 
     ``CAST(win AS INTEGER)`` works on SQLite but Postgres rejects it outright
@@ -264,7 +264,7 @@ async def rebuild_champion_stats(
             MatchParticipant.champion_id,
             MatchParticipant.team_position,
             func.count().label("games"),
-            func.sum(_win_as_int()).label("wins"),
+            func.sum(win_as_int()).label("wins"),
             func.avg(MatchParticipant.kills),
             func.avg(MatchParticipant.deaths),
             func.avg(MatchParticipant.assists),
@@ -380,7 +380,7 @@ async def rebuild_matchup_stats(
                 MatchParticipant.champion_id,
                 enemy.c.champion_id,
                 func.count().label("games"),
-                func.sum(_win_as_int()).label("wins"),
+                func.sum(win_as_int()).label("wins"),
                 func.count(MatchParticipant.laning_score),
                 func.avg(MatchParticipant.laning_score),
                 func.avg(MatchParticipant.gold_diff_14),
@@ -454,7 +454,7 @@ async def rebuild_synergy_stats(
             ally.c.team_position,
             ally.c.champion_id,
             func.count().label("games"),
-            func.sum(_win_as_int()).label("wins"),
+            func.sum(win_as_int()).label("wins"),
         )
         .join(Match, Match.match_id == MatchParticipant.match_id)
         .join(

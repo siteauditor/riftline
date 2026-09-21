@@ -474,10 +474,10 @@ def test_win_counting_sql_is_valid_on_postgres():
     """CAST(boolean AS INTEGER) is an error in Postgres, silently fine in SQLite."""
     from sqlalchemy.dialects import postgresql, sqlite
 
-    from app.services.aggregate import _win_as_int
+    from app.services.aggregate import win_as_int
 
     for dialect in (sqlite.dialect(), postgresql.dialect()):
-        sql = str(_win_as_int().compile(dialect=dialect))
+        sql = str(win_as_int().compile(dialect=dialect))
         assert "CASE" in sql
         assert "CAST" not in sql
 

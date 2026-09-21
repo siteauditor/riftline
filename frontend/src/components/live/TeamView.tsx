@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, SkinArt } from './PlayerBits'
+import PlayerRecordChips from './PlayerRecordChips'
 import type { LiveGame, LiveParticipant } from '../../lib/api'
 import { pct } from '../../lib/format'
 
@@ -100,6 +101,12 @@ function PlayerRow({
             {p.champion.name}
           </span>
         )}
+      </span>
+
+      {/* Dense here: one line per player, so the champion specific record
+          stays on the lane cards where there is room for it. */}
+      <span className="hidden shrink-0 items-center gap-2 sm:flex">
+        <PlayerRecordChips p={p} championName={p.champion.name} dense />
       </span>
 
       <MasteryChip p={p} />

@@ -11,6 +11,8 @@ these reads are over stored rows.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 import respx
 
@@ -44,6 +46,10 @@ async def seed_games(puuid: str, *, count: int, newest_at: int) -> None:
                     is_remake=False,
                     teams=[],
                     raw={},
+                    # Stamped as measured so the lobby rank backfill, which
+                    # walks every stored match with no reading, does not adopt
+                    # these rows and change what its own tests see.
+                    lobby_rank_measured_at=datetime(2026, 9, 21, tzinfo=UTC),
                 )
             )
             session.add(
