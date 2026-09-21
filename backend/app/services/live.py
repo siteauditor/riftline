@@ -36,6 +36,7 @@ from app.services.aggregate import (
     patch_sort_key,
     win_as_int,
 )
+from app.services.draft import MATCHUP_SHRINKAGE, TEAM_SHRINKAGE, credible_lift
 from app.services.ranks import RankCache
 from app.services.roles import SUMMONERS_RIFT_MAP_ID, assign_team, load_priors
 
@@ -63,6 +64,18 @@ APEX_TIER_NAMES = ("MASTER", "GRANDMASTER", "CHALLENGER")
 # as a W-L record rather than a bare percentage, so a thin one looks thin.
 MIN_CORPUS_GAMES = 5
 
+# Below this many identified players a side's rank is withheld. Six of ten is
+# the whole lobby's floor, and three of five is the same proportion at half the
+# size, so the two cannot be edited apart without noticing.
+MIN_RANKED_PER_SIDE = 3
+
+# "Barely played this champion", on Riot's own scale rather than a number we
+# invented. Measured 2026-09-21: the corpus cannot calibrate a points threshold,
+# because only 115 mastery rows join to a stored game of the same champion and
+# the median in every points bucket is one game. Mastery level is what Riot
+# publishes and what players read, and level 3 is roughly ten games.
+LOW_MASTERY_LEVEL = 3
+
 # How far the lane record may reach when this patch holds too few games.
 # Measured 2026-09-21 over the lanes of forty real lobbies: 26% of them have a
 # five game lane record on the current patch, 34% once the previous patch is
@@ -79,7 +92,11 @@ POOL_MAX_MINOR_GAP = 2
 # how many before a percentage is published rather than a W-L. Both are defined
 # in schemas, which this module imports rather than the other way round, so the
 # response models publish the same numbers the service applies.
-from app.api.schemas import MIN_GAMES_FOR_WIN_RATE, MIN_RECORD_GAMES  # noqa: E402
+from app.api.schemas import (  # noqa: E402
+    MIN_GAMES_FOR_WIN_RATE,
+    MIN_RECORD_GAMES,
+    TIER_ORDER,
+)
 
 # "Their usual role" needs enough positioned games to be a habit, and a share
 # big enough to be one role rather than a rotation. Measured over 712 players
@@ -263,6 +280,61 @@ class LobbyRank:
 
 
 @dataclass(slots=True)
+class SideRead:
+    """One side of the lobby, summed from what the other attachments found."""
+
+    team_id: int
+    median_points: int | None
+    tier: str | None
+    division: str | None
+    league_points: int | None
+    ranked: int
+    unranked: int
+    hidden: int
+    bots: int
+    unknown: int
+    # Tier boundaries between the searched player and this side's median. Valid
+    # everywhere, including across the apex boundary, which is why it exists.
+    tier_gap: int | None
+    # The `numeric_rank` difference, published only when both ends are below
+    # Master. Above it the scale is an ordinal with a 100,000 stride, so a
+    # subtraction is not a rank gap: a Diamond I against a Master median would
+    # otherwise read as "one point behind".
+    points_gap: int | None
+    gap_basis: str
+    # Lanes where the stored records favour this side, counted only over lanes
+    # that have a record at all.
+    lanes_favoured: int
+    # Players on a champion Riot's own mastery level calls barely played, and
+    # how many we could measure at all.
+    off_champion: int
+    off_champion_known: int
+    # Players out of the role they usually take, and the same denominator.
+    off_role: int
+    off_role_known: int
+
+
+@dataclass(slots=True)
+class LobbyCompare:
+    """The two sides beside each other.
+
+    **There is no win probability here, and there must not be one.** The site
+    holds no model that predicts a game, so a percentage would be the only
+    number on the page with nothing behind it. The second reason survives
+    somebody later fitting one: about a third of a lobby hides its identity,
+    that third is not missing at random, and a model whose inputs are missing
+    non-randomly cannot quote its own error.
+    """
+
+    sides: list[SideRead]
+    you_team_id: int | None
+    lanes_with_record: int
+    lanes_level: int
+    lanes_total: int
+    min_ranked_per_side: int
+
+
+@dataclass(slots=True)
 class LiveGame:
     game_id: int
     platform_id: str
@@ -290,6 +362,9 @@ class LiveGame:
     corpus_patch: str | None = None
     # Every patch the lane fallback was allowed to read, newest first.
     corpus_patches: list[str] = field(default_factory=list)
+    # The two sides beside each other. None off Summoner's Rift, where there is
+    # no pair of sides to compare.
+    sides: LobbyCompare | None = None
     # Which games the player records were counted over: this queue, or every
     # queue we hold. The crawl is nearly all solo queue, so scoping a flex lobby
     # to flex would blank ten cards for nothing.
@@ -504,6 +579,155 @@ def lobby_rank(participants: list[LiveParticipant], queue_id: int) -> LobbyRank:
     )
 
 
+def side_read(
+    participants: list[LiveParticipant], queue_id: int, you_puuid: str | None
+) -> LobbyCompare | None:
+    """The two sides of a lobby, side by side.
+
+    Pure: everything it needs was attached by the readers above, so this costs
+    no query and no Riot call. Only for a two sided game; Arena reports eight
+    teams of two and has no sides to compare.
+    """
+    by_team: dict[int, list[LiveParticipant]] = {}
+    for p in participants:
+        by_team.setdefault(p.team_id, []).append(p)
+    if len(by_team) != 2:
+        return None
+
+    you = next((p for p in participants if p.puuid and p.puuid == you_puuid), None)
+    your_entry = you.rank if you else None
+    sides = [_one_side(team_id, team, your_entry) for team_id, team in sorted(by_team.items())]
+
+    # Lane counting walks the blue side once: the two sides' records mirror each
+    # other, so counting both would double every lane.
+    favoured = {side.team_id: 0 for side in sides}
+    with_record = level = total = 0
+    blue_id = min(by_team)
+    for p in by_team[blue_id]:
+        if p.position is None:
+            continue
+        total += 1
+        record = p.lane_record
+        if record is None or record.games <= 0:
+            continue
+        with_record += 1
+        supported = _lane_edge(p)
+        if supported > 0:
+            favoured[p.team_id] += 1
+        elif supported < 0:
+            favoured[300 - p.team_id] += 1
+        else:
+            level += 1
+    for side in sides:
+        side.lanes_favoured = favoured[side.team_id]
+
+    return LobbyCompare(
+        sides=sides,
+        you_team_id=you.team_id if you else None,
+        lanes_with_record=with_record,
+        lanes_level=level,
+        lanes_total=total,
+        min_ranked_per_side=MIN_RANKED_PER_SIDE,
+    )
+
+
+def _lane_edge(p: LiveParticipant) -> float:
+    """How far this player's lane record is from level, in supported points.
+
+    Not a comparison against 50%: a 3-2 over five games is not a favoured lane.
+    `credible_lift` takes the record's own standard error off the claim, and the
+    baseline is the champion's own win rate in this role rather than a flat
+    half, so a 55% matchup for a champion who wins 55% everywhere reads as
+    level. The shrinkage follows the basis, so a team scope record has to be
+    bigger to say the same thing, which is what draft.py already does.
+    """
+    record = p.lane_record
+    if record is None or record.games <= 0:
+        return 0.0
+    base = 0.5
+    if p.champion_record is not None and p.champion_record.games > 0:
+        base = p.champion_record.wins / p.champion_record.games
+    shrinkage = TEAM_SHRINKAGE if record.basis == "team" else MATCHUP_SHRINKAGE
+    _, supported = credible_lift(record.wins / record.games, base, record.games, shrinkage)
+    return supported
+
+
+def _one_side(
+    team_id: int, team: list[LiveParticipant], your_entry: RankedEntry | None
+) -> SideRead:
+    ranked = [p.rank for p in team if p.state == "ranked" and p.rank and p.rank.tier]
+    counts = {"ranked": 0, "unranked": 0, "hidden": 0, "bots": 0, "unknown": 0}
+    for p in team:
+        if p.state == "bot":
+            counts["bots"] += 1
+        elif p.state == "hidden":
+            counts["hidden"] += 1
+        elif p.state == "unknown":
+            counts["unknown"] += 1
+        elif p.rank and p.rank.tier:
+            counts["ranked"] += 1
+        else:
+            counts["unranked"] += 1
+
+    median = median_entry(ranked) if len(ranked) >= MIN_RANKED_PER_SIDE else None
+    tier = median.tier if median else None
+    # Apex tiers carry no division, so repeating Riot's "I" would invent one.
+    division = median.division if median and tier not in APEX_TIER_NAMES else None
+    tier_gap, points_gap, gap_basis = _rank_gap(median, your_entry)
+
+    off_champion = off_champion_known = off_role = off_role_known = 0
+    for p in team:
+        # A player we could not look up enters neither the numerator nor the
+        # denominator: "we did not find out" is not "they have never played it".
+        if p.mastery_known:
+            off_champion_known += 1
+            if p.mastery is None or p.mastery.level <= LOW_MASTERY_LEVEL:
+                off_champion += 1
+        if p.record is not None and p.record.on_main_position is not None:
+            off_role_known += 1
+            if p.record.on_main_position is False:
+                off_role += 1
+
+    return SideRead(
+        team_id=team_id,
+        median_points=rank_points(median) if median else None,
+        tier=tier,
+        division=division,
+        league_points=median.league_points if median else None,
+        ranked=counts["ranked"],
+        unranked=counts["unranked"],
+        hidden=counts["hidden"],
+        bots=counts["bots"],
+        unknown=counts["unknown"],
+        tier_gap=tier_gap,
+        points_gap=points_gap,
+        gap_basis=gap_basis,
+        lanes_favoured=0,
+        off_champion=off_champion,
+        off_champion_known=off_champion_known,
+        off_role=off_role,
+        off_role_known=off_role_known,
+    )
+
+
+def _rank_gap(
+    median: RankedEntry | None, yours: RankedEntry | None
+) -> tuple[int | None, int | None, str]:
+    """The distance from the searched player to a side's median rank.
+
+    In tiers always, and in points only below Master. `numeric_rank` is an
+    ordinal scale with wildly unequal steps: one point separates Diamond I from
+    Master and the apex stride is 100,000, so subtracting across that boundary
+    produces a number that reads as "one point behind" for a whole tier.
+    """
+    if median is None or yours is None or not median.tier or not yours.tier:
+        return None, None, "withheld"
+    tier_gap = TIER_ORDER.index(median.tier) - TIER_ORDER.index(yours.tier)
+    if median.tier in APEX_TIER_NAMES or yours.tier in APEX_TIER_NAMES:
+        return tier_gap, None, "tiers_only"
+    return tier_gap, rank_points(median) - rank_points(yours), "points"
+
+
 class LiveGameService:
     def __init__(self, session, client: RiotClient, settings) -> None:
         self.session = session
@@ -597,6 +821,9 @@ class LiveGameService:
             record_queue_id=record_queue_id,
         )
         game.lobby_rank = lobby_rank(participants, game.queue_id)
+        # Pure arithmetic over what the readers above attached: no query, no
+        # Riot call, and nothing in it that predicts the game.
+        game.sides = side_read(participants, game.queue_id, puuid)
         return game
 
     async def _infer_positions(self, participants: list[LiveParticipant]) -> bool:

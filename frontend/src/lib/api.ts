@@ -171,6 +171,42 @@ export interface LobbyRank {
   queue_matches_game: boolean
 }
 
+/** One side of a live lobby, summed from what the lobby already shows. */
+export interface SideRead {
+  team_id: number
+  median_points: number | null
+  tier: string | null
+  division: string | null
+  league_points: number | null
+  ranked: number
+  unranked: number
+  hidden: number
+  bots: number
+  unknown: number
+  /** Tier boundaries from the searched player to this side's median. */
+  tier_gap: number | null
+  /** Only below Master, where the rank scale is uniform. */
+  points_gap: number | null
+  gap_basis: 'points' | 'tiers_only' | 'withheld'
+  lanes_favoured: number
+  off_champion: number
+  off_champion_known: number
+  off_role: number
+  off_role_known: number
+}
+
+/** The two sides beside each other. Carries no win probability and no verdict:
+ *  the site holds no model that predicts a game, and a third of every lobby
+ *  hides its identity in a way that is not missing at random. */
+export interface LobbyCompare {
+  sides: SideRead[]
+  you_team_id: number | null
+  lanes_with_record: number
+  lanes_level: number
+  lanes_total: number
+  min_ranked_per_side: number
+}
+
 export interface LiveGame {
   game_id: number
   platform_id: string
@@ -200,6 +236,8 @@ export interface LiveGame {
    *  all solo queue, so a flex lobby is counted over every queue and says so. */
   record_basis: 'queue' | 'all_queues'
   record_queue_id: number | null
+  /** Null off Summoner's Rift, where there are no two sides to compare. */
+  sides: LobbyCompare | null
 }
 
 /** The newest game Riftline holds for a player, for the page they see when they

@@ -42,7 +42,7 @@ export default function GameView({
         )}
       </header>
 
-      {game.lobby_rank && <LobbyBand lobby={game.lobby_rank} />}
+      <LobbyBand game={game} you={you} />
 
       {game.positions_inferred ? (
         <LaneView game={game} platform={platform} you={you} />

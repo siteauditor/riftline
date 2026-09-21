@@ -569,6 +569,51 @@ class LobbyRankOut(BaseModel):
     queue_matches_game: bool = True
 
 
+class SideReadOut(BaseModel):
+    """One side of a live lobby, summed from what the lobby already shows."""
+
+    team_id: int
+    median_points: int | None = None
+    tier: str | None = None
+    division: str | None = None
+    league_points: int | None = None
+    ranked: int = 0
+    unranked: int = 0
+    hidden: int = 0
+    bots: int = 0
+    unknown: int = 0
+    # Tier boundaries from the searched player to this side's median. Valid
+    # everywhere, which is why it exists beside the points gap.
+    tier_gap: int | None = None
+    # Published only when both ends are below Master: `numeric_rank` is ordinal
+    # with a 100,000 apex stride, so subtracting across that boundary would tell
+    # a Diamond I player they are one point behind a Master lobby.
+    points_gap: int | None = None
+    gap_basis: str = "withheld"
+    lanes_favoured: int = 0
+    off_champion: int = 0
+    off_champion_known: int = 0
+    off_role: int = 0
+    off_role_known: int = 0
+
+
+class LobbyCompareOut(BaseModel):
+    """The two sides beside each other.
+
+    Carries no win probability and no verdict, deliberately. The site holds no
+    model that predicts a game, so a percentage here would be the only number on
+    the page with nothing behind it, and about a third of a lobby hides its
+    identity, which is not a third missing at random.
+    """
+
+    sides: list[SideReadOut] = Field(default_factory=list)
+    you_team_id: int | None = None
+    lanes_with_record: int = 0
+    lanes_level: int = 0
+    lanes_total: int = 0
+    min_ranked_per_side: int = 3
+
+
 class LiveGameOut(BaseModel):
     game_id: int
     platform_id: str
@@ -597,6 +642,8 @@ class LiveGameOut(BaseModel):
     # Which games each player's own record was counted over.
     record_basis: str = "all_queues"
     record_queue_id: int | None = None
+    # The two sides beside each other. Null off Summoner's Rift.
+    sides: LobbyCompareOut | None = None
 
 
 class LastStoredGameOut(BaseModel):
@@ -1347,6 +1394,15 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
         corpus_patches=game.corpus_patches,
         record_basis=game.record_basis,
         record_queue_id=game.record_queue_id,
+        sides=(
+            LobbyCompareOut(
+                **{**dataclasses.asdict(game.sides), "sides": [
+                    SideReadOut(**dataclasses.asdict(side)) for side in game.sides.sides
+                ]}
+            )
+            if game.sides
+            else None
+        ),
         # asdict, not vars: LobbyRank is a slots dataclass and has no __dict__.
         lobby_rank=(
             LobbyRankOut(**dataclasses.asdict(game.lobby_rank))
