@@ -737,6 +737,18 @@ def _keystone(perks: dict | None) -> RuneRef | None:
         return None
 
 
+def _keystone_art(perks: dict | None, sd: StaticDataService) -> RuneRef | None:
+    """The keystone with its icon, for the surfaces that draw the rune.
+
+    `_keystone` returns the id alone. The scoreboard shows the rune next to the
+    champion, so a bare id renders as an empty circle, which is how it shipped.
+    """
+    rune = _keystone(perks)
+    if rune and rune.id:
+        rune.icon_url = sd.rune_icon(rune.id)
+    return rune
+
+
 def _secondary_tree(perks: dict | None) -> RuneRef | None:
     style = _style(perks, "subStyle", 1)
     try:
@@ -1310,7 +1322,7 @@ def to_match_detail(
                     for sid in (p.summoner1_id, p.summoner2_id)
                     if sid
                 ],
-                keystone=_keystone(p.perks),
+                keystone=_keystone_art(p.perks, sd),
                 score=p.performance_score,
                 placement=p.performance_rank,
                 badges=_badges_out(p, match),

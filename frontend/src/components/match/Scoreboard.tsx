@@ -6,6 +6,7 @@ import PositionIcon from '../PositionIcon'
 import { ErrorView, Spinner } from '../StateViews'
 import {
   api,
+  type ItemRef,
   type ScoreModel,
   type ScoreboardPlayer,
   type TeamObjectives,
@@ -101,7 +102,7 @@ export default function Scoreboard({
               </header>
 
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[620px] border-collapse text-xs">
+                <table className="w-full min-w-[780px] border-collapse text-xs">
                   <thead>
                     <tr className="text-[11px] text-ink-faint">
                       <th className="py-1 text-left font-500">Player</th>
@@ -116,6 +117,7 @@ export default function Scoreboard({
                       <th className="py-1 pl-2 text-right font-500">Taken</th>
                       <th className="py-1 pl-2 text-right font-500">CS</th>
                       <th className="py-1 pl-2 text-right font-500">Vis</th>
+                      <th className="py-1 pl-3 text-left font-500">Build</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -201,13 +203,36 @@ function Row({
                 alt={player.champion.name}
                 title={player.champion.name}
                 loading="lazy"
-                className="size-7 rounded-sm"
+                className="size-8"
               />
             )}
             <span className="tnum absolute -bottom-1 -right-1 rounded-full bg-deep px-1 text-[9px] font-600 text-ink-dim ring-1 ring-line">
               {player.champ_level}
             </span>
           </span>
+          {/* Spells and the keystone, the way the client shows a player: they
+              are how anyone tells a Smite jungler from a Teleport top before
+              reading a single number. */}
+          <span className="hidden shrink-0 flex-col gap-px sm:flex">
+            {player.spells.map((spell, i) => (
+              <img
+                key={`${spell.id}-${i}`}
+                src={spell.icon_url ?? undefined}
+                alt=""
+                title={spell.name ?? ''}
+                loading="lazy"
+                className="size-[15px] bg-raised"
+              />
+            ))}
+          </span>
+          {player.keystone?.icon_url && (
+            <img
+              src={player.keystone.icon_url}
+              alt=""
+              loading="lazy"
+              className="hidden size-[17px] shrink-0 rounded-full bg-raised sm:block"
+            />
+          )}
           <PositionIcon
             position={player.position}
             className="size-3.5 shrink-0 text-ink-faint"
@@ -290,7 +315,47 @@ function Row({
       >
         {player.vision_score}
       </td>
+
+      <td className="py-1.5 pl-3">
+        <Build items={player.items} trinket={player.trinket} />
+      </td>
     </tr>
+  )
+}
+
+/**
+ * The six item slots and the trinket.
+ *
+ * Empty slots are drawn rather than skipped: a four-item build at forty minutes
+ * is a fact about the game, and a row of four icons hides it. The trinket is
+ * round, as it is in the client.
+ */
+function Build({ items, trinket }: { items: ItemRef[]; trinket: ItemRef | null }) {
+  const slots = [...items.slice(0, 6), ...Array(Math.max(0, 6 - items.length)).fill(null)]
+  return (
+    <span className="flex gap-px">
+      {slots.map((item: ItemRef | null, i: number) => (
+        <span
+          key={i}
+          title={item?.name ?? ''}
+          className={`size-[22px] shrink-0 overflow-hidden bg-raised/60 ${
+            item ? '' : 'border border-line-soft bg-transparent'
+          }`}
+        >
+          {item?.icon_url && (
+            <img src={item.icon_url} alt={item.name ?? ''} loading="lazy" className="size-full" />
+          )}
+        </span>
+      ))}
+      <span
+        title={trinket?.name ?? ''}
+        className="ml-0.5 size-[22px] shrink-0 overflow-hidden rounded-full bg-raised/60"
+      >
+        {trinket?.icon_url && (
+          <img src={trinket.icon_url} alt="" loading="lazy" className="size-full" />
+        )}
+      </span>
+    </span>
   )
 }
 

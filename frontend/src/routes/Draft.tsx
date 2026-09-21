@@ -440,6 +440,11 @@ function SuggestionRow({ suggestion: s, place }: { suggestion: DraftSuggestion; 
   // do not add up to the total. Saying so beats letting the reader check.
   const uncapped = part('lane') + part('enemy') + part('ally')
   const capped = Math.abs(uncapped - s.context_lift) > 0.0005
+  // With nothing locked in there is no breakdown yet: the reason line and the
+  // parts line both read "baseline over N games", which the games count on the
+  // right has already said. Three copies of one fact is what made an opening
+  // list of fifteen rows look like a form rather than a ranking.
+  const bare = parts.length === 1 && s.reasons.length === 1
 
   return (
     <li className="border-b border-line-soft px-1 py-2.5 lift">
@@ -471,12 +476,14 @@ function SuggestionRow({ suggestion: s, place }: { suggestion: DraftSuggestion; 
               </p>
             )}
           </div>
-          <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
-            {s.reasons.map((r, j) => (
-              <li key={j}>{r}</li>
-            ))}
-          </ul>
-          <p className="mt-1 flex flex-wrap gap-x-2.5 gap-y-1 text-[11px]">
+          {!bare && (
+            <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
+              {s.reasons.map((r, j) => (
+                <li key={j}>{r}</li>
+              ))}
+            </ul>
+          )}
+          <p className={`${bare ? 'hidden' : 'mt-1 flex'} flex-wrap gap-x-2.5 gap-y-1 text-[11px]`}>
             {parts.map((p) => (
               <span key={p.label} title={p.title} className="text-ink-faint">
                 {p.label}{' '}
@@ -500,11 +507,51 @@ function SuggestionRow({ suggestion: s, place }: { suggestion: DraftSuggestion; 
           </p>
         </div>
         <div className="shrink-0 text-right text-xs text-ink-faint">
+          <ScoreBar score={s.score} />
           <p className="tnum">{compact(s.games)} games</p>
           {s.mastery_points > 0 && <p className="tnum">{compact(s.mastery_points)} pts</p>}
         </div>
       </div>
     </li>
+  )
+}
+
+/**
+ * Where this pick sits against an even game.
+ *
+ * The scale is fixed at 40 to 60 so two rows can be compared by eye, and the
+ * tick is 50. Most rows sit left of it, which is not a bug: the list is ranked
+ * on the low end of what each record supports, and a lower bound is below the
+ * rate it came from. The bar is the one place that is visible at a glance
+ * rather than in a tooltip.
+ */
+const BAR_LOW = 0.4
+const BAR_HIGH = 0.6
+
+function ScoreBar({ score }: { score: number }) {
+  const place = (v: number) =>
+    ((Math.min(Math.max(v, BAR_LOW), BAR_HIGH) - BAR_LOW) / (BAR_HIGH - BAR_LOW)) * 100
+  const even = place(0.5)
+  const here = place(score)
+  const winning = score >= 0.5
+  return (
+    <span
+      className="relative mb-1.5 hidden h-1.5 w-36 bg-raised sm:block"
+      title={`${pct(score, 1)} is what this pick's records support. The bar runs 40 to 60%.`}
+      aria-hidden
+    >
+      <span
+        className="absolute inset-y-0"
+        style={{
+          left: `${Math.min(even, here)}%`,
+          width: `${Math.max(Math.abs(here - even), 1)}%`,
+          background: winning
+            ? 'var(--color-gold-bright)'
+            : 'color-mix(in srgb, var(--color-ink-dim) 70%, transparent)',
+        }}
+      />
+      <span className="absolute -inset-y-[3px] w-px bg-ink-faint" style={{ left: `${even}%` }} />
+    </span>
   )
 }
 

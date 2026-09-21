@@ -14,10 +14,10 @@ interface PlayerKey {
 /**
  * A ranked queue at a glance.
  *
- * No emblem art: the tier's own colour does the identifying work, which keeps
- * the card readable at any size and avoids depending on scraped Riot assets.
- * The win/loss bar is the honest version of a win rate -- it shows sample size
- * and split in the same object.
+ * This is the one place a rank is the subject rather than a label, so it gets
+ * Riot's full emblem at the size it was drawn for, with the tier's colour on
+ * the type and the rule. The win/loss bar is the honest version of a win rate:
+ * it shows sample size and split in the same object.
  */
 export default function RankCard({
   rank,

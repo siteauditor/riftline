@@ -1,12 +1,12 @@
 import { tierColor, tierLabel } from '../lib/format'
+import { crestUrl } from '../lib/rankArt'
 
 /**
  * A rank as a small inline pill.
  *
  * `RankCard` is the big version on a profile; this is the one that goes in a
- * roster row or beside a match. No emblem art, for the reason `RankCard` already
- * records: the tier colour identifies it at any size and we avoid depending on
- * scraped Riot assets.
+ * roster row or beside a match, so it carries Riot's mini crest rather than the
+ * full emblem: 2 KB of SVG, and the shape is what players read first.
  *
  * Four states, not two, and the extra two are the point. A player who hid their
  * identity is not unranked, and a lookup that did not finish is not unranked
@@ -80,12 +80,19 @@ export default function RankBadge({
           ? `${tierLabel(tier, division)}, ${leaguePoints.toLocaleString()} LP`
           : tierLabel(tier, division))
       }
-      className={`tnum inline-flex shrink-0 items-center gap-1 rounded-sm ${pad} font-600`}
+      className={`tnum inline-flex shrink-0 items-center gap-1 ${pad} font-600`}
       style={{
         color: colour,
         background: `color-mix(in srgb, ${colour} 14%, transparent)`,
       }}
     >
+      <img
+        src={crestUrl(tier)}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        className={size === 'sm' ? 'size-3.5' : 'size-4'}
+      />
       {tierLabel(tier, division)}
       {showLp && leaguePoints != null && (
         <span className="font-500 opacity-70">{leaguePoints.toLocaleString()} LP</span>

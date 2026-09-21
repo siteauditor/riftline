@@ -32,9 +32,14 @@ export default function Match() {
   })
 
   // Read before the loading and error branches: a hook cannot run only
-  // sometimes. The subject is the player the link named, so the art is theirs.
+  // sometimes. The art is the named player's champion, and with nobody named
+  // it is the best game in the lobby: a scoreboard reached from anywhere else
+  // is still about somebody, and a header with no art on a page that has ten
+  // champions in it looks like the art failed to load.
+  const everyone = query.data?.teams.flat() ?? []
+  const best = [...everyone].sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99))[0]
   const heroArt = useChampionArt(
-    query.data?.teams.flat().find((p) => p.puuid === subjectPuuid)?.champion.id,
+    (everyone.find((p) => p.puuid === subjectPuuid) ?? best)?.champion.id,
   )
 
   if (query.isLoading) {
@@ -64,62 +69,62 @@ export default function Match() {
   return (
     <div>
       <ArtHeader art={heroArt}>
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <h1 className="display text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
-            {subject && riotId ? (
-              <>
-                <Link
-                  to={`/summoner/${platform}/${encodeURIComponent(riotId.name)}/${encodeURIComponent(riotId.tag)}`}
-                  className="transition-colors hover:text-gold-bright"
-                >
-                  {riotId.name}
-                </Link>{' '}
-                <span className="text-ink-dim">on {subject.champion.name}</span>
-              </>
-            ) : (
-              detail.queue_name
-            )}
-          </h1>
-          <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-dim">
-            {subject?.position && (
-              <span className="inline-flex items-center gap-1">
-                <PositionIcon position={subject.position} className="size-4" />
-                {positionLabel(subject.position)}
-              </span>
-            )}
-            {subject && (
-              <span className={subject.win ? 'text-win' : 'text-loss'}>
-                {subject.win ? 'Win' : 'Loss'}
-              </span>
-            )}
-            {subject && <span>{detail.queue_name}</span>}
-            <span>{played}</span>
-            <span className="tnum">{duration(detail.game_duration)}</span>
-            {detail.patch && <span>Patch {detail.patch}</span>}
-          </p>
-        </div>
-
-        {subject?.score != null && (
-          <div className="text-right">
-            <span
-              className="tnum display block text-5xl font-700 leading-none"
-              style={{ color: scoreColor(subject.score) }}
-            >
-              {subject.score.toFixed(1)}
-            </span>
-            <span className="mt-1 block text-xs text-ink-faint">
-              Riftline score
-              {subject.placement != null && `, ${ordinal(subject.placement)} of 10`}
-            </span>
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0">
+            <h1 className="display text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
+              {subject && riotId ? (
+                <>
+                  <Link
+                    to={`/summoner/${platform}/${encodeURIComponent(riotId.name)}/${encodeURIComponent(riotId.tag)}`}
+                    className="transition-colors hover:text-gold-bright"
+                  >
+                    {riotId.name}
+                  </Link>{' '}
+                  <span className="text-ink-dim">on {subject.champion.name}</span>
+                </>
+              ) : (
+                detail.queue_name
+              )}
+            </h1>
+            <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-ink-dim">
+              {subject?.position && (
+                <span className="inline-flex items-center gap-1">
+                  <PositionIcon position={subject.position} className="size-4" />
+                  {positionLabel(subject.position)}
+                </span>
+              )}
+              {subject && (
+                <span className={subject.win ? 'text-win' : 'text-loss'}>
+                  {subject.win ? 'Win' : 'Loss'}
+                </span>
+              )}
+              {subject && <span>{detail.queue_name}</span>}
+              <span>{played}</span>
+              <span className="tnum">{duration(detail.game_duration)}</span>
+              {detail.patch && <span>Patch {detail.patch}</span>}
+            </p>
           </div>
-        )}
-      </div>
+
+          {subject?.score != null && (
+            <div className="text-right">
+              <span
+                className="tnum display block text-5xl font-700 leading-none"
+                style={{ color: scoreColor(subject.score) }}
+              >
+                {subject.score.toFixed(1)}
+              </span>
+              <span className="mt-1 block text-xs text-ink-faint">
+                Riftline score
+                {subject.placement != null && `, ${ordinal(subject.placement)} of 10`}
+              </span>
+            </div>
+          )}
+        </div>
       </ArtHeader>
 
       <div className="mx-auto max-w-[1280px] px-4 py-6">
-      <div className="frame">
-        <Scoreboard matchId={matchId} subjectPuuid={subjectPuuid} platform={platform} />
+        <div className="frame">
+          <Scoreboard matchId={matchId} subjectPuuid={subjectPuuid} platform={platform} />
       </div>
       </div>
     </div>
