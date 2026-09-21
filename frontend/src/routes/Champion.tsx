@@ -150,7 +150,7 @@ export default function Champion() {
           </div>
 
           {o && (
-            <dl className="flex flex-wrap items-end gap-x-7 gap-y-3 lg:ml-auto">
+            <dl className="flex flex-wrap items-end gap-x-7 gap-y-5 lg:ml-auto">
               <Stat label="Adjusted" value={pct(o.confidence_win_rate, 1)} accent />
               <Stat
                 label="Win rate"
@@ -340,7 +340,10 @@ function Stat({
   change?: Change
 }) {
   return (
-    <div>
+    // Relative, so a change note hangs below the figure instead of pushing it
+    // up: the row is bottom aligned, and one taller cell lifted its number
+    // above every other number in the row.
+    <div className="relative">
       <dt className="text-[11px] text-ink-dim">{label}</dt>
       <dd
         className={`tnum display mt-0.5 text-[26px] font-700 ${
@@ -350,7 +353,11 @@ function Stat({
         {value}
       </dd>
       {moved && (
-        <dd className="tnum -mt-0.5 text-[11px]" style={{ color: moved.color }} title={moved.title}>
+        <dd
+          className="tnum absolute left-0 top-full whitespace-nowrap text-[11px]"
+          style={{ color: moved.color }}
+          title={moved.title}
+        >
           {moved.text}
         </dd>
       )}
