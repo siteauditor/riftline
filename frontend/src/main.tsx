@@ -18,6 +18,10 @@ import Items from './routes/Items'
 import Leaderboard from './routes/Leaderboard'
 import Match from './routes/Match'
 import Method from './routes/Method'
+import Score from './routes/method/Score'
+import WinChance from './routes/method/WinChance'
+import DeathReview from './routes/method/DeathReview'
+import LaneLabels from './routes/method/LaneLabels'
 import Groups from './routes/Groups'
 import Group from './routes/Group'
 import NotFound, { RouteError } from './routes/NotFound'
@@ -80,6 +84,10 @@ const router = createBrowserRouter([
       { path: 'items/:itemId', element: <Item /> },
       { path: 'match/:matchId', element: <Match /> },
       { path: 'method', element: <Method /> },
+      { path: 'method/score', element: <Score /> },
+      { path: 'method/win-chance', element: <WinChance /> },
+      { path: 'method/death-review', element: <DeathReview /> },
+      { path: 'method/lane-labels', element: <LaneLabels /> },
       { path: 'groups', element: <Groups /> },
       { path: 'g/:slug', element: <Group /> },
       // nginx serves index.html for every path it does not recognise, so the

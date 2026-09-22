@@ -10,6 +10,8 @@ export interface ChampionRef {
   id: number
   name: string
   icon_url: string | null
+  /** The name as a URL: "aatrox", "kaisa", "wukong". Links prefer it to the id. */
+  slug?: string
 }
 
 export interface ItemRef {
@@ -1087,6 +1089,8 @@ export interface ItemFigures {
 export interface ItemDetail {
   id: number
   name: string
+  /** The name as a URL, with the id appended where two items share a name. */
+  slug?: string
   icon_url: string | null
   plaintext: string
   cost: number

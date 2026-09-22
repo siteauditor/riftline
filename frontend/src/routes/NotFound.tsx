@@ -1,5 +1,7 @@
 import { Link, isRouteErrorResponse, useLocation, useRouteError } from 'react-router-dom'
+import { heads } from '../lib/seo'
 
+import Head from '../components/Head'
 import SearchBar from '../components/SearchBar'
 import { PRODUCT_NAME } from '../App'
 
@@ -25,6 +27,7 @@ export default function NotFound() {
 
   return (
     <div className="mx-auto max-w-[1280px] px-4 py-16">
+      <Head {...heads.notFound()} />
       <p className="font-display text-sm font-600 tracking-wide text-gold">404</p>
       <h1 className="display mt-2 text-3xl font-800 text-ink sm:text-4xl">
         There is no page at that address.

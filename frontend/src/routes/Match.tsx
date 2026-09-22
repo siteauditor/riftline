@@ -2,11 +2,13 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import Scoreboard from '../components/match/Scoreboard'
 import StorySection from '../components/story/StorySection'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { api } from '../lib/api'
+import { heads } from '../lib/seo'
 import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../lib/format'
 import { useChampionArt } from '../lib/useChampionArt'
 
@@ -69,6 +71,12 @@ export default function Match() {
 
   return (
     <div>
+      <Head
+        {...heads.match(
+          matchId,
+          subject ? `${subject.champion.name}${subject.riot_id ? ` (${subject.riot_id})` : ''} in a ${detail.queue_name} game` : null,
+        )}
+      />
       <ArtHeader art={heroArt}>
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
           <div className="min-w-0">

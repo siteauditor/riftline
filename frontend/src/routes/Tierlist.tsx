@@ -3,11 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
 import { api, type ChampionMetaRow, type MetaResponse } from '../lib/api'
+import { heads } from '../lib/seo'
 import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
 import {
   foldName,
@@ -137,6 +139,7 @@ export default function Tierlist() {
 
   return (
     <div>
+      <Head {...heads.tierlist(meta.data?.patch, queueName)} />
       <ArtHeader art={heroArt}>
         <p className="eyebrow">
           {meta.data

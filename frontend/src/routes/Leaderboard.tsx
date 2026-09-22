@@ -3,7 +3,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { PLATFORMS, api, type LeaderboardResponse } from '../lib/api'
+import { heads } from '../lib/seo'
 import Crest from '../components/Crest'
+import Head from '../components/Head'
 import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
@@ -171,6 +173,7 @@ export default function Leaderboard() {
       className="mx-auto max-w-[1060px] space-y-5 px-4 py-6"
       style={{ '--accent': accent } as CSSProperties}
     >
+      <Head {...heads.leaderboards(regionLabel, tier, isApex ? null : division, queueLabel)} />
       <header className="flex items-center gap-4">
         {/* The ladder's own emblem: on this page the rank is the subject.
             Hidden below sm, where 128px of emblem above a 32px headline would

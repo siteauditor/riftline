@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import ChampionPicker from '../components/ChampionPicker'
 import PositionIcon from '../components/PositionIcon'
 import { EmptyState, ErrorView } from '../components/StateViews'
@@ -16,6 +17,7 @@ import {
   type DraftSuggestion,
 } from '../lib/api'
 import { compact, parseRiotId, pct, positionLabel } from '../lib/format'
+import { heads } from '../lib/seo'
 import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
 import { useChampionArt } from '../lib/useChampionArt'
 import { useDebounced } from '../lib/useDebounced'
@@ -123,6 +125,7 @@ export default function Draft() {
 
   return (
     <div>
+      <Head {...heads.draft()} />
       <ArtHeader art={heroArt}>
         <p className="eyebrow">{positionLabel(position)} · pick phase</p>
         <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">

@@ -2,6 +2,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import SliceFilters, { type SliceValue } from '../components/SliceFilters'
 import { ErrorView, Spinner } from '../components/StateViews'
 import ItemChampions from '../components/items/ItemChampions'
@@ -11,7 +12,9 @@ import RecipeTree from '../components/items/RecipeTree'
 import { points } from '../components/items/groups'
 import { api, type ItemDetail, type ItemFigures } from '../lib/api'
 import { compact, pct } from '../lib/format'
+import { itemSummary } from '../lib/prose'
 import { sliceFromParams, sliceLink, sliceParams, withParams } from '../lib/searchParams'
+import { heads } from '../lib/seo'
 
 export default function Item() {
   const { itemId = '' } = useParams()
@@ -56,8 +59,11 @@ export default function Item() {
   // Figures exist for items sold on the Rift and bought as themselves.
   const measurable = item.on_rift && item.group !== 'transformed'
 
+  const summary = itemSummary(item)
+
   return (
     <div>
+      <Head {...heads.item(item, figures?.patch)} />
       <ArtHeader>
         <div className="flex items-end gap-5">
           {item.icon_url && (
@@ -81,6 +87,17 @@ export default function Item() {
       </ArtHeader>
 
       <div className="mx-auto max-w-[1280px] px-4 py-6">
+        {/* The figures in sentences, from the figures themselves. */}
+        {measurable && summary.length > 0 && (
+          <section aria-label={`${item.name} in brief`} className="mb-6 max-w-prose space-y-2 text-sm leading-relaxed text-ink-dim">
+            {summary.map((sentence, i) => (
+              <p key={i} className={i === 0 ? 'text-ink' : undefined}>
+                {sentence}
+              </p>
+            ))}
+          </section>
+        )}
+
         {measurable && (
           <SliceFilters
             value={{ ...slice, position: null, minGames: 1 }}

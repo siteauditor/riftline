@@ -5,20 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#05070a" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <!--
+      The site-wide defaults. Every page replaces these at render with its own
+      title, description, canonical and card (see src/lib/head.ts), and the
+      prerenderer writes each page's tags in their place; the shell keeps the
+      defaults for whatever is not a page.
+    -->
     <meta
       name="description"
       content="Look up any League of Legends player: rank, match history and champion mastery."
+      data-head="description"
     />
+    <meta property="og:site_name" content="Riftline" data-head="og:site_name" />
+    <meta property="og:type" content="website" data-head="og:type" />
+    <meta property="og:title" content="Riftline" data-head="og:title" />
+    <meta
+      property="og:description"
+      content="League of Legends stats with the working shown: a performance score per game, the moments that decided it, a tier list and an item guide."
+      data-head="og:description"
+    />
+    <meta property="og:image" content="https://riftline.rhasta.space/og-default.png" data-head="og:image" />
+    <meta name="twitter:card" content="summary_large_image" data-head="twitter:card" />
+    <!--app-head-->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <title>Riftline</title>
+    <title data-head="title">Riftline</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><!--app-html--></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

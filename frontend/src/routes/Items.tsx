@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import { ErrorView, Spinner } from '../components/StateViews'
 import {
   isStatFilterKey,
@@ -11,6 +12,7 @@ import {
   type StatFilterKey,
 } from '../components/items/groups'
 import { api, type ItemSummary } from '../lib/api'
+import { heads } from '../lib/seo'
 import { pct } from '../lib/format'
 import { foldName, useSearchText, withParams } from '../lib/searchParams'
 
@@ -53,6 +55,7 @@ export default function Items() {
 
   return (
     <div>
+      <Head {...heads.items(list.data?.patch)} />
       <ArtHeader>
         <p className="eyebrow">
           {list.data?.patch ? `Patch ${list.data.patch}, ranked solo` : "Summoner's Rift"}

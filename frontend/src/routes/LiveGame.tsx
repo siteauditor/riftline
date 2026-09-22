@@ -3,7 +3,9 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, type LiveGame } from '../lib/api'
+import { heads } from '../lib/seo'
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import GameView from '../components/live/GameView'
 import IdleView from '../components/live/IdleView'
 import PollClock from '../components/live/PollClock'
@@ -91,6 +93,7 @@ export default function LiveGamePage() {
     <div>
       {/* The same header the other two tabs carry. Without it this page was a
           strip of tabs and an empty box, with nothing saying whose it was. */}
+      <Head {...heads.profileTab(`${name}#${tag}`, platform, 'live')} />
       <ArtHeader art={heroArt}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <div className="min-w-0">

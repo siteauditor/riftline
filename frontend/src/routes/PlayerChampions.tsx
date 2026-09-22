@@ -3,10 +3,12 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import { api, type ChampionPlayed } from '../lib/api'
+import { heads } from '../lib/seo'
 import {
   kdaColor,
   pct,
@@ -114,6 +116,7 @@ export default function PlayerChampions() {
 
   return (
     <div>
+      <Head {...heads.profileTab(`${name}#${tag}`, platform, 'champions')} />
       <ArtHeader art={heroArt}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <div className="min-w-0">

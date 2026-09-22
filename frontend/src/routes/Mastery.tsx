@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import ProfileTabs from '../components/ProfileTabs'
 import BandSection from '../components/mastery/BandSection'
 import ChampionDetail from '../components/mastery/ChampionDetail'
@@ -11,6 +12,7 @@ import { LEGEND_STEPS } from '../components/mastery/scale'
 import { Stat, StatCell, StatStrip } from '../components/Stat'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import { api } from '../lib/api'
+import { heads } from '../lib/seo'
 import { compact, pct, timeAgo } from '../lib/format'
 import { foldName, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
@@ -80,6 +82,7 @@ export default function Mastery() {
 
   const header = (
     <ArtHeader art={heroArt}>
+      <Head {...heads.profileTab(`${name}#${tag}`, platform, 'mastery')} />
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <div className="min-w-0">
           <p className="eyebrow">Champion mastery</p>

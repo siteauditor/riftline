@@ -3,9 +3,11 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'reac
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, api, type GroupWarm } from '../lib/api'
+import { heads } from '../lib/seo'
 import { forgetGroup, keyInHash, rememberGroup, useSavedGroups, viewLink } from '../lib/groups'
 import { withParams } from '../lib/searchParams'
 import CopyButton from '../components/group/CopyButton'
+import Head from '../components/Head'
 import EditPanel from '../components/group/EditPanel'
 import MemberTable from '../components/group/MemberTable'
 import { SORT_KEYS, sortMembers, type SortKey } from '../components/group/sorting'
@@ -51,16 +53,6 @@ function GroupPage({ slug }: { slug: string }) {
     navigate({ pathname: location.pathname, search: location.search }, { replace: true })
   }, [slug, addressKey, navigate, location.pathname, location.search])
 
-  // A group is a list of people shared by link: not for search engines.
-  // nginx sends the same as a header; this covers a crawler that renders.
-  useEffect(() => {
-    const meta = document.createElement('meta')
-    meta.name = 'robots'
-    meta.content = 'noindex, nofollow'
-    document.head.appendChild(meta)
-    return () => meta.remove()
-  }, [])
-
   const queue = search.get('queue') ?? 'all'
   const sortParam = search.get('sort') as SortKey | null
   const sort: SortKey = sortParam && SORT_KEYS.includes(sortParam) ? sortParam : 'rank'
@@ -81,15 +73,6 @@ function GroupPage({ slug }: { slug: string }) {
   useEffect(() => {
     if (name) rememberGroup({ slug, name })
   }, [slug, name])
-
-  useEffect(() => {
-    if (!name) return
-    const before = document.title
-    document.title = `${name} | Riftline`
-    return () => {
-      document.title = before
-    }
-  }, [name])
 
   // The warming loop: one pass, then the table again, then the next pass. It
   // runs in a background tab too, because the page says it keeps fetching
@@ -201,6 +184,9 @@ function GroupPage({ slug }: { slug: string }) {
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-6 px-4 py-6">
+      {/* A group is a list of people shared by link: not for search engines.
+          nginx sends the same as a header; this covers a crawler that renders. */}
+      <Head {...heads.group(data.name, slug)} />
       <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0">
           <p className="eyebrow">

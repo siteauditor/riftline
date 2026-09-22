@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 
+import Head from '../components/Head'
 import { api } from '../lib/api'
+import { heads } from '../lib/seo'
 import { timeAgo } from '../lib/format'
 import { forgetGroup, rememberGroup, useSavedGroups } from '../lib/groups'
 
@@ -27,6 +29,7 @@ export default function Groups() {
 
   return (
     <div className="mx-auto max-w-[860px] space-y-8 px-4 py-8">
+      <Head {...heads.groups()} />
       <header>
         <p className="eyebrow">Groups</p>
         <h1 className="display mt-1 text-[clamp(2rem,5vw,3rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">

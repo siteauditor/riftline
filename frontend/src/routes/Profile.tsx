@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import Crest from '../components/Crest'
 import FormStrip from '../components/FormStrip'
 import MatchRow from '../components/MatchRow'
@@ -15,6 +16,7 @@ import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
 import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
+import { heads } from '../lib/seo'
 import { useMatchHistory } from '../lib/useMatchHistory'
 import {
   compact,
@@ -197,6 +199,13 @@ export default function Profile() {
 
   return (
     <div style={{ '--accent': accent } as CSSProperties}>
+      <Head
+        {...heads.profile(
+          profile.riot_id,
+          platform,
+          headline ? tierLabel(headline.tier, headline.division) : null,
+        )}
+      />
       {/*
         A band, not a card. The rule on the left is the subject's own rank
         colour, which is the redesign's one repeated motif: a Challenger reads

@@ -1,6 +1,7 @@
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import Head from '../components/Head'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import AbilitiesPanel from '../components/champion/AbilitiesPanel'
@@ -15,6 +16,8 @@ import StoryPanel from '../components/champion/StoryPanel'
 import { parseTab, type ChampionTab } from '../components/champion/tabs'
 import { api, POSITIONS, type ChampionDetail, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
+import { championSummary } from '../lib/prose'
+import { heads } from '../lib/seo'
 import {
   SLICE_DEFAULTS,
   sliceFromParams,
@@ -119,6 +122,7 @@ export default function Champion() {
 
   return (
     <div>
+      <Head {...heads.champion(info, d?.patch, d?.position, d?.overview.games)} />
       {/*
         The hero. One image per page, full strength, and the only place on the
         site where art is allowed to be the loudest thing. The scrim resolves to
@@ -178,6 +182,19 @@ export default function Champion() {
       </header>
 
       <div className="mx-auto max-w-[1280px] px-4 py-5">
+        {/* What the numbers say, in sentences, from the numbers themselves:
+            for the reader who does not know the game, and for anything that
+            reads the page without clicking a tab. */}
+        {d && (
+          <section aria-label={`${info.name} in brief`} className="max-w-prose space-y-2 text-sm leading-relaxed text-ink-dim">
+            {championSummary(d, profile).map((sentence, i) => (
+              <p key={i} className={i === 0 ? 'text-ink' : undefined}>
+                {sentence}
+              </p>
+            ))}
+          </section>
+        )}
+
         {/* Slice controls. Shown on a patch with no numbers too, because the
             way out of that page is to pick another patch. */}
         <div className="mt-4">

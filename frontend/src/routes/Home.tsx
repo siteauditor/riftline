@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
+import Head from '../components/Head'
 import MostWornSkins from '../components/MostWornSkins'
 import PositionIcon from '../components/PositionIcon'
 import SearchBar from '../components/SearchBar'
@@ -22,6 +23,7 @@ import {
   winRateColor,
 } from '../lib/format'
 import { clearRecentSearches, useRecentSearches } from '../lib/storage'
+import { heads } from '../lib/seo'
 
 // Two accounts with a real history behind them. The previous EUW example was
 // `Caps#EUW`, which resolves to an unranked level 31 with no games: the first
@@ -79,6 +81,7 @@ export default function Home() {
 
   return (
     <div>
+      <Head {...heads.home()} />
       <ArtHeader art={heroArt} tall>
         <div className="pb-2 pt-6 sm:pt-10">
           {/* Broken by hand. Left to a measure, the rag landed on "read at /
