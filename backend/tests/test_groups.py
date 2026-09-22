@@ -610,3 +610,39 @@ async def test_one_players_failure_does_not_stop_the_pass(client, cap):
     assert response.status_code == 200
     assert response.json()["pending"] == 1, "only the broken player is left"
     assert "EUW1_9510000001" in riot.fetched
+
+
+@respx.mock
+async def test_a_short_pass_spends_its_calls_on_whoever_has_read_least(client, cap, monkeypatch):
+    """Plain round-robin was unfair: most passes end part way through a round,
+    so the player listed first got nearly every call."""
+    cap(10)
+    monkeypatch.setattr(groups_service, "CHUNK", 2)
+    riot = FakeRiot()
+    riot.install()
+    ahead, behind = puuid_for("Read Ahead"), puuid_for("Read Behind")
+    for n in range(4):
+        riot.add_game(game(f"EUW1_9511{n:06d}", {ahead: 100}, hours_ago=3 + n))
+        riot.add_game(game(f"EUW1_9512{n:06d}", {behind: 200}, hours_ago=3 + n))
+    slug, key = await make_group(client)
+    await add(client, slug, key, "Read Ahead#EUW")
+    await add(client, slug, key, "Read Behind#EUW")
+
+    from app.main import app
+
+    async with SessionLocal() as session:
+        # The first player is nearly done, the second has read nothing.
+        now_s = int(time.time())
+        session.add(HistoryCursor(puuid=ahead, until_s=now_s, offset=8, since_s=now_s))
+        session.add(HistoryCursor(puuid=behind, until_s=now_s, offset=0, since_s=now_s))
+        await session.commit()
+        # Two ranks, two lists of new games, then one history chunk: seven.
+        budget = Budget(app.state.riot.limiter, calls=7)
+        warmer = Warmer(session, app.state.riot, get_settings(), budget)
+        await warmer.run([WarmTarget(ahead, "euw1"), WarmTarget(behind, "euw1")])
+
+    assert budget.stopped == "calls"
+    assert riot.fetched, "the pass fetched something"
+    assert all(m.startswith("EUW1_9512") for m in riot.fetched), (
+        f"the calls went to the player who had read least: {riot.fetched}"
+    )

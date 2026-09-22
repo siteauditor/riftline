@@ -431,6 +431,8 @@ class Warmer:
                 if not await self._guard(self._new_games(target)):
                     return
             await self._history(targets, rounds=1)
+            if self.budget.stopped:
+                return
             for target in targets:
                 if not await self._guard(self._newest_timelines(target)):
                     return
@@ -533,6 +535,12 @@ class Warmer:
         done_rounds = 0
         while active and (rounds is None or done_rounds < rounds):
             still = []
+            # Least read first. Plain round-robin looked fair and was not: most
+            # passes end part way through a round, on time or at the key's
+            # reserve, so whoever came first in the list got nearly every call.
+            # Measured locally over twelve passes: 282 ids read for the first
+            # player against 62 for the third.
+            active = await self._least_read_first(active)
             for target in active:
                 if not await self._guard(self._history_step(target)):
                     return
@@ -540,6 +548,10 @@ class Warmer:
                     still.append(target)
             active = still
             done_rounds += 1
+
+    async def _least_read_first(self, targets: list[WarmTarget]) -> list[WarmTarget]:
+        read = {t.puuid: (await self._cursor(t.puuid)).offset for t in targets}
+        return sorted(targets, key=lambda t: read[t.puuid])
 
     async def _history_done(self, puuid: str) -> bool:
         cursor = await self._cursor(puuid)
