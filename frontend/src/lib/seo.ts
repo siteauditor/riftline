@@ -42,6 +42,9 @@ export function article(head: { title: string; description: string; path: string
     headline: head.title,
     description: head.description,
     mainEntityOfPage: canonicalUrl(head.path),
+    // Recommended for Article; without it the Rich Results Test reports a
+    // non-critical issue on every explainer.
+    image: [`${ORIGIN}/og-default.png`],
     author: ORGANISATION,
     publisher: ORGANISATION,
     ...(modified ? { dateModified: modified } : {}),
@@ -113,9 +116,12 @@ export const heads = {
     const path = `/items/${item.slug ?? item.id}`
     return {
       title: titled(`${item.name}: win rate, build timing and who buys it${patch ? `, patch ${patch}` : ''}`),
+      // Riot's plaintext ends in a full stop on some items and not others,
+      // so the one we add would double it ("...for a short time.. How often").
       description:
-        `${item.name}${item.plaintext ? `: ${item.plaintext}` : ''}. How often it is bought, when, ` +
-        'what it does against the other items in its slot, and the champions that build it most.',
+        `${item.name}${item.plaintext ? `: ${item.plaintext.replace(/[.\s]+$/, '')}` : ''}. ` +
+        'How often it is bought, when, what it does against the other items in its slot, ' +
+        'and the champions that build it most.',
       path,
       image: item.icon_url ?? null,
       jsonLd: breadcrumbs([
