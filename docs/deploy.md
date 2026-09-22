@@ -348,7 +348,10 @@ that work.
 - **The `riftline_pages` volume**, Compose's own (it holds nothing that a
   `docker compose run --rm prerender` cannot make again), mounted read-only
   into `web` and read-write into `prerender`. Each build's pages live in
-  their own directory; the two newest are kept.
+  their own directory; the two newest are kept. The first prerendered deploy
+  (5a11ead) created it under Compose's project-prefixed name,
+  `riftline_riftline_pages`, before the name was fixed in the compose file;
+  that volume is orphaned and can go: `docker volume rm riftline_riftline_pages`.
 - **The order of a deploy**: build, start the api, migrate, **prerender**,
   then start the web container. The prerender is fatal on purpose: a build
   that cannot render its pages is not switched to, and the web container

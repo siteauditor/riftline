@@ -138,8 +138,11 @@ networks:
 
 volumes:
   # The prerendered pages. Compose's own: it holds nothing that cannot be made
-  # again by running the prerender service.
-  riftline_pages: {}
+  # again by running the prerender service. Named outright, as `riftline_data`
+  # is, so it reads the same in `docker volume ls` and in docs/deploy.md
+  # rather than as the project-prefixed `riftline_riftline_pages`.
+  riftline_pages:
+    name: riftline_pages
   # Created by hand before the first deploy (docs/deploy.md, "The corpus"), so
   # the database can be copied in before anything runs, and therefore owned
   # outside this project like `edge_default`. Declared as Compose's own, every
