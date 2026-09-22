@@ -90,13 +90,13 @@ GPTBot and ClaudeBot got 403. The decision for this site is to **allow every
 crawler category** (the site has no ads and wants its explainers cited), and,
 because that opens training crawlers that fetch thousands of pages per
 referral on a box serving six sites, to keep a **rate-limiting rule** on the
-zone ahead of it (60 requests per 10 seconds per address, blocked for 10
-minutes). Both are dashboard settings under the zone's Security section;
-nothing in the repository sets them. The crawler policy was set on
-2026-09-23 (Security > Settings > AI bot policies: Search, Agent and
-Training all Allow, Bot Preference Sync off), after which Googlebot,
-bingbot, GPTBot, ClaudeBot, PerplexityBot and CCBot all answered 200. To
-prove it from anywhere:
+zone ahead of it. Both are dashboard settings under the zone's Security
+section; nothing in the repository sets them.
+
+The crawler policy was set on 2026-09-23 (Security > Settings > AI bot
+policies: Search, Agent and Training all Allow, Bot Preference Sync off),
+after which Googlebot, bingbot, GPTBot, ClaudeBot, PerplexityBot and CCBot
+all answered 200. To prove it from anywhere:
 
 ```bash
 for ua in Googlebot bingbot GPTBot ClaudeBot PerplexityBot; do
@@ -104,9 +104,29 @@ for ua in Googlebot bingbot GPTBot ClaudeBot PerplexityBot; do
 done
 ```
 
-Every one should answer 200. The site is registered in Google Search Console
-and Bing Webmaster Tools (DNS TXT records on the zone), with the sitemap at
-`https://riftline.rhasta.space/sitemap.xml` submitted in both.
+Every one should answer 200.
+
+The rate-limiting rule was set the same day (Security > WAF > Rate limiting
+rules): expression `(http.host eq "riftline.rhasta.space")`, 60 requests per
+10 seconds counted per IP address, action Block. On this plan the block lasts
+as long as the period, 10 seconds, so the effect is a ceiling of about six
+requests a second per address rather than a long ban. The field matters: a
+first version compared `http.request.uri.path` with the hostname, which no
+request can ever satisfy (a path starts with `/`), and 225 requests in 30
+seconds went through untouched. Prove it from the server, so that it is the
+server's address that gets blocked for ten seconds and not yours:
+
+```bash
+ssh MyVPS 'for i in $(seq 1 75); do curl -s -o /dev/null -w "%{http_code}\n" https://riftline.rhasta.space/api/health; done | sort | uniq -c'
+```
+
+Measured on 2026-09-23: 73 answers of 200, then 429 with `retry-after: 10`
+(Cloudflare's count lags the edge by a few requests, so the cut is near the
+threshold rather than exactly on it).
+
+Still to do, by hand: register the site in Google Search Console and Bing
+Webmaster Tools (DNS TXT records on the zone) and submit the sitemap,
+`https://riftline.rhasta.space/sitemap.xml`, in both.
 
 ### Why the site proxies its own /api
 
