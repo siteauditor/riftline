@@ -44,6 +44,7 @@ export default function App() {
               { to: '/draft', label: 'Draft' },
               { to: '/items', label: 'Items' },
               { to: '/leaderboards', label: 'Leaderboards' },
+              { to: '/groups', label: 'Groups' },
             ].map((item) => (
               <NavLink
                 key={item.to}

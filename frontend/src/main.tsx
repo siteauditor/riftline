@@ -18,6 +18,8 @@ import Items from './routes/Items'
 import Leaderboard from './routes/Leaderboard'
 import Match from './routes/Match'
 import Method from './routes/Method'
+import Groups from './routes/Groups'
+import Group from './routes/Group'
 import NotFound, { RouteError } from './routes/NotFound'
 
 const queryClient = new QueryClient({
@@ -78,6 +80,8 @@ const router = createBrowserRouter([
       { path: 'items/:itemId', element: <Item /> },
       { path: 'match/:matchId', element: <Match /> },
       { path: 'method', element: <Method /> },
+      { path: 'groups', element: <Groups /> },
+      { path: 'g/:slug', element: <Group /> },
       // nginx serves index.html for every path it does not recognise, so the
       // router is what decides an address is not a page. Keep this last.
       { path: '*', element: <NotFound /> },

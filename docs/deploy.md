@@ -160,6 +160,7 @@ a dead key.
 | `timelines` | yes | skipped |
 | `lobbyranks` | yes | skipped |
 | `ladders` (apex, per `LADDER_PLATFORMS`) | yes | skipped |
+| `groups` (up to `GROUP_NIGHTLY_CALLS`) | yes | skipped |
 | `buytimes` | no | **yes** |
 | `reextract` | no | **yes** |
 | `aggregate` | no | **yes** |
@@ -167,6 +168,13 @@ a dead key.
 | `winmodel` | no | **yes** |
 | `reviews` | no | **yes** |
 | `audit` | no | **yes** |
+
+`groups` fills in the players of every group, most recently viewed first:
+ranks, new games, and older history back to `GROUP_HISTORY_CAP` games each. It
+spends at most `GROUP_NIGHTLY_CALLS` calls (2,000 by default, about 50 minutes
+of a development key), always leaves 20 calls in each two minutes for the
+site's own searches, and removes groups that have had nobody in them for a
+week. Both settings are in `.env`, so changing them is a container restart.
 
 The storage stages from `reextract` on also run at the end of every deploy
 (`deploy/deploy.sh`, after `migrate`), because each is a no-op when nothing

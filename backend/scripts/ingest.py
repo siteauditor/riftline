@@ -12,6 +12,7 @@
     python -m scripts.ingest winmodel
     python -m scripts.ingest reviews
     python -m scripts.ingest audit
+    python -m scripts.ingest groups --calls 2000
 
 ``crawl`` is resumable: stop it whenever and it picks the frontier back up. On a
 development key expect roughly 3,000 matches an hour, and remember the key
@@ -41,6 +42,7 @@ from app.services.aggregate import (
     rebuild_synergy_stats,
 )
 from app.services.audit import store_audit
+from app.services.groups import delete_empty_groups, warm_all_groups
 from app.services.ingest import (
     Ingestor,
     LobbyRankBackfill,
@@ -477,6 +479,32 @@ async def cmd_audit(args) -> int:
     return 0
 
 
+async def cmd_groups(args) -> int:
+    """Fill in every group's players from Riot, most recently viewed first."""
+    settings = get_settings()
+    await init_db()
+    async with SessionLocal() as session:
+        removed = await delete_empty_groups(session)
+    if removed:
+        print(f"{removed} empty groups removed")
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+    calls = args.calls if args.calls is not None else settings.group_nightly_calls
+    client = make_client(settings)
+    try:
+        async with SessionLocal() as session:
+            players, budget = await warm_all_groups(session, client, settings, calls=calls)
+    finally:
+        await client.aclose()
+    print(f"{players} group players looked at, {budget.spent:,} Riot calls spent"
+          + (f", stopped: {budget.stopped}" if budget.stopped else ""))
+    if budget.stopped == "dead":
+        log.error("Riot refused the key")
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="ingest", description="Collect and aggregate League match data."
@@ -570,6 +598,15 @@ def main() -> int:
         help="Bring stored timeline extracts up to date. Reads local storage only.",
     )
 
+    gr = sub.add_parser(
+        "groups",
+        help="Fetch what groups' players still lack: ranks, new games, older history.",
+    )
+    gr.add_argument(
+        "--calls", type=int, default=None,
+        help="Riot calls to spend at most. Defaults to GROUP_NIGHTLY_CALLS.",
+    )
+
     agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
     agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
     agg.add_argument("--queue", type=int, default=None)
@@ -622,6 +659,8 @@ def main() -> int:
         return asyncio.run(cmd_reviews(args))
     if args.command == "audit":
         return asyncio.run(cmd_audit(args))
+    if args.command == "groups":
+        return asyncio.run(cmd_groups(args))
     return 1
 
 

@@ -15,6 +15,7 @@ label, the same floor as the Riftline score.
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -112,3 +113,58 @@ async def lane_labeler(session: AsyncSession) -> LaneLabeler:
         for r in rows
         if r.games >= MIN_GAMES_FOR_SCORE
     })
+
+
+@dataclass(slots=True)
+class LaneRecord:
+    """How one player's lanes went in one role."""
+
+    position: str
+    games: int = 0
+    won_big: int = 0
+    won: int = 0
+    even: int = 0
+    lost: int = 0
+    lost_big: int = 0
+
+
+async def lane_records(
+    session: AsyncSession,
+    puuid: str,
+    *,
+    queue: int | None = None,
+    queues: Collection[int] | None = None,
+    limit: int = 300,
+    labeler: LaneLabeler | None = None,
+) -> list[LaneRecord]:
+    """Won, even and lost lanes per role, over the newest games with a timeline.
+
+    ``queues`` narrows to several queues at once (a group's "Normal" is three).
+    A caller labelling many players passes one ``labeler`` rather than reading
+    the breakpoints once per player.
+    """
+    stmt = (
+        select(Match.queue_id, MatchParticipant.team_position, MatchParticipant.laning_score)
+        .join(Match, Match.match_id == MatchParticipant.match_id)
+        .where(
+            MatchParticipant.puuid == puuid,
+            MatchParticipant.laning_score.is_not(None),
+            Match.is_remake.is_(False),
+        )
+        .order_by(Match.game_creation.desc())
+        .limit(limit)
+    )
+    if queue is not None:
+        stmt = stmt.where(Match.queue_id == queue)
+    if queues is not None:
+        stmt = stmt.where(Match.queue_id.in_(list(queues)))
+    labeler = labeler or await lane_labeler(session)
+    records: dict[str, LaneRecord] = {}
+    for queue_id, position, score in (await session.execute(stmt)).all():
+        which = labeler(queue_id, position, score)
+        if which is None or position is None:
+            continue
+        record = records.setdefault(position, LaneRecord(position))
+        record.games += 1
+        setattr(record, which, getattr(record, which) + 1)
+    return sorted(records.values(), key=lambda r: -r.games)

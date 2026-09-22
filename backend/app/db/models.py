@@ -903,3 +903,73 @@ class ParticipantReview(Base):
         UniqueConstraint("match_id", "participant_index", name="uq_review_player"),
         Index("ix_review_profile", "puuid", "queue_id"),
     )
+
+
+class PlayerGroup(Base):
+    """A list of players someone put together, shared by link.
+
+    There are no accounts. Anyone with the slug can read a group, and whoever
+    holds its edit key can change it. Only a hash of the key is stored, so a
+    copy of this database cannot edit anybody's group.
+    """
+
+    __tablename__ = "player_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Random, so a group cannot be found by counting: 62^10 is about 8e17.
+    slug: Mapped[str] = mapped_column(String(16), unique=True)
+    name: Mapped[str] = mapped_column(String(60))
+    edit_key_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # The nightly stage fills the groups people look at first.
+    viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    group_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("player_groups.id", ondelete="CASCADE"), index=True
+    )
+    puuid: Mapped[str] = mapped_column(String(78), index=True)
+    # The shard the account plays on, which is not always the one searched:
+    # an OCE Riot ID resolves through SEA while the account lives on SG2.
+    platform: Mapped[str] = mapped_column(String(8))
+    # The group's own name for this player's place in it: "Top", "Sub".
+    label: Mapped[str | None] = mapped_column(String(24))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (UniqueConstraint("group_id", "puuid", name="uq_group_member"),)
+
+
+class HistoryCursor(Base):
+    """How far back one player's match history has been read, for groups.
+
+    The history is paged with a fixed ``endTime`` and an offset rather than an
+    offset alone: Riot's offsets count from the newest game, so every game the
+    player finishes shifts them by one, and paging by offset alone skips or
+    repeats a game each time. Under a fixed end time the list does not move.
+    New games are read separately, from ``since_s`` on.
+    """
+
+    __tablename__ = "history_cursors"
+
+    puuid: Mapped[str] = mapped_column(String(78), primary_key=True)
+    # Epoch seconds, as match-v5's list takes them.
+    until_s: Mapped[int] = mapped_column(BigInteger)
+    # Ids read so far under `until_s`, newest first. Compared with the cap when
+    # it is read rather than stored as "done", so raising the cap resumes.
+    offset: Mapped[int] = mapped_column(Integer, default=0)
+    # Riot's list ran out: there is no older game to read.
+    exhausted: Mapped[bool] = mapped_column(Boolean, default=False)
+    since_s: Mapped[int] = mapped_column(BigInteger)
+    # When new games were last looked for.
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the newest ranked games' timelines were last made complete. Cleared
+    # whenever games arrive, so new ones are looked at on the next pass.
+    timelines_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )

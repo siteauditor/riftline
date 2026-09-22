@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
@@ -425,7 +425,12 @@ class MatchService:
     # --------------------------------------------------------------- analytics
 
     async def played_by(
-        self, puuid: str, *, queue: int | None = None, limit: int = 300
+        self,
+        puuid: str,
+        *,
+        queue: int | None = None,
+        queues: Collection[int] | None = None,
+        limit: int = 300,
     ) -> list[PlayedRow]:
         """This player's games **from storage only**, newest first.
 
@@ -461,6 +466,9 @@ class MatchService:
         )
         if queue is not None:
             stmt = stmt.where(Match.queue_id == queue)
+        if queues is not None:
+            # Several queues read as one: a group's "Normal" is draft, blind and quickplay.
+            stmt = stmt.where(Match.queue_id.in_(list(queues)))
         return [PlayedRow(*row) for row in (await self.session.execute(stmt)).all()]
 
     async def last_stored(self, puuid: str) -> PlayedRow | None:

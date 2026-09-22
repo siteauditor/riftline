@@ -32,7 +32,7 @@ on fewer than 200 games, the figure is withheld and the count shown.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -402,7 +402,11 @@ class RoleReviewProfile:
 
 
 async def review_profile(
-    session: AsyncSession, puuid: str, queue_id: int | None = None
+    session: AsyncSession,
+    puuid: str,
+    queue_id: int | None = None,
+    *,
+    queues: Collection[int] | None = None,
 ) -> list[RoleReviewProfile]:
     """A player's review rates per role, against the role, from stored games."""
     stmt = select(ParticipantReview).where(
@@ -410,6 +414,8 @@ async def review_profile(
     )
     if queue_id is not None:
         stmt = stmt.where(ParticipantReview.queue_id == queue_id)
+    if queues is not None:
+        stmt = stmt.where(ParticipantReview.queue_id.in_(list(queues)))
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
         return []

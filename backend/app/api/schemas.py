@@ -1775,3 +1775,188 @@ def to_match_detail(
         objectives=_objectives_out(match, sd),
         model=_score_model_out(match) if withheld is None else None,
     )
+
+
+# ------------------------------------------------------------------ groups
+
+
+class GroupQueueOut(BaseModel):
+    key: str
+    label: str
+
+
+class GroupChampionOut(BaseModel):
+    champion: ChampionRef
+    games: int
+    wins: int
+    win_rate: float
+    kda: float
+
+
+class GroupHistoryOut(BaseModel):
+    """How much of this player's history is stored, and whether more is coming."""
+
+    # Stored games in every queue, remakes left out.
+    stored: int = 0
+    # Epoch ms of the oldest of them.
+    oldest: int | None = None
+    # Ids of the history read so far, toward the group's cap.
+    read: int = 0
+    # Riot's list ran out before the cap.
+    exhausted: bool = False
+    # Still being fetched: the rank has not been read, or the history is short
+    # of the cap with more to read.
+    pending: bool = True
+
+
+class GroupMemberOut(BaseModel):
+    puuid: str
+    riot_id: str
+    game_name: str | None = None
+    tag_line: str | None = None
+    platform: str
+    platform_label: str
+    profile_icon_url: str | None = None
+    summoner_level: int | None = None
+    label: str | None = None
+    added_at: int | None = None
+    # The official ranks on the shard played on. Empty until read, and
+    # `rank_read_at` says whether "unranked" is known or just not asked yet.
+    ranks: list[RankInfo] = Field(default_factory=list)
+    rank_read_at: int | None = None
+
+    # Stored games in the chosen queues, newest first, up to the cap.
+    games: int = 0
+    wins: int = 0
+    # Why the averages below are empty, when they are: too few games.
+    withheld: str | None = None
+    win_rate: float | None = None
+    kda: float | None = None
+    avg_kills: float | None = None
+    avg_deaths: float | None = None
+    avg_assists: float | None = None
+    cs_per_min: float | None = None
+    damage_per_min: float | None = None
+    vision_per_min: float | None = None
+    avg_minutes: float | None = None
+    main_position: str | None = None
+    positions: list[RoleShare] = Field(default_factory=list)
+    champions: list[GroupChampionOut] = Field(default_factory=list)
+    # Newest first: True for a win.
+    recent: list[bool] = Field(default_factory=list)
+    # The Riftline score over every scored game in the filter, and its count.
+    scored_games: int = 0
+    avg_score: float | None = None
+    score_profile: list[RoleScoreProfileOut] = Field(default_factory=list)
+    review: list[RoleReviewOut] = Field(default_factory=list)
+    lanes: list[LaneRecordOut] = Field(default_factory=list)
+    history: GroupHistoryOut = Field(default_factory=GroupHistoryOut)
+
+
+class GroupPairOut(BaseModel):
+    a: str
+    b: str
+    games: int
+    wins: int
+    win_rate: float
+
+
+class TogetherPlayerOut(BaseModel):
+    puuid: str
+    champion: ChampionRef
+    position: str | None = None
+    kills: int
+    deaths: int
+    assists: int
+
+
+class TogetherGameOut(BaseModel):
+    match_id: str
+    queue_id: int
+    queue_name: str
+    game_creation: int
+    game_duration: int
+    win: bool
+    players: list[TogetherPlayerOut]
+
+
+class GroupTogetherOut(BaseModel):
+    """Stored games where two or more of the group played on the same side."""
+
+    games: int = 0
+    wins: int = 0
+    min_pair_games: int
+    pairs: list[GroupPairOut] = Field(default_factory=list)
+    recent: list[TogetherGameOut] = Field(default_factory=list)
+
+
+class GroupResponse(BaseModel):
+    slug: str
+    name: str
+    created_at: int | None = None
+    updated_at: int | None = None
+    # True when the request carried this group's edit key.
+    can_edit: bool = False
+    max_members: int
+    history_cap: int
+    min_games: int
+    queue: str
+    queues: list[GroupQueueOut]
+    # False for ARAM and Arena: no lanes, so no score, review or lane labels.
+    scored_mode: bool = True
+    # Official rank first, as the page orders it by default.
+    members: list[GroupMemberOut] = Field(default_factory=list)
+    together: GroupTogetherOut
+    # Players still being fetched from Riot.
+    pending: int = 0
+    # Whether fetching can go on at all: a key is set and Riot accepts it.
+    fetching: bool = True
+
+
+class GroupWarmResponse(BaseModel):
+    """One bounded pass of fetching a group's missing games from Riot."""
+
+    pending: int = 0
+    fetching: bool = True
+    # The pass stopped to leave the key's last calls for searches.
+    key_busy: bool = False
+    # Seconds until asking again can get somewhere, when that is known.
+    retry_after: float | None = None
+    calls: int = 0
+    games: int = 0
+
+
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class GroupCreatedResponse(BaseModel):
+    slug: str
+    name: str
+    # The edit key. Shown once: only a hash of it is kept.
+    key: str
+
+
+class GroupRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class GroupKeyResponse(BaseModel):
+    key: str
+
+
+class GroupMemberAddRequest(BaseModel):
+    riot_id: str = Field(min_length=3, max_length=64)
+    platform: str = Field(min_length=2, max_length=8)
+    label: str | None = Field(default=None, max_length=100)
+
+
+class GroupMemberLabelRequest(BaseModel):
+    label: str | None = Field(default=None, max_length=100)
+
+
+class GroupMemberAddedResponse(BaseModel):
+    puuid: str
+    riot_id: str
+    platform: str
+    platform_label: str

@@ -86,6 +86,20 @@ class Settings(BaseSettings):
     ttl_ladder: int = Field(default=900, alias="TTL_LADDER")
     ttl_ladder_master: int = Field(default=3600, alias="TTL_LADDER_MASTER")
 
+    # --- Groups -------------------------------------------------------------
+    # How far back a group reaches for each player: their newest N games, in
+    # every queue, when they are added (new games are added as they are
+    # played). Each costs one Riot call the first time and about 85 KB of
+    # storage, 160 KB with a timeline, so this one number is the dial for both.
+    group_history_cap: int = Field(default=300, alias="GROUP_HISTORY_CAP")
+    # Riot calls the nightly `groups` stage may spend, most recently viewed
+    # groups first. About 50 minutes of a development key.
+    group_nightly_calls: int = Field(default=2000, alias="GROUP_NIGHTLY_CALLS")
+    # Per visitor address, per hour. There is no login, so these are what stops
+    # one script from filling the database with groups or the key with lookups.
+    group_creates_per_hour: int = Field(default=10, alias="GROUP_CREATES_PER_HOUR")
+    group_adds_per_hour: int = Field(default=60, alias="GROUP_ADDS_PER_HOUR")
+
     cors_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173", alias="CORS_ORIGINS"
     )

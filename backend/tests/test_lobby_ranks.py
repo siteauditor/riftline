@@ -64,7 +64,7 @@ async def test_a_lobby_is_measured_over_every_player_who_has_a_rank():
         bf = backfill(session)
         # Filtered by id: the suite shares a database and `pending` returns the
         # newest unmeasured matches, which other modules keep adding to.
-        mine = [m for m in await bf.pending(limit=500) if m.match_id == "LB_FULL"]
+        mine = [m for m in await bf.pending(limit=5000) if m.match_id == "LB_FULL"]
         assert await bf.measure(mine) == 1
 
     row = await stored("LB_FULL")
@@ -90,7 +90,7 @@ async def test_each_player_is_looked_up_on_their_own_platform():
     await seed("LB_KR", platform="KR", players=2, created=8_000)
     async with SessionLocal() as session:
         bf = backfill(session)
-        pending = [m for m in await bf.pending(limit=50) if m.match_id.startswith("LB_")]
+        pending = [m for m in await bf.pending(limit=5000) if m.match_id.startswith("LB_")]
         await bf.measure(pending)
 
     assert "euw1.api.riotgames.com" in hosts
@@ -108,7 +108,7 @@ async def test_the_rank_cache_is_shared_across_matches_in_a_batch():
     await seed("LB_SHARE_A", players=3, created=7_000)
     async with SessionLocal() as session:
         bf = backfill(session)
-        first = [m for m in await bf.pending(limit=50) if m.match_id == "LB_SHARE_A"]
+        first = [m for m in await bf.pending(limit=5000) if m.match_id == "LB_SHARE_A"]
         await bf.measure(first)
     calls_for_three_players = route.call_count
     assert calls_for_three_players == 3
@@ -122,7 +122,7 @@ async def test_an_all_unranked_lobby_is_stamped_so_it_is_not_retried_for_ever():
     await seed("LB_UNRANKED", players=4, created=6_000)
     async with SessionLocal() as session:
         bf = backfill(session)
-        await bf.measure([m for m in await bf.pending(limit=50)
+        await bf.measure([m for m in await bf.pending(limit=5000)
                           if m.match_id == "LB_UNRANKED"])
 
     row = await stored("LB_UNRANKED")
@@ -139,10 +139,10 @@ async def test_a_measured_match_is_never_offered_again():
     await seed("LB_ONCE", players=2, created=5_000)
     async with SessionLocal() as session:
         bf = backfill(session)
-        await bf.measure([m for m in await bf.pending(limit=50)
+        await bf.measure([m for m in await bf.pending(limit=5000)
                           if m.match_id == "LB_ONCE"])
     async with SessionLocal() as session:
-        outstanding = {m.match_id for m in await backfill(session).pending(limit=500)}
+        outstanding = {m.match_id for m in await backfill(session).pending(limit=5000)}
     assert "LB_ONCE" not in outstanding, "the cursor is the data itself"
 
 
@@ -171,7 +171,7 @@ async def test_a_write_race_inside_the_rank_fetch_does_not_strand_the_batch(monk
 
     async with SessionLocal() as session:
         bf = backfill(session)
-        mine = [m for m in await bf.pending(limit=500) if m.match_id == "LB_RACE"]
+        mine = [m for m in await bf.pending(limit=5000) if m.match_id == "LB_RACE"]
         assert await bf.measure(mine) == 1
 
     row = await stored("LB_RACE")
@@ -194,14 +194,14 @@ async def test_a_dead_key_does_not_retire_the_corpus():
 
     async with SessionLocal() as session:
         bf = backfill(session)
-        mine = [m for m in await bf.pending(limit=500) if m.match_id == "LB_DEADKEY"]
+        mine = [m for m in await bf.pending(limit=5000) if m.match_id == "LB_DEADKEY"]
         assert await bf.measure(mine) == 0, "nothing was learned, so nothing is claimed"
 
     row = await stored("LB_DEADKEY")
     assert row.lobby_rank_measured_at is None, "must stay outstanding for a retry"
 
     async with SessionLocal() as session:
-        outstanding = {m.match_id for m in await backfill(session).pending(limit=500)}
+        outstanding = {m.match_id for m in await backfill(session).pending(limit=5000)}
     assert "LB_DEADKEY" in outstanding
 
 
@@ -215,7 +215,7 @@ async def test_an_all_unranked_lobby_is_distinguished_from_a_failed_one():
     async with SessionLocal() as session:
         bf = backfill(session)
         mine = [
-            m for m in await bf.pending(limit=500)
+            m for m in await bf.pending(limit=5000)
             if m.match_id == "LB_TRULY_UNRANKED"
         ]
         assert await bf.measure(mine) == 1
@@ -245,7 +245,7 @@ async def test_an_unknown_shard_does_not_abort_the_run():
     async with SessionLocal() as session:
         bf = backfill(session)
         mine = [
-            m for m in await bf.pending(limit=500)
+            m for m in await bf.pending(limit=5000)
             if m.match_id in {"LB_RETIRED", "LB_LIVE"}
         ]
         await bf.measure(mine)
@@ -276,7 +276,7 @@ async def test_the_stored_statistic_is_the_median():
     await seed("LB_MEDIAN", players=10, created=2_000)
     async with SessionLocal() as session:
         bf = backfill(session)
-        mine = [m for m in await bf.pending(limit=500) if m.match_id == "LB_MEDIAN"]
+        mine = [m for m in await bf.pending(limit=5000) if m.match_id == "LB_MEDIAN"]
         await bf.measure(mine)
 
     row = await stored("LB_MEDIAN")

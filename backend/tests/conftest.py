@@ -25,6 +25,10 @@ os.environ["TTL_MASTERY"] = "0"
 # Bulk rank lookups cache for 15 minutes in production. Zeroed here so a
 # rank stored by one test cannot silently serve another.
 os.environ["TTL_LEAGUE_BULK"] = "0"
+# Every test shares one client address, so the per-address group limits would
+# trip across tests. The test of the limit itself lowers it for its own run.
+os.environ["GROUP_CREATES_PER_HOUR"] = "100000"
+os.environ["GROUP_ADDS_PER_HOUR"] = "100000"
 
 import httpx  # noqa: E402
 import pytest  # noqa: E402

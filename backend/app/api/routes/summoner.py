@@ -56,7 +56,7 @@ from app.api.schemas import ChampionRef as ChampionRefSchema
 from app.db.models import Match, MatchParticipant, RankHistory
 from app.riot.errors import RiotForbidden
 from app.riot.routing import resolve_platform
-from app.services.lanes import lane_labeler
+from app.services.lanes import lane_labeler, lane_records
 from app.services.profile_stats import (
     MIN_SCORED_FOR_PROFILE,
     champion_totals,
@@ -389,7 +389,10 @@ async def get_analytics(
             )
             for r in await review_profile(matches.session, puuid, queue)
         ],
-        lanes=await _lane_records(matches.session, puuid, queue, limit),
+        lanes=[
+            LaneRecordOut.model_validate(r, from_attributes=True)
+            for r in await lane_records(matches.session, puuid, queue=queue, limit=limit)
+        ],
         score_profile=[
             RoleScoreProfileOut(
                 position=p.position,
@@ -424,33 +427,6 @@ async def get_analytics(
             damage_per_min=totals["damage"] / totals["minutes"],
         ),
     )
-
-
-async def _lane_records(session, puuid: str, queue: int | None, limit: int) -> list[LaneRecordOut]:
-    """Won, even and lost lanes per role, over the newest games with a timeline."""
-    stmt = (
-        select(Match.queue_id, MatchParticipant.team_position, MatchParticipant.laning_score)
-        .join(Match, Match.match_id == MatchParticipant.match_id)
-        .where(
-            MatchParticipant.puuid == puuid,
-            MatchParticipant.laning_score.is_not(None),
-            Match.is_remake.is_(False),
-        )
-        .order_by(Match.game_creation.desc())
-        .limit(limit)
-    )
-    if queue is not None:
-        stmt = stmt.where(Match.queue_id == queue)
-    labeler = await lane_labeler(session)
-    records: dict[str, LaneRecordOut] = {}
-    for queue_id, position, score in (await session.execute(stmt)).all():
-        which = labeler(queue_id, position, score)
-        if which is None or position is None:
-            continue
-        record = records.setdefault(position, LaneRecordOut(position=position, games=0))
-        record.games += 1
-        setattr(record, which, getattr(record, which) + 1)
-    return sorted(records.values(), key=lambda r: -r.games)
 
 
 @router.get("/{platform}/{game_name}/{tag_line}/live", response_model=LiveGameResponse)

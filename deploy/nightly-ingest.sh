@@ -9,9 +9,9 @@
 # expires 24 hours after it is issued, so on most nights some or all of it will
 # run with a dead key. It therefore splits into two halves.
 #
-#   Riot-dependent   crawl, timelines, lobbyranks, ladders. Skipped entirely when the
-#                    key is dead, because every request would fail and the log
-#                    would be noise rather than information.
+#   Riot-dependent   crawl, timelines, lobbyranks, ladders, groups. Skipped entirely
+#                    when the key is dead, because every request would fail and
+#                    the log would be noise rather than information.
 #   Local-only       aggregate, score. These read the stored corpus and make no
 #                    network call at all, so they always run and always finish.
 #                    A dead key therefore still leaves the site's derived data
@@ -114,9 +114,13 @@ case "$key_state" in
     for ladder_platform in $LADDER_PLATFORMS; do
       run_stage "ladders ${ladder_platform}" python -m scripts.ingest ladders --platform "$ladder_platform" --tier apex || failures=$((failures+1))
     done
+    # Groups' players: ranks, new games and older history up to the cap, most
+    # recently viewed groups first, within GROUP_NIGHTLY_CALLS. Before the
+    # local stages, so the games it brings in are scored and reviewed tonight.
+    run_stage "groups" python -m scripts.ingest groups || failures=$((failures+1))
     ;;
   expired|absent)
-    log "skipping crawl, timelines, lobbyranks and ladders: the key is ${key_state}."
+    log "skipping crawl, timelines, lobbyranks, ladders and groups: the key is ${key_state}."
     log "rotate it with: docs/deploy.md -> 'Rotating the Riot key'"
     ;;
   *)

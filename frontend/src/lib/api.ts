@@ -1484,6 +1484,156 @@ export interface DraftRequest {
   comfort_weight?: number
 }
 
+// --- groups -------------------------------------------------------------------
+
+export interface GroupQueue {
+  key: string
+  label: string
+}
+
+export interface GroupChampion {
+  champion: ChampionRef
+  games: number
+  wins: number
+  win_rate: number
+  kda: number
+}
+
+/** How much of one player's history is stored, and whether more is coming. */
+export interface GroupHistory {
+  /** Stored games in every queue, remakes left out. */
+  stored: number
+  /** Epoch ms of the oldest of them. */
+  oldest: number | null
+  /** Ids of the history read so far, toward the group's cap. */
+  read: number
+  /** Riot's list ran out before the cap: this is all there is. */
+  exhausted: boolean
+  /** Rank not read yet, or history short of the cap with more to read. */
+  pending: boolean
+}
+
+export interface GroupMember {
+  puuid: string
+  riot_id: string
+  game_name: string | null
+  tag_line: string | null
+  platform: string
+  platform_label: string
+  profile_icon_url: string | null
+  summoner_level: number | null
+  label: string | null
+  added_at: number | null
+  /** Empty until read; `rank_read_at` says whether "unranked" is known. */
+  ranks: RankInfo[]
+  rank_read_at: number | null
+  games: number
+  wins: number
+  /** Why the averages are null: too few games in this filter. */
+  withheld: string | null
+  win_rate: number | null
+  kda: number | null
+  avg_kills: number | null
+  avg_deaths: number | null
+  avg_assists: number | null
+  cs_per_min: number | null
+  damage_per_min: number | null
+  vision_per_min: number | null
+  avg_minutes: number | null
+  main_position: Position | null
+  positions: { position: Position; games: number; share: number; win_rate: number }[]
+  champions: GroupChampion[]
+  /** Newest first: true for a win. */
+  recent: boolean[]
+  scored_games: number
+  avg_score: number | null
+  score_profile: RoleScoreProfile[]
+  review: RoleReview[]
+  lanes: LaneRecord[]
+  history: GroupHistory
+}
+
+export interface GroupPair {
+  a: string
+  b: string
+  games: number
+  wins: number
+  win_rate: number
+}
+
+export interface TogetherGame {
+  match_id: string
+  queue_id: number
+  queue_name: string
+  game_creation: number
+  game_duration: number
+  win: boolean
+  players: {
+    puuid: string
+    champion: ChampionRef
+    position: Position | null
+    kills: number
+    deaths: number
+    assists: number
+  }[]
+}
+
+export interface GroupTogether {
+  games: number
+  wins: number
+  min_pair_games: number
+  pairs: GroupPair[]
+  recent: TogetherGame[]
+}
+
+export interface Group {
+  slug: string
+  name: string
+  created_at: number | null
+  updated_at: number | null
+  /** True when the request carried this group's edit key. */
+  can_edit: boolean
+  max_members: number
+  history_cap: number
+  min_games: number
+  queue: string
+  queues: GroupQueue[]
+  /** False for ARAM and Arena: no lanes, so no score, review or lane labels. */
+  scored_mode: boolean
+  /** Official rank first. */
+  members: GroupMember[]
+  together: GroupTogether
+  /** Players still being fetched from Riot. */
+  pending: number
+  /** Whether fetching can go on at all: a key is set and Riot accepts it. */
+  fetching: boolean
+}
+
+/** One bounded pass of fetching a group's missing games. */
+export interface GroupWarm {
+  pending: number
+  fetching: boolean
+  /** The pass stopped to leave the key's last calls for searches. */
+  key_busy: boolean
+  retry_after: number | null
+  calls: number
+  games: number
+}
+
+export interface GroupCreated {
+  slug: string
+  name: string
+  /** Shown once: the server keeps only a hash of it. */
+  key: string
+}
+
+export interface GroupMemberAdded {
+  puuid: string
+  riot_id: string
+  platform: string
+  platform_label: string
+}
+
 export class ApiError extends Error {
   status: number
   kind:
@@ -1545,7 +1695,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, detail, extra)
   }
+  // A change with nothing to say back (renaming a group, say) is a 204, and
+  // an empty body is not JSON.
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
+}
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+
+/** The edit key travels as a header, never in a URL a server would log. */
+function groupHeaders(key: string | null, json = false): Record<string, string> {
+  return { ...(json ? JSON_HEADERS : {}), ...(key ? { 'X-Group-Key': key } : {}) }
 }
 
 const enc = encodeURIComponent
@@ -1699,6 +1859,62 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    }),
+
+  createGroup: (name: string) =>
+    request<GroupCreated>('/api/groups', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ name }),
+    }),
+
+  /** Storage only: fetching from Riot is `warmGroup`. */
+  group: (slug: string, queue: string, key: string | null) =>
+    request<Group>(`/api/groups/${enc(slug)}?queue=${enc(queue)}`, {
+      headers: groupHeaders(key),
+    }),
+
+  warmGroup: (slug: string) =>
+    request<GroupWarm>(`/api/groups/${enc(slug)}/warm`, { method: 'POST' }),
+
+  renameGroup: (slug: string, key: string, name: string) =>
+    request<void>(`/api/groups/${enc(slug)}`, {
+      method: 'PATCH',
+      headers: groupHeaders(key, true),
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteGroup: (slug: string, key: string) =>
+    request<void>(`/api/groups/${enc(slug)}`, { method: 'DELETE', headers: groupHeaders(key) }),
+
+  rotateGroupKey: (slug: string, key: string) =>
+    request<{ key: string }>(`/api/groups/${enc(slug)}/key`, {
+      method: 'POST',
+      headers: groupHeaders(key),
+    }),
+
+  addGroupMember: (
+    slug: string,
+    key: string,
+    member: { riot_id: string; platform: string; label?: string | null },
+  ) =>
+    request<GroupMemberAdded>(`/api/groups/${enc(slug)}/members`, {
+      method: 'POST',
+      headers: groupHeaders(key, true),
+      body: JSON.stringify(member),
+    }),
+
+  setGroupMemberLabel: (slug: string, key: string, puuid: string, label: string | null) =>
+    request<void>(`/api/groups/${enc(slug)}/members/${enc(puuid)}`, {
+      method: 'PATCH',
+      headers: groupHeaders(key, true),
+      body: JSON.stringify({ label }),
+    }),
+
+  removeGroupMember: (slug: string, key: string, puuid: string) =>
+    request<void>(`/api/groups/${enc(slug)}/members/${enc(puuid)}`, {
+      method: 'DELETE',
+      headers: groupHeaders(key),
     }),
 }
 

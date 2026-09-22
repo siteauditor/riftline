@@ -9,6 +9,7 @@ import Crest from '../components/Crest'
 import FormStrip from '../components/FormStrip'
 import MatchRow from '../components/MatchRow'
 import ProfileTabs from '../components/ProfileTabs'
+import AddToGroup from '../components/group/AddToGroup'
 import RankCard from '../components/RankCard'
 import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
@@ -237,7 +238,12 @@ export default function Profile() {
               <span className="eyebrow">Level {profile.summoner_level ?? '–'}</span>
               <span className="eyebrow">{profile.platform_label}</span>
             </p>
-            <UpdateControl updatedAt={profile.updated_at} onUpdate={refreshAll} />
+            <div className="flex flex-wrap items-start gap-x-2.5">
+              <UpdateControl updatedAt={profile.updated_at} onUpdate={refreshAll} />
+              <div className="mt-1.5 text-xs">
+                <AddToGroup platform={platform} riotId={profile.riot_id} />
+              </div>
+            </div>
           </div>
 
           <ProfileTabs platform={platform} name={name} tag={tag} />

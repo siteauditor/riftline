@@ -692,6 +692,51 @@ split STRATZ uses for Dota. On our corpus that lands about 0.02 and 0.09 from ev
 A role with fewer than 200 measured lanes gets no labels. The breakpoints are
 rebuilt with the score.
 
+## Groups
+
+`/groups` makes a group of up to 20 players (a team, a Clash roster, friends)
+and `/g/{slug}` shows them side by side: official rank, record, KDA, the
+Riftline score and its seven components, the death review, lane labels, recent
+form, and the games they played on the same team. Every queue together, or one
+at a time: ranked solo, flex, normal, Swiftplay, ARAM, Arena.
+
+**No login.** A group is two links. The view link (`/g/{slug}`, ten random
+characters) shows it to anyone who has it. The edit link adds `#key=...`, a
+192-bit random key: the part after `#` never reaches a server, so it cannot
+land in an access log, and the page moves it into `localStorage` and out of the
+address bar at once, so an address copied from the bar is the view link. The
+key travels as an `X-Group-Key` header; the database holds only its SHA-256.
+A new edit link can be made at any time, and the old one stops working.
+"Your groups" is that browser's memory of both. Group pages send `noindex`.
+
+**Riot's rules decide the order.** Riot does not allow alternatives to its
+ranked ladder, so the default order is the official rank and LP, every other
+figure is a column to sort by, and nothing combines them into one rating.
+
+**Filling a group** (`app/services/groups.py`). A new player costs about one
+call per game of history, so twenty strangers are thousands of calls: hours on
+a development key. The page asks for a bounded pass (`POST
+/api/groups/{slug}/warm`, five seconds at most) and asks again when it ends,
+and the nightly `groups` stage does the rest. Every pass stops at the same
+reserve of 20 calls that ladder naming and game stories leave for searches.
+A pass reads ranks first (the table's default order), then new games, then one
+chunk of older history per player in turn, so one long history cannot starve
+the rest. Timelines are fetched only for each player's newest 20 ranked games,
+which is what the death review and the lane labels read.
+
+History is paged backwards under a fixed `endTime` rather than by offset
+alone: match-v5's offsets count from the newest game, so a game finished
+between two pages shifts every offset by one. `GROUP_HISTORY_CAP` (300 by
+default) is how far back each player is read. Reading the table
+(`app/services/group_table.py`) never calls Riot, and every figure needs 5
+games in the chosen queues before it is shown, with the count beside it.
+
+**Abuse.** Without accounts, the limits are per visitor address, per hour: 10
+new groups and 60 players added (`GROUP_CREATES_PER_HOUR`,
+`GROUP_ADDS_PER_HOUR`). The address is Cloudflare's `CF-Connecting-IP`, not
+`X-Forwarded-For`: uvicorn trusts every proxy here and so takes that header's
+first entry, which the visitor writes. Empty groups are removed after a week.
+
 ## The home page and search
 
 Nothing on the home page calls Riot. The best pick in each role comes from the
