@@ -52,7 +52,8 @@ export default function StorySection({
     return (
       <div className="frame flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm text-ink-dim">
         <p>
-          <span className="text-ink">No story for this game yet.</span> {story.reason}
+          <span className="text-ink">No story for this game{story.pending ? ' yet' : ''}.</span>{' '}
+          {story.reason}
           {story.pending && story.retry_after !== null &&
             ` Try again in about ${Math.max(1, Math.ceil(story.retry_after))} seconds.`}
         </p>
@@ -125,6 +126,8 @@ export default function StorySection({
       )}
 
       <DeathReview
+        // A new game starts on its own player, not the seat chosen in the last.
+        key={story.match_id}
         players={story.players}
         subjectIndex={subject?.participant_index ?? null}
         mapUrl={story.map_url}

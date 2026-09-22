@@ -192,3 +192,24 @@ async def test_the_profile_lists_a_reviewed_role_and_says_when_it_has_too_few_ga
     assert middle["metrics"] == []
     assert middle["min_games"] == 10 and "10" in middle["withheld"]
     assert isinstance(body["lanes"], list)
+
+
+@respx.mock
+async def test_a_story_leaves_the_keys_last_calls_for_searches(client, monkeypatch):
+    """Opening stories one after another, or a bot doing it, must not starve
+    the Riot ID searches the site is for: at the reserve it waits."""
+    from app.main import app
+    from app.riot.limiter import SEARCH_RESERVE
+
+    match_id = "EUW1_6000000057"
+    await seed_match(client, match_id)
+    route = mock_timeline(story_payload())
+    # The suite's key never throttles, so the key is made busy here.
+    limiter = app.state.riot.limiter
+    monkeypatch.setattr(limiter, "spare", lambda: SEARCH_RESERVE)
+    monkeypatch.setattr(limiter, "seconds_until_free", lambda slots: 5.0)
+
+    body = (await client.get(f"/api/matches/{match_id}/story")).json()
+    assert body["pending"] is True and body["available"] is False
+    assert body["retry_after"] == 5.0
+    assert route.call_count == 0, "no call spent while the key is at its reserve"

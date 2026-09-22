@@ -656,7 +656,10 @@ events: "Red won a fight 4 for 1 and took Baron, -35.8".
 
 **The timeline on demand.** Profile games get their timeline at the nightly run.
 Opening a story without one fetches it: one Riot call, once, under the request's
-wait budget. On a busy key the section says so and offers a retry.
+wait budget. It never takes the key's last 20 calls in a two-minute window
+(`SEARCH_RESERVE`, shared with ladder naming): those are for Riot ID searches, and
+opening stories one after another, or a bot doing it, would otherwise starve them.
+On a busy key the section says so and offers a retry.
 
 ## The death review
 

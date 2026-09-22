@@ -6,6 +6,9 @@ import RankBadge from './RankBadge'
 import ItemIcon from './items/ItemIcon'
 import Scoreboard from './match/Scoreboard'
 import { LANE_TEXT, laneColor } from './story/lanes'
+
+// Ranked solo and flex: the queues the win-chance model covers.
+const STORY_QUEUES = new Set([420, 440])
 import {
   compact,
   duration,
@@ -321,7 +324,13 @@ export default function MatchRow({
         matchId={match.match_id}
         subjectPuuid={puuid}
         platform={platform}
-        storyHref={`/match/${encodeURIComponent(match.match_id)}?player=${encodeURIComponent(puuid)}`}
+        // Only where a story exists: the win-chance model is trained on ranked
+        // Summoner's Rift, and ARAM or Arena would link to a page saying so.
+        storyHref={
+          STORY_QUEUES.has(match.queue_id)
+            ? `/match/${encodeURIComponent(match.match_id)}?player=${encodeURIComponent(puuid)}`
+            : undefined
+        }
       />
     )}
     </article>

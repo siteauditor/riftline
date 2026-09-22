@@ -23,12 +23,14 @@ import json
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbDep, RiotDep, SettingsDep, StaticDep
 from app.api.schemas import ChampionRef, MatchDetailResponse, to_match_detail
 from app.db.models import Match, MatchTimeline, ParticipantReview
 from app.riot.errors import RiotRateLimited
+from app.riot.limiter import SEARCH_RESERVE
 from app.services.lanes import lane_labeler
 from app.services.reviews import PlayerReview, described, review_game, sides_of, store_reviews
 from app.services.timelines import EXTRACT_VERSION, TimelineService, extract
@@ -193,6 +195,19 @@ async def get_story(
         )
 
     timeline = await db.get(MatchTimeline, match.match_id)
+    if timeline is None and riot.limiter.spare() <= SEARCH_RESERVE:
+        # A story is not what anyone searched for. With the key down to its
+        # reserve, it waits rather than spend the calls a Riot ID lookup needs:
+        # otherwise opening stories one after another, or a bot doing it, would
+        # starve every search on the site.
+        return GameStoryResponse(
+            match_id=match.match_id,
+            available=False,
+            pending=True,
+            retry_after=round(max(1.0, riot.limiter.seconds_until_free(SEARCH_RESERVE + 1)), 1),
+            reason="Riot's rate limit is busy, so this game's timeline could not be fetched yet.",
+            queue_id=match.queue_id,
+        )
     if timeline is None:
         try:
             timeline = await TimelineService(db, riot, settings).ensure_one(match)
@@ -237,7 +252,13 @@ async def get_story(
         ).scalars().all()
         if not stored or any(v != model.version for v in stored):
             await store_reviews(db, match, reviews, model.version)
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError:
+                # Someone else wrote this game's reviews first: another view of
+                # it, or the nightly stage. They are the same numbers, and the
+                # response is built from the ones computed here either way.
+                await db.rollback()
             match = await _load(db, match.match_id)
 
     by_index = {p.participant_index: p for p in match.participants}

@@ -778,7 +778,7 @@ def evaluate(extracted: dict, model: WinModel) -> Story:
 class Moment:
     start_ms: int
     end_ms: int
-    # Blue's chance after minus before, summed over the sequence's events.
+    # Blue's chance on the curve a minute after the sequence minus just before it.
     swing: float
     kills: dict[int, int]
     objectives: dict[int, list[str]]

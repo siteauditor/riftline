@@ -258,8 +258,13 @@ def sides_of(match: Match) -> dict[int, int]:
 async def review_match(session: AsyncSession, match: Match, model: WinModel) -> bool:
     """Evaluate and store one match's reviews. No commit. False if it has no
     usable timeline."""
-    timeline = await session.get(MatchTimeline, match.match_id)
-    extracted = timeline.extracted if timeline else None
+    # The extract only: loading the row would bring its 81 KB raw payload
+    # along for every game, about 240 MB a night on 3,000 games.
+    extracted = (
+        await session.execute(
+            select(MatchTimeline.extracted).where(MatchTimeline.match_id == match.match_id)
+        )
+    ).scalar_one_or_none()
     if not extracted or (extracted.get("v") or 0) < EXTRACT_VERSION:
         return False
     story = evaluate(extracted, model)

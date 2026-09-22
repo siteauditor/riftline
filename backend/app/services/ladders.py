@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import IngestCursor, LadderEntry, Player, utcnow
 from app.riot.client import RiotClient
 from app.riot.errors import RiotApiError, RiotNotFound
-from app.riot.limiter import wait_deadline
+from app.riot.limiter import SEARCH_RESERVE, wait_deadline
 from app.riot.routing import Platform, resolve_platform
 from app.services.players import normalize_riot_name
 from app.services.ranks import RankCache, is_fresh
@@ -86,8 +86,8 @@ NAME_BUDGET_SECONDS = 4.0
 # already held and could be served instead.
 REFRESH_WAIT_SECONDS = 5.0
 # Calls in the key's two-minute window that naming never touches, kept for the
-# lookups a visitor is actually waiting on: about four cold profiles' worth.
-NAME_RESERVE = 20
+# lookups a visitor is actually waiting on. Shared with a game's story.
+NAME_RESERVE = SEARCH_RESERVE
 # How long a "no such account" from account-v1 is believed. Some ladder entries
 # have no account behind them: on 2026-09-22, two of the first 200 EUW Bronze IV rows
 # answered 404 for every lookup, and each view of their page paid for both

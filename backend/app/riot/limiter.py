@@ -28,6 +28,13 @@ from dataclasses import dataclass, field
 # Application limits for a Riot development key.
 DEV_KEY_LIMITS: list[tuple[int, float]] = [(20, 1.0), (100, 120.0)]
 
+# Calls in the key's two-minute window that work nobody is waiting on (naming a
+# ladder, fetching a game's timeline for its story) leaves alone, for the
+# lookups a visitor is waiting on: about four cold profiles' worth. A Riot ID
+# search is the site's front door, and a background feature that spent the
+# whole budget would answer the next one with a rate limit.
+SEARCH_RESERVE = 20
+
 # The moment, on the monotonic clock, after which the current caller would
 # rather be told "not now" than keep waiting for a slot. Unset, a caller waits
 # as long as the key needs, which is right for the ingest CLI. A web request
