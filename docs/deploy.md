@@ -4,7 +4,7 @@ Riftline runs on the shared VPS:
 
 | | |
 | --- | --- |
-| Site | https://riftline.rhasta.space |
+| Site | https://www.rhasta.space |
 | API | https://riftline-api.rhasta.space |
 | Deploy directory | `/root/riftline`, a clone of the public repository |
 | Corpus | Docker volume `riftline_data`, mounted at `/srv/riftline/data` |
@@ -29,7 +29,7 @@ ports:
                        |
         caddy-docker-proxy (project: edge)
            |                        |
-  riftline.rhasta.space   riftline-api.rhasta.space
+    www.rhasta.space      riftline-api.rhasta.space
            |                        |
      riftline-web  ---- /api --->  riftline-api
     (nginx + bundle)              (uvicorn + SQLite)
@@ -43,6 +43,18 @@ port, so this project cannot collide with a neighbour or take one down with it.
 `configurespaces.rhasta.space` and `configurespaces-api.rhasta.space` were
 already set up this way on the same box and in the same DNS zone. The label
 shape here is copied from them rather than invented.
+
+### Hostnames
+
+The site is `www.rhasta.space`. Two other names reach the same container and
+answer with a permanent redirect to it, path included: `rhasta.space`, the
+bare domain, and `riftline.rhasta.space`, the name the site launched under on
+2026-09-23 and moved away from the same day. The redirects are Caddy labels
+on the web container (`caddy_1` in `docker-compose.yml`), so a link or a
+search result that still names the old host lands on the same page. All
+three names are proxied DNS records on the zone; Caddy holds a certificate
+for each, obtained the same way as the others. `SITE_ORIGIN` (the sitemap and
+canonical links) and `CORS_ORIGINS` name the `www` host and nothing else.
 
 ### Web traffic only from Cloudflare
 
@@ -100,14 +112,14 @@ all answered 200. To prove it from anywhere:
 
 ```bash
 for ua in Googlebot bingbot GPTBot ClaudeBot PerplexityBot; do
-  printf '%s -> ' "$ua"; curl -s -o /dev/null -w '%{http_code}\n' -A "Mozilla/5.0 (compatible; $ua/1.0)" https://riftline.rhasta.space/
+  printf '%s -> ' "$ua"; curl -s -o /dev/null -w '%{http_code}\n' -A "Mozilla/5.0 (compatible; $ua/1.0)" https://www.rhasta.space/
 done
 ```
 
 Every one should answer 200.
 
 The rate-limiting rule was set the same day (Security > WAF > Rate limiting
-rules): expression `(http.host eq "riftline.rhasta.space")`, 60 requests per
+rules): expression `(http.host eq "www.rhasta.space")`, 60 requests per
 10 seconds counted per IP address, action Block. On this plan the block lasts
 as long as the period, 10 seconds, so the effect is a ceiling of about six
 requests a second per address rather than a long ban. The field matters: a
@@ -117,7 +129,7 @@ seconds went through untouched. Prove it from the server, so that it is the
 server's address that gets blocked for ten seconds and not yours:
 
 ```bash
-ssh MyVPS 'for i in $(seq 1 75); do curl -s -o /dev/null -w "%{http_code}\n" https://riftline.rhasta.space/api/health; done | sort | uniq -c'
+ssh MyVPS 'for i in $(seq 1 75); do curl -s -o /dev/null -w "%{http_code}\n" https://www.rhasta.space/api/health; done | sort | uniq -c'
 ```
 
 Measured on 2026-09-23: 73 answers of 200, then 429 with `retry-after: 10`
@@ -126,7 +138,7 @@ threshold rather than exactly on it).
 
 Still to do, by hand: register the site in Google Search Console and Bing
 Webmaster Tools (DNS TXT records on the zone) and submit the sitemap,
-`https://riftline.rhasta.space/sitemap.xml`, in both.
+`https://www.rhasta.space/sitemap.xml`, in both.
 
 ### Why the site proxies its own /api
 
@@ -386,8 +398,8 @@ that work.
 ```bash
 ssh MyVPS 'cd /root/riftline && docker compose run --rm prerender'   # render every page now
 ssh MyVPS 'docker run --rm -v riftline_pages:/pages alpine cat /pages/$(cd /root/riftline && git rev-parse --short HEAD)/_manifest.json'
-curl -sI https://riftline.rhasta.space/tierlist | grep -i 'x-prerendered\|x-robots'   # the build id, and no noindex
-curl -sI https://riftline.rhasta.space/no-such-page | grep -i x-robots           # the shell: noindex
+curl -sI https://www.rhasta.space/tierlist | grep -i 'x-prerendered\|x-robots'   # the build id, and no noindex
+curl -sI https://www.rhasta.space/no-such-page | grep -i x-robots           # the shell: noindex
 ```
 
 The manifest of pages, and which of them are indexable, is `GET

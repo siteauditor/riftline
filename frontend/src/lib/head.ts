@@ -14,7 +14,7 @@ import { createContext } from 'react'
  */
 
 export const SITE_NAME = 'Riftline'
-export const ORIGIN = 'https://riftline.rhasta.space'
+export const ORIGIN = 'https://www.rhasta.space'
 export const DEFAULT_IMAGE = `${ORIGIN}/og-default.png`
 
 export interface PageHead {

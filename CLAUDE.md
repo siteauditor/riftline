@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Riftline is a League of Legends analytics site (op.gg style): FastAPI + SQLAlchemy 2.0 async + SQLite behind a React 19 + Vite + Tailwind v4 frontend, live at https://riftline.rhasta.space. `README.md` explains most design decisions and the Riot API traps; read it before changing anything that talks to Riot. `docs/deploy.md` is the production runbook. The roadmap is `internal-docs/feature-gap-analysis.md` (work is organised in its lettered feature groups). `internal-docs/` is gitignored: it exists on the owner's workstation and not in a clone, and anything written there stays private.
+Riftline is a League of Legends analytics site (op.gg style): FastAPI + SQLAlchemy 2.0 async + SQLite behind a React 19 + Vite + Tailwind v4 frontend, live at https://www.rhasta.space. `README.md` explains most design decisions and the Riot API traps; read it before changing anything that talks to Riot. `docs/deploy.md` is the production runbook. The roadmap is `internal-docs/feature-gap-analysis.md` (work is organised in its lettered feature groups). `internal-docs/` is gitignored: it exists on the owner's workstation and not in a clone, and anything written there stays private.
 
 ## Commands
 

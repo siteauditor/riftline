@@ -147,7 +147,7 @@ jobs:
     timeout-minutes: 20
     environment:
       name: production
-      url: https://riftline.rhasta.space
+      url: https://www.rhasta.space
     steps:
       # No checkout: the server fetches the commit itself, from the public
       # repository, and refuses anything that is not on main.

@@ -4,7 +4,7 @@ A League of Legends analytics site: summoner profiles and match history with a
 per-game performance score, a champion mastery dashboard, live games, champion tier
 lists and pages, ranked leaderboards, and a draft assistant.
 
-Live at <https://riftline.rhasta.space>. FastAPI + SQLAlchemy on the backend,
+Live at <https://www.rhasta.space>. FastAPI + SQLAlchemy on the backend,
 React + Vite + Tailwind on the front.
 
 ---
@@ -321,7 +321,7 @@ pull request.
 
 ## Running it in production
 
-It runs at <https://riftline.rhasta.space> on a shared VPS. A push to `main` runs
+It runs at <https://www.rhasta.space> on a shared VPS. A push to `main` runs
 the tests on GitHub-hosted runners and then deploys that exact commit over SSH.
 There is no self-hosted runner, because the repository is public and a pull request
 could otherwise run code on the server. The corpus lives in a Docker volume and

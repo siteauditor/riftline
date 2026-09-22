@@ -31,7 +31,7 @@ services:
       # The browser reaches the API same-origin through the web container, so
       # this only matters for anything calling riftline-api.rhasta.space
       # directly from a page.
-      CORS_ORIGINS: https://riftline.rhasta.space
+      CORS_ORIGINS: https://www.rhasta.space
     volumes:
       # The corpus: 1,795 matches, every stored Riot payload, and the scores
       # derived from them. A named volume rather than a bind mount so a stray
@@ -82,12 +82,17 @@ services:
         condition: service_started
     networks: [default, edge]
     labels:
-      caddy: riftline.rhasta.space
-      caddy.reverse_proxy: '{{upstreams 80}}'
-      caddy.encode: zstd gzip
-      caddy.header.Strict-Transport-Security: '"max-age=31536000; includeSubDomains"'
-      caddy.header.X-Content-Type-Options: nosniff
-      caddy.header.Referrer-Policy: strict-origin-when-cross-origin
+      # Two site blocks on one container (caddy_0, caddy_1): the site, and the
+      # names that redirect to it. The bare domain and the launch name both
+      # answer 301 with the path kept, so nothing that ever linked here breaks.
+      caddy_0: www.rhasta.space
+      caddy_0.reverse_proxy: '{{upstreams 80}}'
+      caddy_0.encode: zstd gzip
+      caddy_0.header.Strict-Transport-Security: '"max-age=31536000; includeSubDomains"'
+      caddy_0.header.X-Content-Type-Options: nosniff
+      caddy_0.header.Referrer-Policy: strict-origin-when-cross-origin
+      caddy_1: rhasta.space, riftline.rhasta.space
+      caddy_1.redir: 'https://www.rhasta.space{uri} permanent'
     healthcheck:
       # BusyBox wget. Two -O flags (as in `-qO- ... -O /dev/null`) is the kind
       # of thing that works until it does not.

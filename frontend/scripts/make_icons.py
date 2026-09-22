@@ -62,7 +62,7 @@ def card() -> None:
     wordmark(d, (0, 150, 1200, 380), 150)
     tag = font(38)
     d.text((600, 440), "League of Legends stats with the working shown", font=tag, fill=INK_DIM, anchor="mm")
-    d.text((600, 500), "riftline.rhasta.space", font=font(28), fill=GOLD, anchor="mm")
+    d.text((600, 500), "www.rhasta.space", font=font(28), fill=GOLD, anchor="mm")
     img.save(PUBLIC / "og-default.png", optimize=True)
 
 

@@ -102,7 +102,7 @@ class Settings(BaseSettings):
 
     # Where the site lives, for the sitemap and the canonical links the
     # prerenderer writes. Absolute, because a sitemap must be.
-    site_origin: str = Field(default="https://riftline.rhasta.space", alias="SITE_ORIGIN")
+    site_origin: str = Field(default="https://www.rhasta.space", alias="SITE_ORIGIN")
 
     cors_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173", alias="CORS_ORIGINS"
