@@ -205,10 +205,10 @@ function GroupPage({ slug }: { slug: string }) {
             {data.name}
           </h1>
           <p className="mt-2 max-w-[78ch] text-sm leading-relaxed text-ink-dim">
-            Ordered by official rank. Every other column sorts, and Riftline does not fold them
-            into one rating: Riot's rules keep ranking to Riot. Figures come from each player's
-            newest {data.history_cap.toLocaleString()} games that Riftline holds, and need{' '}
-            {data.min_games} games in the queues chosen before they are shown.
+            Ordered by official rank. Every other column sorts, but Riftline does not combine
+            them into a rating of its own: Riot does not allow one. Figures come from each
+            player's newest {data.history_cap.toLocaleString()} games that Riftline holds, and
+            need {data.min_games} games in the queues chosen before they are shown.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
