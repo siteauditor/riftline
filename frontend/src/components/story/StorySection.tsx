@@ -112,6 +112,7 @@ export default function StorySection({
             <p className="mb-3 mt-0.5 text-xs text-ink-faint">
               Biggest first, numbered as on the curve: the change in win chance from just before
               each to a minute after.
+              {subject && ` ${subject.champion.name} was on the ${team === 100 ? 'blue' : 'red'} side.`}
             </p>
             <Moments moments={story.moments} team={team} />
           </div>
