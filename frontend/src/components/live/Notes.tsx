@@ -14,7 +14,7 @@ export default function Notes({ game }: { game: LiveGame }) {
           Each lane is inferred from the champions and their summoner spells, and
           a team&apos;s only Smite is always the jungler. The{' '}
           {pct(model.accuracy, 1)} above was measured on{' '}
-          {model.players_tested.toLocaleString()} players from our stored games
+          {model.players_tested.toLocaleString('en-US')} players from our stored games
           that the model had not seen. A lane marked &ldquo;likely&rdquo; is one
           of the closer calls, and those are right about half to two thirds of
           the time.

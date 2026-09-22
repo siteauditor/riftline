@@ -27,7 +27,7 @@ export default function MostWornSkins() {
     <section className="mx-auto max-w-[1280px] px-4 pb-12">
       <SectionTitle eyebrow="Live games" title="Most worn skins" />
       <p className="mt-1 max-w-[62ch] text-sm text-ink-dim">
-        Counted from <span className="tnum">{board.data!.total.toLocaleString()}</span> players seen
+        Counted from <span className="tnum">{board.data!.total.toLocaleString('en-US')}</span> players seen
         in live games looked up here. Riot does not say which skin anyone wore once a game is
         over, so this is the only way to count them. Base skins are left out.
       </p>

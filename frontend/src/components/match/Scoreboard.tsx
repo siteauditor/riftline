@@ -492,10 +492,10 @@ function sampleLine(model: ScoreModel): string {
   if (counts.length === 0) return 'Measured against our stored matches.'
   const same = counts.every((n) => n === counts[0])
   if (same) {
-    return `Measured against ${counts[0].toLocaleString()} games in each role in our corpus.`
+    return `Measured against ${counts[0].toLocaleString('en-US')} games in each role in our corpus.`
   }
   const parts = Object.entries(model.samples).map(
-    ([role, n]) => `${n.toLocaleString()} ${positionLabel(role).toLowerCase()}`,
+    ([role, n]) => `${n.toLocaleString('en-US')} ${positionLabel(role).toLowerCase()}`,
   )
   return `Measured against ${parts.join(', ')} games in our corpus.`
 }

@@ -122,7 +122,7 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
         className={`${expanded ? '' : 'hidden'} border-t border-line-soft px-4 py-2 text-xs leading-relaxed text-ink-faint sm:block`}
       >
         Each bar is where a typical game of theirs lands among
-        {role.sample ? ` ${role.sample.toLocaleString()} ` : ' the '}
+        {role.sample ? ` ${role.sample.toLocaleString('en-US')} ` : ' the '}
         {positionLabel(role.position).toLowerCase()} games Riftline holds, with 50 in the
         middle.
       </p>

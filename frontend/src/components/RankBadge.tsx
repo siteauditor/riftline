@@ -77,7 +77,7 @@ export default function RankBadge({
       title={
         title ??
         (leaguePoints != null
-          ? `${tierLabel(tier, division)}, ${leaguePoints.toLocaleString()} LP`
+          ? `${tierLabel(tier, division)}, ${leaguePoints.toLocaleString('en-US')} LP`
           : tierLabel(tier, division))
       }
       className={`tnum inline-flex shrink-0 items-center gap-1 ${pad} font-600`}
@@ -91,7 +91,7 @@ export default function RankBadge({
       <Crest tier={tier} division={division} size="pill" title={null} />
       {tierLabel(tier, division)}
       {showLp && leaguePoints != null && (
-        <span className="font-500 opacity-70">{leaguePoints.toLocaleString()} LP</span>
+        <span className="font-500 opacity-70">{leaguePoints.toLocaleString('en-US')} LP</span>
       )}
     </span>
   )

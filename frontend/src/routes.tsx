@@ -72,7 +72,21 @@ export const routes: RouteObject[] = [
           ]),
         ),
       },
-      { path: 'summoner/:platform/:name/:tag', element: <Profile /> },
+      {
+        path: 'summoner/:platform/:name/:tag',
+        element: <Profile />,
+        // From storage only: the manifest lists a profile once the player has
+        // enough scored games, and rendering a thousand of them must not cost
+        // a Riot call. The page shows these until its live queries answer.
+        handle: handle(({ params, queryClient }) => {
+          const { platform = '', name = '', tag = '' } = params
+          return Promise.all([
+            queryClient.prefetchQuery(queries.profileStored(platform, name, tag)),
+            queryClient.prefetchQuery(queries.matchesStored(platform, name, tag)),
+            queryClient.prefetchQuery(queries.analyticsStored(platform, name, tag)),
+          ])
+        }),
+      },
       { path: 'summoner/:platform/:name/:tag/champions', element: <PlayerChampions /> },
       { path: 'summoner/:platform/:name/:tag/mastery', element: <Mastery /> },
       { path: 'summoner/:platform/:name/:tag/live', element: <LiveGame /> },

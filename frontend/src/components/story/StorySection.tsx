@@ -88,7 +88,7 @@ export default function StorySection({
         {published && model && (
           <p className="max-w-[60ch] text-xs leading-relaxed text-ink-faint">
             {subject ? 'Your' : "Blue side's"} chance to win, from a model trained on{' '}
-            {model.trained_games.toLocaleString()} of our ranked solo games
+            {model.trained_games.toLocaleString('en-US')} of our ranked solo games
             {story.queue_id === 440 ? ' (this is a flex game)' : ''}. On games it had not seen it
             called the winner {model.accuracy !== null ? pct(model.accuracy) : ''} of the time
             {early ? `, ${pct(early.accuracy)} in the first ten minutes` : ''}.{' '}

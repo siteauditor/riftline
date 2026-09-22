@@ -116,6 +116,21 @@ class PlayerService:
         await self.ensure_summoner(player, platform, refresh=refresh)
         return player
 
+    async def resolve_stored(self, platform_name: str, game_name: str, tag_line: str) -> Player:
+        """The row we hold for a Riot ID, and nothing from Riot.
+
+        For the prerendered profile: a page is written for every player with
+        enough scored games, and a thousand pages each spending an account-v1
+        call would be the whole key's budget for twenty minutes. Nothing here
+        is refreshed either, so the answer is whatever the last visit left,
+        which is what the page says it is.
+        """
+        platform = resolve_platform(platform_name)
+        player = await self._find_cached(platform, game_name, tag_line.lstrip("#"))
+        if player is None:
+            raise PlayerNotFound(f"{game_name}#{tag_line} is not stored for {platform.label}")
+        return player
+
     async def _find_cached(
         self, platform: Platform, game_name: str, tag_line: str
     ) -> Player | None:
@@ -296,6 +311,11 @@ class PlayerService:
             return None
 
     # ------------------------------------------------------------------ ranks
+
+    async def stored_ranks(self, player: Player) -> list[RankedEntry]:
+        """The ranks as last read, from storage only."""
+        stmt = select(RankedEntry).where(RankedEntry.puuid == player.puuid)
+        return list((await self.session.execute(stmt)).scalars())
 
     async def ranks(
         self, player: Player, platform_name: str, *, refresh: bool = False

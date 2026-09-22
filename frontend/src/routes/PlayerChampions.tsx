@@ -224,7 +224,7 @@ export default function PlayerChampions() {
             </table>
           </div>
           <p className="mt-3 text-xs leading-relaxed text-ink-faint">
-            From {data.games_analysed.toLocaleString()} stored games, not the whole
+            From {data.games_analysed.toLocaleString('en-US')} stored games, not the whole
             season. Scores and gold at 14 cover only the games that were scored or have a
             timeline, and each shows how many. The{' '}
             <Link to={base} className="underline decoration-line underline-offset-2 hover:text-ink">
@@ -300,7 +300,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
       </td>
       <td className="tnum py-2 pl-3 text-right text-ink">{row.cs_per_min.toFixed(1)}</td>
       <td className="tnum py-2 pl-3 text-right text-ink">
-        {Math.round(row.damage_per_min).toLocaleString()}
+        {Math.round(row.damage_per_min).toLocaleString('en-US')}
       </td>
       <td className="tnum py-2 pl-3 text-right">
         {row.avg_score !== null ? (
@@ -321,7 +321,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
           <>
             <span className={row.avg_gold_diff_14 >= 0 ? 'text-win' : 'text-loss'}>
               {row.avg_gold_diff_14 >= 0 ? '+' : ''}
-              {Math.round(row.avg_gold_diff_14).toLocaleString()}
+              {Math.round(row.avg_gold_diff_14).toLocaleString('en-US')}
             </span>
             <span className="block text-[11px] text-ink-faint">
               {row.timeline_games} game{row.timeline_games === 1 ? '' : 's'}

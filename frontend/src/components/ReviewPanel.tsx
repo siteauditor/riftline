@@ -30,7 +30,7 @@ export default function ReviewPanel({
         {main && (
           <div>
             <p className="mb-2 text-ink-faint">
-              As {positionLabel(main.position).toLowerCase()}, over {main.games.toLocaleString()}{' '}
+              As {positionLabel(main.position).toLowerCase()}, over {main.games.toLocaleString('en-US')}{' '}
               {main.games === 1 ? 'game' : 'games'} with a timeline
             </p>
             {main.withheld ? (

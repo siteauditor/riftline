@@ -8,22 +8,32 @@ left out of the sitemap by accident.
 
 A page is indexable when the corpus supports what it shows, on the floors
 the pages themselves already apply: a champion needs `TIER_MIN_GAMES` in some
-role, an item needs enough buyers to be compared with its slot. Those floors
-are measured on a patch that has settled (`index_patch`), not on the newest
-patch at the moment it arrives, or every champion page would flip to noindex
-on patch day and back a week later.
+role, an item needs enough buyers to be compared with its slot, a player
+needs `MIN_SCORED_FOR_PROFILE` scored games. The first two are measured on a
+patch that has settled (`index_patch`), not on the newest patch at the moment
+it arrives, or every champion page would flip to noindex on patch day and
+back a week later.
+
+Profiles are the one kind that is not written for every subject. A page is
+listed only for a player with enough scored games in storage, and it is
+rendered from storage alone (`?source=stored` on the summoner routes), so a
+thousand profile pages cost no Riot call. A profile below the floor is not in
+the manifest at all: the shell serves it, noindex, and the page still works.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from urllib.parse import quote
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ChampionStat, ItemStat, Match
+from app.db.models import ChampionStat, ItemStat, Match, MatchParticipant, Player
 from app.services.aggregate import ALL_BRACKETS, POSITIONS, TIER_MIN_GAMES
+from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
 from app.services.static_data import StaticDataService
 
 INDEX_QUEUE = 420
@@ -35,6 +45,14 @@ INDEX_PATCH_MIN_MATCHES = 500
 # purchases (SLOT_MIN_GAMES on the item route), and a page without its main
 # figure is not one to send a crawler to.
 ITEM_MIN_BUYERS = 30
+
+# A Riot ID becomes two path segments, and the prerendered file is named
+# after the decoded path, the way nginx matches `$uri` against the disk.
+# A segment with a path delimiter, an escape or a character no file system
+# takes cannot be that file, so such a player is left out rather than
+# written somewhere the URL will never find. Riot allows none of these in a
+# game name or tag line, so in practice this excludes nobody.
+_UNSAFE_SEGMENT = re.compile(r'[\x00-\x1f/\\%?#:*"<>|]')
 
 FIXED_PAGES: tuple[tuple[str, str], ...] = (
     ("/", "daily"),
@@ -54,7 +72,7 @@ FIXED_PAGES: tuple[tuple[str, str], ...] = (
 @dataclass(slots=True)
 class Page:
     path: str
-    # fixed, champion, item, explainer.
+    # fixed, champion, item, explainer, profile.
     kind: str
     indexable: bool
     lastmod: datetime | None = None
@@ -63,6 +81,18 @@ class Page:
     required: bool = False
     # Why it is not indexable, when it is not.
     reason: str | None = None
+
+
+def path_safe(segment: str) -> bool:
+    return bool(segment) and segment not in (".", "..") and not _UNSAFE_SEGMENT.search(segment)
+
+
+def encode_path(path: str) -> str:
+    """The path as a URL, encoded the way the browser's `encodeURIComponent`
+    encodes each segment, so the sitemap's `loc` is the page's canonical to
+    the byte. `quote` leaves letters, digits and `_.-~` alone; the five other
+    characters `encodeURIComponent` keeps are added."""
+    return quote(path, safe="/!*'()")
 
 
 def patch_key(patch: str) -> tuple[int, ...]:
@@ -191,7 +221,61 @@ async def pages(session: AsyncSession, sd: StaticDataService) -> tuple[str | Non
                 reason=None if enough else f"{bought} buyers on patch {patch}; needs {ITEM_MIN_BUYERS}",
             )
         )
+
+    out.extend(await profile_pages(session))
     return patch, out
+
+
+async def profile_pages(session: AsyncSession) -> list[Page]:
+    """One page per player with enough scored games in storage.
+
+    The floor is the profile's own (`MIN_SCORED_FOR_PROFILE`): below it the
+    page withholds its score breakdown, and a profile that is a rank and a
+    list of games is what every other site already has. `lastmod` is the
+    newest stored game, which is when the page's numbers last moved.
+
+    A row whose `search_name` was retired (the player renamed, someone else
+    took the name) is skipped: its URL would not resolve, stored or live.
+    """
+    rows = (
+        await session.execute(
+            select(
+                Player.platform,
+                Player.game_name,
+                Player.tag_line,
+                func.count(),
+                func.max(Match.game_creation),
+            )
+            .join(MatchParticipant, MatchParticipant.puuid == Player.puuid)
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(
+                Player.game_name.is_not(None),
+                Player.tag_line.is_not(None),
+                Player.search_name.is_not(None),
+                MatchParticipant.performance_score.is_not(None),
+                Match.is_remake.is_(False),
+            )
+            .group_by(Player.puuid)
+            .having(func.count() >= MIN_SCORED_FOR_PROFILE)
+        )
+    ).all()
+    out: list[Page] = []
+    for platform, game_name, tag_line, _scored, newest in sorted(
+        rows, key=lambda r: (r[1].casefold(), r[2])
+    ):
+        if not (path_safe(game_name) and path_safe(tag_line)):
+            continue
+        out.append(
+            Page(
+                path=f"/summoner/{platform}/{game_name}/{tag_line}",
+                kind="profile",
+                indexable=True,
+                lastmod=datetime.fromtimestamp(newest / 1000, tz=UTC) if newest else None,
+                changefreq="daily",
+                reason=None,
+            )
+        )
+    return out
 
 
 def sitemap_xml(origin: str, entries: list[Page]) -> str:
@@ -203,7 +287,7 @@ def sitemap_xml(origin: str, entries: list[Page]) -> str:
         if not page.indexable:
             continue
         lines.append("  <url>")
-        lines.append(f"    <loc>{origin}{_escape(page.path)}</loc>")
+        lines.append(f"    <loc>{origin}{_escape(encode_path(page.path))}</loc>")
         if page.lastmod is not None:
             lines.append(f"    <lastmod>{page.lastmod.date().isoformat()}</lastmod>")
         lines.append(f"    <changefreq>{page.changefreq}</changefreq>")

@@ -163,8 +163,8 @@ function PlayerCell({ member, cap }: { member: GroupMember; cap: number }) {
         <span className="block truncate text-[11px] text-ink-faint">
           {member.platform_label}
           {member.history.pending
-            ? `, loading: ${member.history.stored.toLocaleString()} of up to ${cap.toLocaleString()} games`
-            : `, ${member.history.stored.toLocaleString()} games stored`}
+            ? `, loading: ${member.history.stored.toLocaleString('en-US')} of up to ${cap.toLocaleString('en-US')} games`
+            : `, ${member.history.stored.toLocaleString('en-US')} games stored`}
         </span>
       </span>
     </span>
@@ -265,9 +265,9 @@ export default function MemberTable({
                         ) : c.key === 'score' ? (
                           <ScoreCell member={m} />
                         ) : c.key === 'games' ? (
-                          <span className="text-ink">{m.games.toLocaleString()}</span>
+                          <span className="text-ink">{m.games.toLocaleString('en-US')}</span>
                         ) : c.key === 'damage' ? (
-                          m.damage_per_min === null ? '–' : Math.round(m.damage_per_min).toLocaleString()
+                          m.damage_per_min === null ? '–' : Math.round(m.damage_per_min).toLocaleString('en-US')
                         ) : (
                           num(c.value(m), c.key === 'kda' ? 2 : 1)
                         )}
@@ -403,7 +403,7 @@ function MemberDetail({ member, group }: { member: GroupMember; group: Group }) 
                 <dd className="text-ink">{num(member.cs_per_min)}</dd>
                 <dt className="text-ink-faint">Damage per minute</dt>
                 <dd className="text-ink">
-                  {member.damage_per_min === null ? '–' : Math.round(member.damage_per_min).toLocaleString()}
+                  {member.damage_per_min === null ? '–' : Math.round(member.damage_per_min).toLocaleString('en-US')}
                 </dd>
                 <dt className="text-ink-faint">Vision per minute</dt>
                 <dd className="text-ink">{num(member.vision_per_min, 2)}</dd>
@@ -463,13 +463,13 @@ function MemberDetail({ member, group }: { member: GroupMember; group: Group }) 
         )}
       </div>
       <p className="text-xs leading-relaxed text-ink-faint">
-        {h.stored.toLocaleString()} games of theirs stored in every queue
+        {h.stored.toLocaleString('en-US')} games of theirs stored in every queue
         {h.oldest ? `, the oldest ${timeAgo(h.oldest)}` : ''}.{' '}
         {h.exhausted
           ? "That is all of their history Riot still lists."
           : h.read >= group.history_cap
-            ? `Their newest ${group.history_cap.toLocaleString()} are read, the most this group reads.`
-            : `${h.read.toLocaleString()} of their newest ${group.history_cap.toLocaleString()} read so far.`}
+            ? `Their newest ${group.history_cap.toLocaleString('en-US')} are read, the most this group reads.`
+            : `${h.read.toLocaleString('en-US')} of their newest ${group.history_cap.toLocaleString('en-US')} read so far.`}
         {member.rank_read_at && ` Rank read ${timeAgo(member.rank_read_at)}.`}
       </p>
     </div>

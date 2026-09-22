@@ -758,7 +758,7 @@ than fetching everything again. The head is decided by pure functions in
 `frontend/src/lib/seo.ts`, written by the prerenderer and updated in place by
 the client (`frontend/src/lib/head.ts`), so the document never holds two
 titles and the canonical a crawler read is the one the app keeps. It runs at
-every deploy and every night; on this corpus, 396 pages in about 12 seconds.
+every deploy and every night; on this corpus, about 420 pages in 13 seconds.
 
 **Indexable means prerendered.** nginx serves the prerendered file when one
 exists and the app shell otherwise, and the shell carries `X-Robots-Tag:
@@ -770,9 +770,21 @@ and item, but marked `noindex, follow` when the corpus is thin behind it:
 measured on a patch with at least 500 ranked games so pages do not flip to
 noindex on patch day. The sitemap (`/sitemap.xml`, proxied to `/api/meta/
 sitemap.xml`) lists the indexable pages from the same manifest, with
-`lastmod` only where the data behind a page carries a time. Match pages and
-profiles are not prerendered yet and so stay out of the index; group pages
-are private by design.
+`lastmod` only where the data behind a page carries a time.
+
+**Profiles are allowlisted, and rendered from storage alone.** A player's
+page is prerendered once they have `MIN_SCORED_FOR_PROFILE` (10) scored games
+in storage and a Riot ID we know, which is when the page has a score
+breakdown to show and not only the rank and games every other site has. The
+prerenderer asks the summoner routes with `?source=stored`: the player row
+as the last visit left it, the ranks as last read, the games we hold, and
+not one Riot call, so a thousand profile pages cost the key nothing. The
+page hydrates from those answers and its live queries then replace them, so
+a visitor gets Riot's fresher rank a moment later while a crawler gets a
+complete page. A profile below the floor, or one nobody has looked up by
+name, reaches the shell and stays out of the index; it still works. Match
+pages stay out too (a third have no timeline, so the page would lack its
+main content), and group pages are private by design.
 
 **Slugs.** Champions and items are addressed by name: `/champions/aatrox`,
 `/items/blade-of-the-ruined-king`. A champion slug is its Data Dragon key

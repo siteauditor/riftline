@@ -44,7 +44,7 @@ export default function WinRateRange({
     <span
       className="inline-flex flex-col items-end gap-1"
       title={
-        `${pct(rate, 1)} over ${games.toLocaleString()} games. The sample supports ` +
+        `${pct(rate, 1)} over ${games.toLocaleString('en-US')} games. The sample supports ` +
         `anything from ${pct(low, 1)} to ${pct(high, 1)}, and the list ranks on ${
           rankedOn === 'low' ? 'the low end' : 'the middle of that'
         }.`

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
 import ArtHeader from '../components/ArtHeader'
@@ -16,6 +16,9 @@ import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
 import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
+import { useNow } from '../lib/clock'
+import { profileSummary } from '../lib/prose'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { useMatchHistory } from '../lib/useMatchHistory'
 import {
@@ -71,16 +74,6 @@ const UNRANKED_SOLO = {
   numeric_rank: 0,
 }
 
-/** The clock, re-read every few seconds, for labels like "updated 2m ago". */
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(timer)
-  }, [intervalMs])
-  return now
-}
-
 export default function Profile() {
   const { platform = '', name = '', tag = '' } = useParams()
   // In the URL, so a filtered history survives a reload, a shared link, and
@@ -92,9 +85,17 @@ export default function Profile() {
     setSearch((prev) => withParams(prev, patch), { replace: true })
   const queryClient = useQueryClient()
 
+  // A prerendered profile carries the answers storage gave the prerenderer,
+  // under keys of their own (`queries.*Stored`). Each live query shows that
+  // answer as its placeholder: the page is complete on first render, the
+  // same on the server and in the browser, and moves to Riot's fresher
+  // answer when it arrives. A profile that was not prerendered has no such
+  // entries and loads as it always did.
   const profileQuery = useQuery({
     queryKey: ['profile', platform, name, tag],
     queryFn: () => api.profile(platform, name, tag),
+    placeholderData: () =>
+      queryClient.getQueryData(queries.profileStored(platform, name, tag).queryKey),
   })
 
   // Remembered only once Riot has answered, so a mistyped ID never becomes a
@@ -117,6 +118,11 @@ export default function Profile() {
     queue,
     champion: championFilter,
     enabled: profileQuery.isSuccess,
+    // The stored page is the unfiltered one.
+    placeholder:
+      queue === null && championFilter === null
+        ? () => queryClient.getQueryData(queries.matchesStored(platform, name, tag).queryKey)
+        : undefined,
   })
   const stored = matchesQuery.data?.pages[0]?.source === 'stored'
   const storedTotal = matchesQuery.data?.pages[0]?.stored_total ?? null
@@ -134,11 +140,16 @@ export default function Profile() {
   // and loading history is what stores them: on a first visit, asked in
   // parallel, they described nothing. Keyed on when the history last loaded,
   // so every new page is reflected, with the previous answer held meanwhile.
+  //
+  // Not while the history is still the placeholder: that would describe the
+  // stored games before the live page has been stored, and ask again a
+  // moment later. The stored analytics stand in until then.
   const analyticsQuery = useQuery({
     queryKey: ['analytics', platform, name, tag, matchesQuery.dataUpdatedAt],
     queryFn: () => api.analytics(platform, name, tag),
-    enabled: matchesQuery.isSuccess,
-    placeholderData: keepPreviousData,
+    enabled: matchesQuery.isSuccess && !matchesQuery.isPlaceholderData,
+    placeholderData: (previous) =>
+      previous ?? queryClient.getQueryData(queries.analyticsStored(platform, name, tag).queryKey),
     retry: false,
   })
 
@@ -184,7 +195,7 @@ export default function Profile() {
     champions.data?.champions.find((c) => c.id === topChampion)?.art_url ?? null
 
   async function refreshAll() {
-    const fresh = await api.profile(platform, name, tag, true)
+    const fresh = await api.profile(platform, name, tag, { refresh: true })
     queryClient.setQueryData(['profile', platform, name, tag], fresh)
     // Prefix matches: every queue filter's history, the Champions tab's
     // analytics and both rank-history lines.
@@ -196,6 +207,7 @@ export default function Profile() {
   }
 
   const ranks = profile.ranks.length > 0 ? profile.ranks : profile.plays_on ? [] : [UNRANKED_SOLO]
+  const summary = profileSummary(profile, analyticsQuery.data)
 
   return (
     <div style={{ '--accent': accent } as CSSProperties}>
@@ -204,6 +216,7 @@ export default function Profile() {
           profile.riot_id,
           platform,
           headline ? tierLabel(headline.tier, headline.division) : null,
+          summary[0],
         )}
       />
       {/*
@@ -239,7 +252,7 @@ export default function Profile() {
                     {tierLabel(headline.tier, headline.division)}
                   </span>
                   <span className="tnum text-ink-dim">
-                    {headline.league_points.toLocaleString()} LP
+                    {headline.league_points.toLocaleString('en-US')} LP
                   </span>
                 </span>
               )}
@@ -303,6 +316,20 @@ export default function Profile() {
 
           {/* Feed */}
           <div className="min-w-0 space-y-4 lg:col-start-2 lg:row-start-1">
+            {/* The page in sentences, from its own numbers: for a reader who
+                does not know the game, and for anything that reads the page
+                without a browser. */}
+            <section
+              aria-label={`${profile.riot_id} in brief`}
+              className="max-w-prose space-y-1.5 text-sm leading-relaxed text-ink-dim"
+            >
+              {summary.map((sentence, i) => (
+                <p key={i} className={i === 0 ? 'text-ink' : undefined}>
+                  {sentence}
+                </p>
+              ))}
+            </section>
+
             {matches.length > 0 && <FormStrip matches={matches} />}
 
             {analyticsQuery.data && (
@@ -349,7 +376,7 @@ export default function Profile() {
 
             {championFilter && stored && storedTotal !== null && (
               <p className="border-l-2 border-gold/50 py-1 pl-3 text-xs leading-relaxed text-ink-dim">
-                {storedTotal.toLocaleString()} {championName} {storedTotal === 1 ? 'game' : 'games'}{' '}
+                {storedTotal.toLocaleString('en-US')} {championName} {storedTotal === 1 ? 'game' : 'games'}{' '}
                 we hold{queue ? ` in ${QUEUE_FILTERS.find((f) => f.id === queue)?.label ?? 'this queue'}` : ''}.
                 Riot cannot filter history by champion, so older games show here once more of
                 the history has been loaded.{' '}
@@ -447,6 +474,7 @@ export default function Profile() {
 
 /** "#257 EUW": where they stand on the stored solo ladder of their shard. */
 function LadderChip({ ladder }: { ladder: NonNullable<ProfileData['ladder']> }) {
+  const now = useNow()
   const params = new URLSearchParams({
     platform: ladder.platform,
     tier: ladder.tier,
@@ -457,14 +485,14 @@ function LadderChip({ ladder }: { ladder: NonNullable<ProfileData['ladder']> }) 
   const tier = tierLabel(ladder.tier)
   const label =
     ladder.position !== null
-      ? `#${ladder.position.toLocaleString()} ${ladder.platform_label}`
-      : `#${ladder.tier_position.toLocaleString()} in ${tier}`
+      ? `#${ladder.position.toLocaleString('en-US')} ${ladder.platform_label}`
+      : `#${ladder.tier_position.toLocaleString('en-US')} in ${tier}`
   const title =
     (ladder.position !== null
       ? `${ordinal(ladder.position)} on the ${ladder.platform_label} solo ladder, ` +
         `${ordinal(ladder.tier_position)} in ${tier}. `
       : `${ordinal(ladder.tier_position)} in ${tier} on ${ladder.platform_label}. `) +
-    `From the ladder as it stood ${timeAgo(ladder.as_of)}.`
+    `From the ladder as it stood ${timeAgo(ladder.as_of, now)}.`
   return (
     <Link
       to={`/leaderboards?${params.toString()}`}
@@ -489,7 +517,7 @@ function UpdateControl({
   updatedAt: number | null
   onUpdate: () => Promise<void>
 }) {
-  const now = useNow(5_000)
+  const now = useNow()
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState<string | null>(null)
   const cooling = updatedAt !== null && now - updatedAt < UPDATE_COOLDOWN_MS

@@ -28,7 +28,7 @@ export default function Together({
         <p className="mt-0.5 text-sm text-ink-dim">
           {together.games === 0
             ? 'No stored game has two of this group on the same team yet.'
-            : `${together.games.toLocaleString()} stored ${
+            : `${together.games.toLocaleString('en-US')} stored ${
                 together.games === 1 ? 'game' : 'games'
               } with two or more of the group on one team, ${together.wins} won (${pct(
                 together.wins / together.games,

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 
-import { api, type MatchSummary } from './api'
+import { api, type MatchHistory, type MatchSummary } from './api'
 
 /** Twenty is what Riot's match-v5 hands back in one call, and what a page of
  *  history costs in rate limit. */
@@ -27,7 +27,15 @@ export function useMatchHistory(
     queue = null,
     champion = null,
     enabled = true,
-  }: { queue?: number | null; champion?: number | null; enabled?: boolean } = {},
+    placeholder,
+  }: {
+    queue?: number | null
+    champion?: number | null
+    enabled?: boolean
+    /** A first page to show until the real one loads: the prerendered
+     *  profile's stored page, so the list is there before the fetch. */
+    placeholder?: () => MatchHistory | undefined
+  } = {},
 ) {
   const query = useInfiniteQuery({
     // The champion is last, so the unfiltered history keeps the key the live
@@ -41,6 +49,12 @@ export function useMatchHistory(
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * MATCH_PAGE : undefined,
     enabled,
+    placeholderData: placeholder
+      ? () => {
+          const page = placeholder()
+          return page ? { pages: [page], pageParams: [0] } : undefined
+        }
+      : undefined,
   })
 
   const matches: MatchSummary[] = useMemo(

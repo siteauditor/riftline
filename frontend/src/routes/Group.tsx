@@ -198,7 +198,7 @@ function GroupPage({ slug }: { slug: string }) {
           <p className="mt-2 max-w-[78ch] text-sm leading-relaxed text-ink-dim">
             Ordered by official rank. Every other column sorts, but Riftline does not combine
             them into a rating of its own: Riot does not allow one. Figures come from each
-            player's newest {data.history_cap.toLocaleString()} games that Riftline holds, and
+            player's newest {data.history_cap.toLocaleString('en-US')} games that Riftline holds, and
             need {data.min_games} games in the queues chosen before they are shown.
           </p>
         </div>

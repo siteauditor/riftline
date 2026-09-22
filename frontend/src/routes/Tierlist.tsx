@@ -11,7 +11,7 @@ import WinRateRange from '../components/WinRateRange'
 import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
 import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
-import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
+import { compact, pct, positionLabel, shortDate, tierColor, tierLabel } from '../lib/format'
 import {
   foldName,
   SLICE_DEFAULTS,
@@ -285,9 +285,7 @@ function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']>
   const top = lobby.buckets[0]
   const label = (tier: string) => (tier === 'MASTER+' ? 'Master+' : tierLabel(tier))
   const colour = (tier: string) => tierColor(tier === 'MASTER+' ? 'MASTER' : tier)
-  const measuredOn = lobby.as_of
-    ? new Date(lobby.as_of).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    : null
+  const measuredOn = lobby.as_of ? shortDate(lobby.as_of) : null
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-ink-dim">
       <span className="flex h-1.5 w-32 overflow-hidden rounded-full bg-raised" aria-hidden>
@@ -303,7 +301,7 @@ function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']>
         games were {label(top.tier)} lobbies
         <span className="text-ink-faint">
           {' '}
-          ({lobby.measured.toLocaleString()} of {lobby.total.toLocaleString()} measured)
+          ({lobby.measured.toLocaleString('en-US')} of {lobby.total.toLocaleString('en-US')} measured)
         </span>
       </span>
       <span className="text-ink-faint">
@@ -359,7 +357,7 @@ function Gold({ row }: { row: ChampionMetaRow }) {
       title={`Average gold lead at 14 minutes over ${row.timeline_games} games with a timeline`}
     >
       {gold >= 0 ? '+' : ''}
-      {Math.round(gold).toLocaleString()}
+      {Math.round(gold).toLocaleString('en-US')}
     </span>
   )
 }

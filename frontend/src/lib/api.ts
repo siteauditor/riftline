@@ -591,8 +591,9 @@ export interface MatchHistory {
   start: number
   count: number
   has_more: boolean
-  /** "stored" for a champion filter, which Riot cannot do and storage can.
-   *  Optional: a server one deploy behind does not send it. */
+  /** "stored" for a champion filter, which Riot cannot do and storage can,
+   *  and for a page asked for with `source=stored`. Optional: a server one
+   *  deploy behind does not send it. */
   source?: 'riot' | 'stored'
   /** With "stored": how many games match in all. */
   stored_total?: number | null
@@ -1741,22 +1742,41 @@ export const api = {
 
   method: () => request<MethodReport>('/api/method'),
 
-  profile: (platform: string, name: string, tag: string, refresh = false) =>
-    request<Profile>(
-      `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}${refresh ? '?refresh=true' : ''}`,
-    ),
+  /** `source: 'stored'` answers from storage alone, with no Riot call and no
+   *  refresh: what the prerenderer asks for. */
+  profile: (
+    platform: string,
+    name: string,
+    tag: string,
+    opts: { refresh?: boolean; source?: 'stored' } = {},
+  ) => {
+    const params = new URLSearchParams()
+    if (opts.refresh) params.set('refresh', 'true')
+    if (opts.source) params.set('source', opts.source)
+    const qs = params.toString()
+    return request<Profile>(
+      `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}${qs ? `?${qs}` : ''}`,
+    )
+  },
 
   matches: (
     platform: string,
     name: string,
     tag: string,
-    opts: { start?: number; count?: number; queue?: number | null; champion?: number | null } = {},
+    opts: {
+      start?: number
+      count?: number
+      queue?: number | null
+      champion?: number | null
+      source?: 'stored'
+    } = {},
   ) => {
     const params = new URLSearchParams()
     if (opts.start) params.set('start', String(opts.start))
     if (opts.count) params.set('count', String(opts.count))
     if (opts.queue) params.set('queue', String(opts.queue))
     if (opts.champion) params.set('champion', String(opts.champion))
+    if (opts.source) params.set('source', opts.source)
     const qs = params.toString()
     return request<MatchHistory>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/matches${qs ? `?${qs}` : ''}`,
@@ -1808,11 +1828,12 @@ export const api = {
     platform: string,
     name: string,
     tag: string,
-    opts: { queue?: number | null; limit?: number } = {},
+    opts: { queue?: number | null; limit?: number; source?: 'stored' } = {},
   ) => {
     const params = new URLSearchParams()
     if (opts.queue) params.set('queue', String(opts.queue))
     if (opts.limit) params.set('limit', String(opts.limit))
+    if (opts.source) params.set('source', opts.source)
     const qs = params.toString()
     return request<Analytics>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}/analytics${qs ? `?${qs}` : ''}`,

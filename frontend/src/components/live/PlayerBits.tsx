@@ -49,7 +49,7 @@ export function MasteryChip({ p }: { p: LiveParticipant }) {
     <span
       className="tnum whitespace-nowrap text-[11px] text-ink-dim"
       title={
-        `Mastery ${m.level} on ${p.champion.name}, ${m.points.toLocaleString()} points` +
+        `Mastery ${m.level} on ${p.champion.name}, ${m.points.toLocaleString('en-US')} points` +
         (m.last_play_time ? `. Last played ${timeAgo(m.last_play_time)}.` : '.')
       }
     >

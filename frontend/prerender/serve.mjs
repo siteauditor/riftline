@@ -63,7 +63,10 @@ http
       res.end(Buffer.from(await upstream.arrayBuffer()))
       return
     }
-    const clean = url.pathname === '/' ? '/' : url.pathname.replace(/\/$/, '')
+    // Decoded, as nginx's $uri is: a profile whose name holds a space is a
+    // file with a space in its name.
+    const decoded = decodeURIComponent(url.pathname)
+    const clean = decoded === '/' ? '/' : decoded.replace(/\/$/, '')
     const candidates = [
       path.join(pages, clean === '/' ? 'index.html' : `${clean.slice(1)}.html`),
       path.join(dist, clean.slice(1) || 'nothing'),

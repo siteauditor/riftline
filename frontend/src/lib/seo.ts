@@ -233,15 +233,18 @@ export const heads = {
     }
   },
 
-  profile(riotId: string, platform: string, rank?: string | null): PageHead {
+  /** `brief` is the page's own first sentence (rank and record), when the
+   *  profile has loaded; the generic description stands in until then. */
+  profile(riotId: string, platform: string, rank?: string | null, brief?: string): PageHead {
     const [name, tag] = riotId.split('#')
     const platformLabel = regionLabel(platform)
     const path = `/summoner/${platform}/${encodeURIComponent(name ?? '')}/${encodeURIComponent(tag ?? '')}`
     return {
       title: titled(`${riotId}${rank ? `, ${rank}` : ''}, ${platformLabel} stats`),
       description:
+        brief ??
         `${riotId} on ${platformLabel}: rank, match history with a performance score for every game, ` +
-        'champions, mastery, and how their lanes and deaths compare with the same role.',
+          'champions, mastery, and how their lanes and deaths compare with the same role.',
       path,
     }
   },

@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
 import { api, type SliceQuery } from './api'
+import { MATCH_PAGE } from './useMatchHistory'
 
 /**
  * Every query a prerendered page reads, defined once.
@@ -60,5 +61,25 @@ export const queries = {
     queryOptions({
       queryKey: ['leaderboard', platform, slice.queueId, slice.tier, slice.division, slice.page],
       queryFn: () => api.leaderboard(platform, slice),
+    }),
+
+  // A profile as storage has it: what the prerenderer fetches, and nothing
+  // the browser ever fetches itself. Under their own keys, apart from the live
+  // queries the page runs, so a prerendered profile hydrates from these and
+  // the live answers replace them when they arrive.
+  profileStored: (platform: string, name: string, tag: string) =>
+    queryOptions({
+      queryKey: ['profile-stored', platform, name, tag],
+      queryFn: () => api.profile(platform, name, tag, { source: 'stored' }),
+    }),
+  matchesStored: (platform: string, name: string, tag: string) =>
+    queryOptions({
+      queryKey: ['matches-stored', platform, name, tag],
+      queryFn: () => api.matches(platform, name, tag, { count: MATCH_PAGE, source: 'stored' }),
+    }),
+  analyticsStored: (platform: string, name: string, tag: string) =>
+    queryOptions({
+      queryKey: ['analytics-stored', platform, name, tag],
+      queryFn: () => api.analytics(platform, name, tag, { source: 'stored' }),
     }),
 }

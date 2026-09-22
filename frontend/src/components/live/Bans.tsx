@@ -31,7 +31,7 @@ export default function Bans({ game }: { game: LiveGame }) {
                 title={
                   b.ban_rate === null
                     ? `${b.champion.name}, banned. We hold too few games of them on this patch to say how often that happens.`
-                    : `${b.champion.name} is banned in ${pct(b.ban_rate, 1)} of the ${(b.ban_rate_games ?? 0).toLocaleString()} games we hold on this patch.`
+                    : `${b.champion.name} is banned in ${pct(b.ban_rate, 1)} of the ${(b.ban_rate_games ?? 0).toLocaleString('en-US')} games we hold on this patch.`
                 }
               >
                 <span className="block size-9 overflow-hidden bg-raised grayscale">

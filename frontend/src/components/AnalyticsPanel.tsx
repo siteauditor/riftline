@@ -1,4 +1,5 @@
 import type { Analytics } from '../lib/api'
+import { useLocalOffsetHours } from '../lib/clock'
 import { pct, positionLabel } from '../lib/format'
 
 /**
@@ -13,18 +14,19 @@ import { pct, positionLabel } from '../lib/format'
  * read after the match list has stored the player's games, not beside it.
  */
 export default function AnalyticsPanel({ data }: { data: Analytics | undefined }) {
+  const offsetHours = useLocalOffsetHours()
   if (!data || data.games_analysed === 0) return null
 
   const peakGames = Math.max(...data.activity_utc, 1)
 
   // The server reports UTC buckets on purpose; the shift to local happens here,
-  // where the viewer's timezone is actually known.
+  // where the viewer's timezone is actually known (and, on a prerendered page,
+  // only once the browser has hydrated it: see `useLocalOffsetHours`).
   //
   // The offset is rounded to whole hours *before* the shift, not after. Rounding
   // afterwards turns a +05:30 offset into a fractional bucket index that can
   // land on 24, which reads back as undefined and silently drops an hour of
   // games. India and Newfoundland both hit that.
-  const offsetHours = Math.round(-new Date().getTimezoneOffset() / 60)
   const local = Array.from({ length: 24 }, (_, hour) => {
     const utcHour = (((hour - offsetHours) % 24) + 24) % 24
     return data.activity_utc[utcHour] ?? 0

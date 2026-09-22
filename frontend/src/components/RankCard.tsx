@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import Crest from './Crest'
 import { api, type RankHistory, type RankInfo } from '../lib/api'
-import { pct, tierColor, tierLabel } from '../lib/format'
+import { pct, shortDate, tierColor, tierLabel } from '../lib/format'
 
 interface PlayerKey {
   platform: string
@@ -44,7 +44,7 @@ export default function RankCard({
             <span className="display text-sm font-600" style={{ color }}>
               {tierLabel(rank.tier, rank.division)}
             </span>
-            <span className="text-ink">{rank.league_points.toLocaleString()} LP</span>
+            <span className="text-ink">{rank.league_points.toLocaleString('en-US')} LP</span>
             <span>
               <span className="text-win">{rank.wins}W</span>{' '}
               <span className="text-loss">{rank.losses}L</span>
@@ -90,7 +90,7 @@ export default function RankCard({
                 </p>
                 <p className="mt-1.5 text-sm text-ink-dim">
                   <span className="tnum font-600 text-ink">
-                    {rank.league_points.toLocaleString()}
+                    {rank.league_points.toLocaleString('en-US')}
                   </span>{' '}
                   LP
                 </p>
@@ -128,8 +128,7 @@ export default function RankCard({
 
 const DAY_MS = 86_400_000
 
-const dateLabel = (ms: number) =>
-  new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+const dateLabel = shortDate
 
 /**
  * The rank over time, from readings Riftline took itself.
@@ -197,7 +196,7 @@ function LpLine({ history }: { history: RankHistory }) {
         {points.map((p) => (
           <circle key={p.at} cx={x(p.at)} cy={y(p.numeric_rank)} r="2" fill="var(--accent)">
             <title>
-              {`${dateLabel(p.at)}: ${tierLabel(p.tier, p.division)}, ${p.league_points.toLocaleString()} LP`}
+              {`${dateLabel(p.at)}: ${tierLabel(p.tier, p.division)}, ${p.league_points.toLocaleString('en-US')} LP`}
             </title>
           </circle>
         ))}

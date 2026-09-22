@@ -92,7 +92,11 @@ because that opens training crawlers that fetch thousands of pages per
 referral on a box serving six sites, to keep a **rate-limiting rule** on the
 zone ahead of it (60 requests per 10 seconds per address, blocked for 10
 minutes). Both are dashboard settings under the zone's Security section;
-nothing in the repository sets them. To prove them from anywhere:
+nothing in the repository sets them. The crawler policy was set on
+2026-09-23 (Security > Settings > AI bot policies: Search, Agent and
+Training all Allow, Bot Preference Sync off), after which Googlebot,
+bingbot, GPTBot, ClaudeBot, PerplexityBot and CCBot all answered 200. To
+prove it from anywhere:
 
 ```bash
 for ua in Googlebot bingbot GPTBot ClaudeBot PerplexityBot; do
@@ -348,10 +352,10 @@ that work.
 - **The `riftline_pages` volume**, Compose's own (it holds nothing that a
   `docker compose run --rm prerender` cannot make again), mounted read-only
   into `web` and read-write into `prerender`. Each build's pages live in
-  their own directory; the two newest are kept. The first prerendered deploy
-  (5a11ead) created it under Compose's project-prefixed name,
-  `riftline_riftline_pages`, before the name was fixed in the compose file;
-  that volume is orphaned and can go: `docker volume rm riftline_riftline_pages`.
+  their own directory; the two newest are kept. (The first prerendered
+  deploy, 5a11ead, created it under Compose's project-prefixed name before
+  the name was fixed in the compose file; that orphan was removed on
+  2026-09-23.)
 - **The order of a deploy**: build, start the api, migrate, **prerender**,
   then start the web container. The prerender is fatal on purpose: a build
   that cannot render its pages is not switched to, and the web container
@@ -369,7 +373,10 @@ curl -sI https://riftline.rhasta.space/no-such-page | grep -i x-robots          
 The manifest of pages, and which of them are indexable, is `GET
 /api/meta/pages`; the sitemap nginx serves at `/sitemap.xml` is `GET
 /api/meta/sitemap.xml`, the same list filtered. `SITE_ORIGIN` in `.env` is the
-absolute origin both are written with.
+absolute origin both are written with. Profile pages are in the manifest
+for players with ten scored games and a known Riot ID, and are rendered
+with `?source=stored`, so the prerender never spends the Riot key however
+many players it lists; their number grows with the players people look up.
 
 ## Operating notes
 

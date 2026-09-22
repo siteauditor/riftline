@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 
 import type { MatchSummary, ParticipantBrief } from '../lib/api'
 import RankBadge from './RankBadge'
+import TimeAgo from './TimeAgo'
 import ItemIcon from './items/ItemIcon'
 import Scoreboard from './match/Scoreboard'
 import { LANE_TEXT, laneColor } from './story/lanes'
+import { useNow } from '../lib/clock'
 
 // Ranked solo and flex: the queues the win-chance model covers.
 const STORY_QUEUES = new Set([420, 440])
@@ -41,6 +43,7 @@ export default function MatchRow({
   puuid: string
 }) {
   const [open, setOpen] = useState(false)
+  const now = useNow()
   const { win, is_remake: remake } = match
 
   const edge = remake
@@ -63,7 +66,9 @@ export default function MatchRow({
       {/* Context */}
       <div className="flex items-baseline gap-2 sm:block">
         <p className="eyebrow truncate text-ink-dim">{match.queue_name}</p>
-        <p className="text-xs text-ink-faint">{timeAgo(match.game_creation)}</p>
+        <p className="text-xs text-ink-faint">
+          <TimeAgo at={match.game_creation} />
+        </p>
         {/* Measured, unlike the crawl bracket, but measured *late*: Riot keeps
             no historical rank, so this is where these players sit today, not
             where they sat when the game was played. The tooltip says so. */}
@@ -79,7 +84,7 @@ export default function MatchRow({
               title={
                 `Median rank of the ${match.lobby_ranked_players} of ` +
                 `${match.lobby_players_total} players we could identify, measured ` +
-                `${match.lobby_rank_measured_at ? timeAgo(match.lobby_rank_measured_at) : 'later'}. ` +
+                `${match.lobby_rank_measured_at ? timeAgo(match.lobby_rank_measured_at, now) : 'later'}. ` +
                 'This is their rank now, not their rank when this game was played.' +
                 (match.lobby_queue_matches_game
                   ? ''
@@ -168,7 +173,7 @@ export default function MatchRow({
                   `Riftline score ${match.score.toFixed(1)} of 10, ` +
                   `${ordinal(match.placement ?? 0)} of ten in this lobby. ` +
                   (match.score_sample
-                    ? `Measured against ${match.score_sample.toLocaleString()} games in this role.`
+                    ? `Measured against ${match.score_sample.toLocaleString('en-US')} games in this role.`
                     : '')
                 }
               >

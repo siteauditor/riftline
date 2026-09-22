@@ -184,11 +184,11 @@ function CorpusLine({ corpus }: { corpus: CorpusResponse }) {
 
   return (
     <p className="mt-6 max-w-xl text-xs leading-relaxed text-ink-faint">
-      Built from <span className="tnum text-ink-dim">{games.toLocaleString()}</span> ranked
+      Built from <span className="tnum text-ink-dim">{games.toLocaleString('en-US')}</span> ranked
       solo games
       {solo.length > 1 && (
         <>
-          , <span className="tnum text-ink-dim">{newest.matches.toLocaleString()}</span> of them
+          , <span className="tnum text-ink-dim">{newest.matches.toLocaleString('en-US')}</span> of them
         </>
       )}{' '}
       on patch {newest.patch}.
@@ -387,7 +387,7 @@ function BestGames({
         {best.data ? (
           <>
             , out of{' '}
-            <span className="tnum">{best.data.scored_players.toLocaleString()}</span>{' '}
+            <span className="tnum">{best.data.scored_players.toLocaleString('en-US')}</span>{' '}
             scored players
           </>
         ) : null}

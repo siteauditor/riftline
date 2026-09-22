@@ -71,6 +71,14 @@ router = APIRouter(prefix="/api/summoner", tags=["summoner"])
 
 PLATFORM_DESC = "Platform shard: na1, euw1, kr, eun1, br1, oc1, ..."
 
+# `?source=stored` answers from storage alone: the player row as the last
+# visit left it, the ranks as last read, the games we hold. It is what the
+# prerenderer asks for, so that writing a page for every player with enough
+# scored games costs no Riot call. It is not a refresh, and it says so in the
+# response where the shape allows (`source`, `basis`).
+SOURCE_DESC = "live (default) asks Riot where the cache is stale; stored reads storage only."
+SOURCE_PATTERN = "^(live|stored)$"
+
 
 @router.get("/{platform}/{game_name}/{tag_line}", response_model=ProfileResponse)
 async def get_profile(
@@ -84,22 +92,32 @@ async def get_profile(
         False,
         description="Re-fetch from Riot, once the cached answer is at least a minute old.",
     ),
+    source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
 ) -> ProfileResponse:
     """Profile header: level, icon, every ranked queue and the ladder position."""
     asked = resolve_platform(platform)
-    player = await players.resolve(platform, game_name, tag_line, refresh=refresh)
-    # Where this account's per-shard data actually is, which for an OCE Riot ID
-    # is usually SG2. Asked before the ranks, not after: reading league-v4 on
-    # the shard that has no record answers 200 with an empty list, and that
-    # renders as an unranked Challenger.
-    home = await players.effective_platform(player, asked)
-    ranks = await players.ranks(player, home.id, refresh=refresh)
-    elsewhere = home if home.id != asked.id else None
-    # Their level and icon live on that shard, so read them from there rather
-    # than showing a blank avatar for an account that plainly has one.
-    elsewhere_summoner = (
-        await players.summoner_snapshot(player.puuid, elsewhere) if elsewhere else None
-    )
+    if source == "stored":
+        player = await players.resolve_stored(platform, game_name, tag_line)
+        ranks = await players.stored_ranks(player)
+        # The ranks were read on one shard and the row says which; that is the
+        # home shard, without the match-id call `effective_platform` may make.
+        home = resolve_platform(player.league_platform) if player.league_platform else asked
+        elsewhere = home if home.id != asked.id else None
+        elsewhere_summoner = None
+    else:
+        player = await players.resolve(platform, game_name, tag_line, refresh=refresh)
+        # Where this account's per-shard data actually is, which for an OCE Riot
+        # ID is usually SG2. Asked before the ranks, not after: reading league-v4
+        # on the shard that has no record answers 200 with an empty list, and
+        # that renders as an unranked Challenger.
+        home = await players.effective_platform(player, asked)
+        ranks = await players.ranks(player, home.id, refresh=refresh)
+        elsewhere = home if home.id != asked.id else None
+        # Their level and icon live on that shard, so read them from there
+        # rather than showing a blank avatar for an account that plainly has one.
+        elsewhere_summoner = (
+            await players.summoner_snapshot(player.puuid, elsewhere) if elsewhere else None
+        )
     # Read from stored ladder snapshots only; no Riot call. On the home shard,
     # because a ladder is per shard just like the rank it is ordered by.
     solo = next((r for r in ranks if r.queue_type == "RANKED_SOLO_5x5"), None)
@@ -180,14 +198,19 @@ async def get_matches(
     champion: int | None = Query(
         None, ge=1, description="Champion id. Read from stored games: Riot cannot filter by it."
     ),
+    source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
 ) -> MatchHistoryResponse:
     """Match history.
 
     Cold pages are slow by design: each new match is one request against a
     budget of 100 per two minutes. Already-seen matches are served from storage.
-    With `champion`, the page is stored games only and makes no match calls.
+    With `champion` or `source=stored`, the page is stored games only and
+    makes no Riot call at all.
     """
-    player = await players.resolve(platform, game_name, tag_line)
+    if source == "stored":
+        player = await players.resolve_stored(platform, game_name, tag_line)
+    else:
+        player = await players.resolve(platform, game_name, tag_line)
     # Read the identifier out of the ORM object now. Storing matches can hit a
     # write race and roll back, and a rollback expires every object in the
     # session -- including this `player`. Touching it afterwards would emit a
@@ -197,7 +220,7 @@ async def get_matches(
     # Lane labels read the role spreads once for the whole page.
     lanes = await lane_labeler(matches.session)
 
-    if champion is not None:
+    if champion is not None or source == "stored":
         stored = await matches.stored_history(
             puuid, champion_id=champion, queue=queue, start=start, count=count
         )
@@ -273,15 +296,20 @@ async def get_analytics(
     sd: StaticDep,
     queue: int | None = Query(None, description="Riot queue id, e.g. 420."),
     limit: int = Query(300, ge=10, le=1000, description="Stored games to analyse."),
+    source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
 ) -> AnalyticsResponse:
     """Play style: role share, champion class mix, and when this player plays.
 
     Reads **stored matches only**, so it costs nothing beyond resolving the Riot
-    ID and can never be blocked by a rate limit. It therefore describes the games
-    we have fetched rather than a whole season, which the ``basis`` field says
-    outright instead of letting the number imply more than it means.
+    ID (and with ``source=stored``, not even that) and can never be blocked by a
+    rate limit. It therefore describes the games we have fetched rather than a
+    whole season, which the ``basis`` field says outright instead of letting
+    the number imply more than it means.
     """
-    player = await players.resolve(platform, game_name, tag_line)
+    if source == "stored":
+        player = await players.resolve_stored(platform, game_name, tag_line)
+    else:
+        player = await players.resolve(platform, game_name, tag_line)
     puuid = player.puuid
 
     rows = await matches.played_by(puuid, queue=queue, limit=limit)

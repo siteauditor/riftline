@@ -380,25 +380,26 @@ class MatchService:
         self,
         puuid: str,
         *,
-        champion_id: int,
+        champion_id: int | None = None,
         queue: int | None = None,
         start: int = 0,
         count: int = 20,
     ) -> StoredHistoryPage:
-        """This player's games on one champion, **from storage only**, newest first.
+        """This player's games **from storage only**, newest first.
 
-        Riot's history endpoint filters by queue, type and time, never by
-        champion, so a champion filter can only be read from the games we hold.
-        It costs no Riot call, and the response says it is stored games.
+        Two callers. The champion filter, because Riot's history endpoint
+        filters by queue, type and time, never by champion, so that filter
+        can only be read from the games we hold. And the prerendered profile,
+        which reads every player's page from storage so that rendering a
+        thousand of them costs no Riot call. Either way the response says it
+        is stored games.
 
         Remakes are left out, as `played_by` leaves them out, so the count
         matches the one the champions table shows beside the link here.
         """
-        conditions = [
-            MatchParticipant.puuid == puuid,
-            MatchParticipant.champion_id == champion_id,
-            Match.is_remake.is_(False),
-        ]
+        conditions = [MatchParticipant.puuid == puuid, Match.is_remake.is_(False)]
+        if champion_id is not None:
+            conditions.append(MatchParticipant.champion_id == champion_id)
         if queue is not None:
             conditions.append(Match.queue_id == queue)
         base = (

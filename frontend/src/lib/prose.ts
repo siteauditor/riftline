@@ -1,5 +1,5 @@
-import type { ChampionDetail, ChampionProfile, ItemDetail } from './api'
-import { pct, positionLabel } from './format'
+import type { Analytics, ChampionDetail, ChampionProfile, ItemDetail, Profile } from './api'
+import { pct, positionLabel, tierLabel } from './format'
 
 /**
  * Sentences built from a page's own numbers.
@@ -92,6 +92,57 @@ export function itemSummary(item: ItemDetail): string[] {
   if (f.champions.length > 0) {
     const top = f.champions.slice(0, 3).map((c) => c.champion.name)
     out.push(`It is built most by ${top.join(', ')}.`)
+  }
+  return out
+}
+
+/**
+ * A player in sentences: rank and record, then what the stored games say.
+ * The first sentence stands alone as the page's description. A role's score
+ * is mentioned only when the profile has enough scored games to offer it,
+ * the same floor the strengths panel applies.
+ */
+export function profileSummary(profile: Profile, analytics?: Analytics): string[] {
+  const id = profile.riot_id
+  const region = profile.platform_label
+  const out: string[] = []
+
+  const solo = profile.ranks.find((r) => r.queue === 'RANKED_SOLO_5x5' && r.tier)
+  if (solo) {
+    out.push(
+      `${id} is ${tierLabel(solo.tier, solo.division)} with ${n(solo.league_points)} LP in ranked solo on ${region}, ` +
+        `${n(solo.wins)} wins and ${n(solo.losses)} losses this season (${pct(solo.win_rate)}).`,
+    )
+  } else {
+    out.push(`${id} plays on ${region} and has no ranked solo placement this season.`)
+  }
+
+  if (!analytics || analytics.games_analysed === 0) return out
+  const games = analytics.games_analysed
+  const role = analytics.roles[0]
+  const t = analytics.totals
+  out.push(
+    `Over the ${n(games)} ${games === 1 ? 'game' : 'games'} Riftline holds, ${profile.game_name ?? id} ` +
+      (role ? `plays ${positionLabel(role.position).toLowerCase()} in ${pct(role.share)} of games and ` : '') +
+      `wins ${pct(t.win_rate)}, at a ${t.kda.toFixed(2)} KDA and ${t.cs_per_min.toFixed(1)} CS a minute.`,
+  )
+
+  const scored = role && analytics.score_profile.find((p) => p.position === role.position && p.enough)
+  if (scored) {
+    out.push(
+      `As ${positionLabel(scored.position).toLowerCase()}, their Riftline score averages ` +
+        `${scored.avg_score.toFixed(1)} over ${n(scored.scored_games)} scored games, ` +
+        `an average placement of ${scored.avg_placement.toFixed(1)} of 10 in the lobby` +
+        (scored.mvp ? `, with ${n(scored.mvp)} MVP ${scored.mvp === 1 ? 'game' : 'games'}` : '') +
+        '.',
+    )
+  }
+
+  const top = analytics.champions[0]
+  if (top && top.games >= 3) {
+    out.push(
+      `Their most played champion is ${top.champion.name}: ${n(top.games)} games at ${pct(top.win_rate)}.`,
+    )
   }
   return out
 }

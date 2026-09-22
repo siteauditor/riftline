@@ -10,7 +10,13 @@ from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.db.models import ChampionStat, ItemStat
-from app.services.seo import INDEX_PATCH_MIN_MATCHES, Page, pick_index_patch, sitemap_xml
+from app.services.seo import (
+    INDEX_PATCH_MIN_MATCHES,
+    Page,
+    encode_path,
+    pick_index_patch,
+    sitemap_xml,
+)
 from app.services.static_data import Champion, ItemInfo, static_data
 
 PATCH = "S1.00"
@@ -105,7 +111,11 @@ async def test_the_sitemap_is_xml_and_agrees_with_the_manifest(client, seeded):
     locs = {u.find("s:loc", ns).text for u in root.findall("s:url", ns)}
 
     manifest = (await client.get("/api/meta/pages")).json()
-    expected = {f"{manifest['origin']}{p['path']}" for p in manifest["pages"] if p["indexable"]}
+    # The manifest holds the decoded path (a profile's name may hold a space);
+    # the sitemap holds the URL.
+    expected = {
+        f"{manifest['origin']}{encode_path(p['path'])}" for p in manifest["pages"] if p["indexable"]
+    }
     assert locs == expected
     assert f"{manifest['origin']}/champions/thin" not in locs
     assert manifest["origin"].startswith("https://")

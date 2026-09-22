@@ -153,7 +153,7 @@ export default function Leaderboard() {
   const pageCount = data ? Math.max(1, Math.ceil(data.total / PER_PAGE)) : 1
   const rowsLabel =
     data && data.rows.length > 0
-      ? `ranks ${data.rows[0].position.toLocaleString()} to ${data.rows[data.rows.length - 1].position.toLocaleString()}`
+      ? `ranks ${data.rows[0].position.toLocaleString('en-US')} to ${data.rows[data.rows.length - 1].position.toLocaleString('en-US')}`
       : null
 
   // The ladder being read is the subject, so it sets the page's accent. On a
@@ -361,7 +361,7 @@ export default function Leaderboard() {
                         className="tnum display py-2.5 text-right text-lg font-700"
                         style={{ color: accent }}
                       >
-                        {row.league_points.toLocaleString()}
+                        {row.league_points.toLocaleString('en-US')}
                       </td>
                       <td className="tnum py-2.5 text-right text-ink-dim">
                         <span className="text-win">{row.wins}</span>

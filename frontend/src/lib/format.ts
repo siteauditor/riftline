@@ -64,6 +64,16 @@ export function compact(value: number): string {
   return String(value)
 }
 
+/** "Sep 20". One locale and one zone, so a prerendered page and the browser
+ *  that hydrates it spell the same day the same way. */
+export function shortDate(epochMs: number): string {
+  return new Date(epochMs).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 export function duration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
