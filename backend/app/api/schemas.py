@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.db.models import ChampionMastery, Match, MatchParticipant, Player, RankedEntry
 from app.riot.routing import Platform
@@ -28,7 +28,7 @@ from app.services.scores import (
     WEIGHTS_VERSION,
     badge_detail,
 )
-from app.services.static_data import StaticDataService
+from app.services.static_data import StaticDataService, static_data
 
 if TYPE_CHECKING:
     from app.services.live import PlayedRecord, PlayerRecord
@@ -82,11 +82,25 @@ class ChampionRef(BaseModel):
     name: str
     icon_url: str | None = None
 
+    # The name as a URL, computed here so every champion reference the API
+    # sends links the same way, wherever it was built. It reads the loaded
+    # static data; an unknown id (a test fixture, a champion newer than the
+    # cache) simply has none and the page links by id.
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def slug(self) -> str | None:
+        return static_data.champion_slug(self.id)
+
 
 class ItemRef(BaseModel):
     id: int
     name: str | None = None
     icon_url: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def slug(self) -> str | None:
+        return static_data.item_slug(self.id)
 
 
 class SpellRef(BaseModel):

@@ -8,7 +8,6 @@ import PositionIcon from '../components/PositionIcon'
 import SearchBar from '../components/SearchBar'
 import { SectionTitle } from '../components/Stat'
 import {
-  api,
   POSITIONS,
   type BestGame,
   type ChampionMetaRow,
@@ -19,11 +18,12 @@ import {
   pct,
   positionLabel,
   scoreColor,
-  timeAgo,
   winRateColor,
 } from '../lib/format'
 import { clearRecentSearches, useRecentSearches } from '../lib/storage'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
+import TimeAgo from '../components/TimeAgo'
 
 // Two accounts with a real history behind them. The previous EUW example was
 // `Caps#EUW`, which resolves to an unranked level 31 with no games: the first
@@ -50,20 +50,17 @@ function profilePath(platform: string, name: string, tag: string) {
  */
 export default function Home() {
   const meta = useQuery({
-    queryKey: ['meta', { minGames: 40 }],
-    queryFn: () => api.meta({ minGames: 40 }),
+    ...queries.meta({ minGames: 40 }),
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
   const corpus = useQuery({
-    queryKey: ['corpus'],
-    queryFn: api.corpus,
+    ...queries.corpus(),
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
   const best = useQuery({
-    queryKey: ['best-games'],
-    queryFn: api.bestGames,
+    ...queries.bestGames(),
     staleTime: 10 * 60 * 1000,
     retry: false,
   })
@@ -71,8 +68,7 @@ export default function Home() {
   // The hero's art is the strongest pick on the patch: the page's own subject,
   // not a stock background.
   const champions = useQuery({
-    queryKey: ['champions'],
-    queryFn: api.champions,
+    ...queries.champions(),
     staleTime: 6 * 60 * 60 * 1000,
   })
   const leadChampion = meta.data?.rows[0]?.champion.id
@@ -197,7 +193,7 @@ function CorpusLine({ corpus }: { corpus: CorpusResponse }) {
       )}{' '}
       on patch {newest.patch}.
       {corpus.latest_game_at !== null && (
-        <> The newest was played {timeAgo(corpus.latest_game_at)}.</>
+        <> The newest was played <TimeAgo at={corpus.latest_game_at} />.</>
       )}
     </p>
   )
@@ -314,7 +310,7 @@ function BestPicks({
           {picks.map((row) => (
             <li key={row.position}>
               <Link
-                to={`/champions/${row.champion.id}?position=${row.position}`}
+                to={`/champions/${row.champion.slug ?? row.champion.id}?position=${row.position}`}
                 className="group block overflow-hidden rounded-sm ring-1 ring-line transition-[box-shadow] hover:ring-gold"
               >
                 {/* Tile art, not a 48px icon. The art is the point. */}
@@ -468,7 +464,7 @@ function BestGameRow({ game }: { game: BestGame }) {
           <span className={game.win ? 'text-win' : 'text-loss'}>
             {game.win ? 'Win' : 'Loss'}
           </span>
-          <span className="text-ink-faint">{timeAgo(game.game_creation)}</span>
+          <TimeAgo at={game.game_creation} className="text-ink-faint" />
         </p>
       </div>
 

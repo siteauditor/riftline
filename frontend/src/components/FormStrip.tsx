@@ -7,8 +7,8 @@ import {
   pct,
   positionLabel,
   scoreColor,
-  timeAgo,
 } from '../lib/format'
+import TimeAgo from './TimeAgo'
 
 /**
  * Recent form as a rhythm.
@@ -155,7 +155,7 @@ export default function FormStrip({ matches }: Props) {
             )}
             <span className="text-ink-faint">
               {positionLabel(active.position)}, {duration(active.game_duration)},{' '}
-              {timeAgo(active.game_creation)}
+              <TimeAgo at={active.game_creation} />
             </span>
           </>
         ) : (

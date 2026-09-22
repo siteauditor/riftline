@@ -9,14 +9,14 @@ aggregate builds from stored games. Nothing here calls Riot.
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from sqlalchemy import select
 
 from app.api.deps import DbDep, StaticDep
 from app.api.schemas import ChampionRef
 from app.db.models import ItemChampionStat, ItemStat
 from app.services.aggregate import ALL_BRACKETS, ITEM_SLOTS, available_slices
-from app.services.static_data import GUIDE_GROUPS, ItemInfo, StaticDataService
+from app.services.static_data import GUIDE_GROUPS, ItemInfo, StaticDataService, static_data
 
 router = APIRouter(prefix="/api/items", tags=["items"])
 
@@ -68,6 +68,11 @@ class ItemRefOut(BaseModel):
     icon_url: str | None = None
     cost: int = 0
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def slug(self) -> str | None:
+        return static_data.item_slug(self.id)
+
 
 class ItemSummary(BaseModel):
     id: int
@@ -76,6 +81,11 @@ class ItemSummary(BaseModel):
     cost: int
     plaintext: str = ""
     tags: list[str] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def slug(self) -> str | None:
+        return static_data.item_slug(self.id)
     stats: list[StatLine] = Field(default_factory=list)
     # Share of players with a purchase order who bought it, on the newest
     # patch. Null when there are no figures yet.
@@ -153,6 +163,12 @@ class ItemDetail(BaseModel):
     plaintext: str = ""
     cost: int
     combine_cost: int
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def slug(self) -> str | None:
+        return static_data.item_slug(self.id)
+
     sell: int
     purchasable: bool
     tags: list[str] = Field(default_factory=list)
@@ -251,18 +267,20 @@ async def list_items(db: DbDep, sd: StaticDep) -> ItemList:
     return ItemList(version=sd.version, patch=patch, sections=sections)
 
 
-@router.get("/{item_id}", response_model=ItemDetail)
+@router.get("/{item}", response_model=ItemDetail)
 async def get_item(
-    item_id: int,
+    item: str,
     db: DbDep,
     sd: StaticDep,
     patch: str | None = Query(None, description="Defaults to the newest patch held."),
     queue_id: int = Query(420),
     bracket: str = Query(ALL_BRACKETS, description="Crawl provenance, not a measured rank."),
 ) -> ItemDetail:
-    info = sd.item_info(item_id)
+    # A slug ("blade-of-the-ruined-king") or, from older links, an id.
+    info = sd.item_by_ref(item)
     if info is None:
-        raise HTTPException(404, f"No item with id {item_id}.")
+        raise HTTPException(404, f"No item called {item!r}.")
+    item_id = info.id
 
     detail = ItemDetail(
         id=info.id,

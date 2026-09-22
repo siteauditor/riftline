@@ -8,7 +8,8 @@ import PositionIcon from '../components/PositionIcon'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
-import { api, type ChampionMetaRow, type MetaResponse } from '../lib/api'
+import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { compact, pct, positionLabel, tierColor, tierLabel } from '../lib/format'
 import {
@@ -45,7 +46,7 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
 const GOLD_FLOOR = 10
 
 // The tier list's own sample floor, and the default the URL leaves out.
-const MIN_GAMES = 20
+export const MIN_GAMES = 20
 
 type SortKey =
   | 'confidence_win_rate'
@@ -101,10 +102,9 @@ export default function Tierlist() {
   const setSort = (key: SortKey) =>
     setParams((prev) => withParams(prev, { sort: key }, { sort: DEFAULT_SORT }), { replace: true })
 
-  const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
+  const corpus = useQuery(queries.corpus())
   const meta = useQuery({
-    queryKey: ['meta', slice],
-    queryFn: () => api.meta(slice),
+    ...queries.meta(slice),
     retry: false,
   })
   const position = slice.position
@@ -130,7 +130,7 @@ export default function Tierlist() {
     : ranked
   const queueName = slice.queueId === 440 ? 'ranked flex' : 'ranked solo'
   const linkFor = (row: ChampionMetaRow) =>
-    `/champions/${row.champion.id}${sliceLink({ ...slice, position: row.position })}`
+    `/champions/${row.champion.slug ?? row.champion.id}${sliceLink({ ...slice, position: row.position })}`
   const rows = ranked.map((r) => r.row)
 
   const empty = corpus.data && corpus.data.total_matches === 0

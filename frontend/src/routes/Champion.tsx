@@ -1,4 +1,4 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import Head from '../components/Head'
@@ -14,9 +14,10 @@ import RunePanel from '../components/champion/RunePanel'
 import SkinsPanel from '../components/champion/SkinsPanel'
 import StoryPanel from '../components/champion/StoryPanel'
 import { parseTab, type ChampionTab } from '../components/champion/tabs'
-import { api, POSITIONS, type ChampionDetail, type PatchChange } from '../lib/api'
+import { POSITIONS, type ChampionDetail, type ChampionRef, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
 import { championSummary } from '../lib/prose'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import {
   SLICE_DEFAULTS,
@@ -29,11 +30,11 @@ import {
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
 // The champion page's own sample floor, and the default the URL leaves out.
-const MIN_GAMES = 5
+export const MIN_GAMES = 5
 
 export default function Champion() {
+  // A slug ("aatrox"), or an id from an older link; the API takes either.
   const { championId = '' } = useParams()
-  const id = Number(championId)
   const [search, setSearch] = useSearchParams()
 
   // Slice state lives in the URL so a champion page stays deep-linkable and the
@@ -46,15 +47,13 @@ export default function Champion() {
     search.get('order') === 'best' ? 'best' : search.get('order') === 'worst' ? 'worst' : null
 
   const query = useQuery({
-    queryKey: ['champion', championId, slice],
-    queryFn: () => api.champion(id, slice),
+    ...queries.champion(championId, slice),
     retry: false,
   })
   // Who the champion is. Its own request because the numbers above are a 404
   // on any patch where the champion has no games, and a story is not.
   const profileQuery = useQuery({
-    queryKey: ['champion-profile', championId],
-    queryFn: () => api.championProfile(id),
+    ...queries.championProfile(championId),
     retry: false,
     staleTime: 60 * 60 * 1000,
   })
@@ -66,8 +65,7 @@ export default function Champion() {
   const tab: ChampionTab = parseTab(search.get('tab')) ?? (query.isError ? 'story' : 'build')
 
   const playersQuery = useQuery({
-    queryKey: ['champion-players', championId],
-    queryFn: () => api.championPlayers(id),
+    ...queries.championPlayers(championId),
     retry: false,
     staleTime: 10 * 60 * 1000,
     enabled: tab === 'players',
@@ -92,8 +90,8 @@ export default function Champion() {
 
   // Where a pair row links: the other champion on the slice being read, in
   // the lane they were in when it is known.
-  const pairLink = (id: number, position: string | null) =>
-    `/champions/${id}${sliceLink({ ...slice, position })}`
+  const pairLink = (champion: ChampionRef, position: string | null) =>
+    `/champions/${champion.slug ?? champion.id}${sliceLink({ ...slice, position })}`
 
   if (query.isLoading && profileQuery.isLoading) {
     return (
@@ -115,6 +113,13 @@ export default function Champion() {
         />
       </div>
     )
+  }
+
+  // Older links carry the id. The slug is the address a crawler should see
+  // and the one people can read, so the id form is replaced, not served twice.
+  if (/^\d+$/.test(championId) && info.slug) {
+    const query = search.toString()
+    return <Navigate to={`/champions/${info.slug}${query ? `?${query}` : ''}`} replace />
   }
 
   const o = d?.overview
@@ -274,7 +279,7 @@ export default function Champion() {
                   order={pairOrder ?? 'worst'}
                   query={pairQuery}
                   showGold
-                  linkFor={(row) => pairLink(row.champion.id, d.position)}
+                  linkFor={(row) => pairLink(row.champion, d.position)}
                 />
                 <PairTable
                   title={
@@ -286,7 +291,7 @@ export default function Champion() {
                   rows={d.counters.team}
                   order={pairOrder ?? 'worst'}
                   query={pairQuery}
-                  linkFor={(row) => pairLink(row.champion.id, null)}
+                  linkFor={(row) => pairLink(row.champion, null)}
                 />
               </div>
             </>
@@ -311,7 +316,7 @@ export default function Champion() {
                 order={pairOrder ?? 'best'}
                 query={pairQuery}
                 showPosition
-                linkFor={(row) => pairLink(row.champion.id, row.position)}
+                linkFor={(row) => pairLink(row.champion, row.position)}
               />
             </>
           )}

@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://riftline.rhasta.space/sitemap.xml

@@ -1,30 +1,23 @@
 import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createRoot, hydrateRoot } from 'react-dom/client'
+import {
+  HydrationBoundary,
+  QueryClient,
+  QueryClientProvider,
+  type DehydratedState,
+} from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 
 import './index.css'
-import App from './App'
-import Home from './routes/Home'
-import Profile from './routes/Profile'
-import Mastery from './routes/Mastery'
-import PlayerChampions from './routes/PlayerChampions'
-import Tierlist from './routes/Tierlist'
-import Draft from './routes/Draft'
-import Champion from './routes/Champion'
-import LiveGame from './routes/LiveGame'
-import Item from './routes/Item'
-import Items from './routes/Items'
-import Leaderboard from './routes/Leaderboard'
-import Match from './routes/Match'
-import Method from './routes/Method'
-import Score from './routes/method/Score'
-import WinChance from './routes/method/WinChance'
-import DeathReview from './routes/method/DeathReview'
-import LaneLabels from './routes/method/LaneLabels'
-import Groups from './routes/Groups'
-import Group from './routes/Group'
-import NotFound, { RouteError } from './routes/NotFound'
+import { routes } from './routes'
+
+declare global {
+  interface Window {
+    /** React Query's cache as the prerenderer left it, on a prerendered page. */
+    __RQ_STATE__?: DehydratedState
+    queryClient?: QueryClient
+  }
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -60,47 +53,27 @@ const queryClient = new QueryClient({
 // lobby, a champion select or an ended game and photograph it. Stripped from
 // the production bundle by the `import.meta.env.DEV` branch.
 if (import.meta.env.DEV) {
-  ;(window as unknown as { queryClient: QueryClient }).queryClient = queryClient
+  window.queryClient = queryClient
 }
 
-const router = createBrowserRouter([
-  {
-    path: '/',
-    element: <App />,
-    // Without this, a crash anywhere below shows React Router's own developer
-    // screen, which addresses the visitor as the person who can fix it.
-    errorElement: <RouteError />,
-    children: [
-      { index: true, element: <Home /> },
-      { path: 'summoner/:platform/:name/:tag', element: <Profile /> },
-      { path: 'summoner/:platform/:name/:tag/champions', element: <PlayerChampions /> },
-      { path: 'summoner/:platform/:name/:tag/mastery', element: <Mastery /> },
-      { path: 'summoner/:platform/:name/:tag/live', element: <LiveGame /> },
-      { path: 'leaderboards', element: <Leaderboard /> },
-      { path: 'tierlist', element: <Tierlist /> },
-      { path: 'draft', element: <Draft /> },
-      { path: 'champions/:championId', element: <Champion /> },
-      { path: 'items', element: <Items /> },
-      { path: 'items/:itemId', element: <Item /> },
-      { path: 'match/:matchId', element: <Match /> },
-      { path: 'method', element: <Method /> },
-      { path: 'method/score', element: <Score /> },
-      { path: 'method/win-chance', element: <WinChance /> },
-      { path: 'method/death-review', element: <DeathReview /> },
-      { path: 'method/lane-labels', element: <LaneLabels /> },
-      { path: 'groups', element: <Groups /> },
-      { path: 'g/:slug', element: <Group /> },
-      // nginx serves index.html for every path it does not recognise, so the
-      // router is what decides an address is not a page. Keep this last.
-      { path: '*', element: <NotFound /> },
-    ],
-  },
-])
+const router = createBrowserRouter(routes)
+const container = document.getElementById('root')!
 
-createRoot(document.getElementById('root')!).render(
+const app = (
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <HydrationBoundary state={window.__RQ_STATE__}>
+        <RouterProvider router={router} />
+      </HydrationBoundary>
     </QueryClientProvider>
-  </StrictMode>,
+  </StrictMode>
 )
+
+// A prerendered page arrives with its markup already in #root, and the
+// numbers it was rendered from in __RQ_STATE__: React takes over what is
+// there. The shell arrives with nothing but a comment, and is rendered into.
+if (container.firstElementChild) {
+  hydrateRoot(container, app)
+} else {
+  createRoot(container).render(app)
+}

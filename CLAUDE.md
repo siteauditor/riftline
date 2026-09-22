@@ -22,9 +22,11 @@ python -m scripts.ingest status                  # also: crawl, timelines, lobby
 Frontend commands run from `frontend/` (pnpm is pinned by `packageManager`):
 
 ```bash
-pnpm dev      # :5173, proxies /api to 127.0.0.1:8000
-pnpm build    # tsc -b && vite build: this is the type check
-pnpm lint     # oxlint
+pnpm dev        # :5173, proxies /api to 127.0.0.1:8000
+pnpm build      # tsc -b, then the browser bundle and the server bundle: this is the type check
+pnpm lint       # oxlint
+pnpm prerender --api http://127.0.0.1:8000 --out /tmp/pages --build-id local   # every page as HTML, from a running API
+node prerender/serve.mjs --pages /tmp/pages/local                             # serve them in nginx's try_files order
 ```
 
 CI (`.github/workflows/ci.yml`) runs the same suite, ruff, build and lint inside the Docker images, plus an em dash check.
@@ -55,7 +57,9 @@ The whole suite shares **one database**. A test that inserts rows needs ids no o
 
 ### Frontend
 
-`src/lib/api.ts` is the typed client and its response types, kept in step with `backend/app/api/schemas.py` by hand. It fetches relative `/api/...` paths, which the Vite dev server and the production nginx (`frontend/nginx.conf`) both proxy, so there is no CORS. Routes live in `src/main.tsx`.
+`src/lib/api.ts` is the typed client and its response types, kept in step with `backend/app/api/schemas.py` by hand. It fetches relative `/api/...` paths, which the Vite dev server and the production nginx (`frontend/nginx.conf`) both proxy, so there is no CORS. Routes live in `src/routes.tsx`, shared by the browser entry (`src/main.tsx`) and the prerender entry (`src/entry-server.tsx`).
+
+**Every page is prerendered.** `prerender/run.mjs` renders each path in `GET /api/meta/pages` to a file nginx serves; the shell is `noindex`, so a URL is indexable exactly when it has a prerendered file (`app/services/seo.py` decides which, on the site's sample floors). A route that is prerendered declares the queries it reads in its `handle.prefetch` using the definitions in `src/lib/queries.ts`, and its component must read them through the same definitions, or the page hydrates with an empty cache and fetches everything again. Every route renders `<Head>` (`src/lib/seo.ts`) for its title, description and canonical; the prerenderer writes those tags and the client updates them in place. Anything that reads `Date.now()` in render goes through `src/lib/clock.ts` (see `components/TimeAgo.tsx`), or the hydrated text mismatches the HTML. Champions and items are addressed by slug (`/champions/aatrox`); ids still resolve and redirect.
 
 Tailwind v4 is configured CSS-first: theme tokens are in `@theme` in `src/index.css`, and there is no `tailwind.config`. Custom classes must go inside `@layer components` (or `base`), because unlayered CSS beats every utility and silently overrides classes like `px-3` or `font-700` on the same element. Native `<select>` popups are styled by `.control` / `.control-bare` in the same file, which set both the option background and its colour explicitly; relying on inheritance or `color-scheme` alone has produced unreadable dropdowns twice.
 

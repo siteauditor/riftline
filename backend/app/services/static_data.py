@@ -115,6 +115,20 @@ _BREAK = re.compile(r"<br\s*/?>|<li>", re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
 
 
+# Champion slugs come from the Data Dragon key, which is stable across renames
+# of the display name and already reads as a URL: "leesin", "kaisa", "ksante".
+# The one key nobody would type is Wukong's.
+SLUG_OVERRIDES = {"MonkeyKing": "wukong"}
+_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
+def slugify(name: str) -> str:
+    """"Doran's Blade" -> "dorans-blade": lowercase, apostrophes dropped, the
+    rest of the punctuation and spaces folded to single hyphens."""
+    folded = (name or "").lower().replace("'", "").replace("\u2019", "")
+    return _SLUG_STRIP.sub("-", folded).strip("-")
+
+
 @dataclass(slots=True)
 class Champion:
     id: int
@@ -239,6 +253,11 @@ class StaticDataService:
         self.unpublished_growth: set[str] = set()
         # item id -> the item as the guide reads it. Built with `items`.
         self.item_infos: dict[int, ItemInfo] = {}
+        # Item slugs, both ways. Names repeat across map variants (two
+        # Manamunes, three Giant's Belts), so a slug is the name with the id
+        # appended wherever a lower id already took the plain form.
+        self.item_slugs: dict[int, str] = {}
+        self.items_by_slug: dict[str, int] = {}
         self._loaded_at: float = 0.0
         # Set after a failed refresh so we stop hammering a CDN that is down.
         self._retry_not_before: float = 0.0
@@ -488,6 +507,21 @@ class StaticDataService:
             else:
                 kept[info.name] = item_id
         self.item_infos = infos
+        self._index_item_slugs()
+
+    def _index_item_slugs(self) -> None:
+        """One URL per item. Guide items take the plain name; a copy from
+        another mode that shares it gets the id appended."""
+        self.item_slugs = {}
+        self.items_by_slug = {}
+        ordered = sorted(
+            self.item_infos.values(), key=lambda i: (i.group not in GUIDE_GROUPS, i.id)
+        )
+        for info in ordered:
+            base = slugify(info.name) or f"item-{info.id}"
+            slug = base if base not in self.items_by_slug else f"{base}-{info.id}"
+            self.item_slugs[info.id] = slug
+            self.items_by_slug[slug] = info.id
 
     # ------------------------------------------------------------ disk cache
 
@@ -741,6 +775,27 @@ class StaticDataService:
         champ = self.champion(champion_id)
         return champ.name if champ else f"Champion {champion_id}"
 
+    def champion_slug(self, champion_id: int | None) -> str | None:
+        champ = self.champion(champion_id)
+        if champ is None:
+            return None
+        return SLUG_OVERRIDES.get(champ.key, champ.key.lower())
+
+    def champion_by_ref(self, ref: str) -> Champion | None:
+        """A champion by id ("266") or by slug ("aatrox", "wukong").
+
+        Ids keep working forever: they are in bookmarks and in links from
+        before the slugs existed.
+        """
+        ref = (ref or "").strip()
+        if ref.isdigit():
+            return self.champion(int(ref))
+        wanted = ref.lower()
+        for champ in self.champions_by_id.values():
+            if SLUG_OVERRIDES.get(champ.key, champ.key.lower()) == wanted:
+                return champ
+        return None
+
     def champion_icon(self, champion_id: int | None) -> str | None:
         champ = self.champion(champion_id)
         return f"{self.cdn}/img/champion/{champ.key}.png" if champ else None
@@ -825,6 +880,17 @@ class StaticDataService:
         # spell folder, which is how Data Dragon lays both out.
         folder = "passive" if ability.slot == "P" else "spell"
         return f"{self.cdn}/img/{folder}/{ability.image}"
+
+    def item_slug(self, item_id: int | None) -> str | None:
+        return self.item_slugs.get(int(item_id)) if item_id else None
+
+    def item_by_ref(self, ref: str) -> ItemInfo | None:
+        """An item by id ("3153") or by slug ("blade-of-the-ruined-king")."""
+        ref = (ref or "").strip()
+        if ref.isdigit():
+            return self.item_info(int(ref))
+        item_id = self.items_by_slug.get(ref.lower())
+        return self.item_info(item_id) if item_id is not None else None
 
     def item_info(self, item_id: int | None) -> ItemInfo | None:
         if item_id is None:

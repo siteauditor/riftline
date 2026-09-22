@@ -64,9 +64,17 @@ services:
   web:
     build:
       context: ./frontend
+      args:
+        # The short commit sha, exported by deploy/deploy.sh. Baked into the
+        # image, so a later `up` without it changes nothing.
+        BUILD_ID: ${BUILD_ID:-dev}
     image: riftline-web:local
     container_name: riftline-web
     restart: unless-stopped
+    volumes:
+      # The prerendered pages, written by the prerender service below and read
+      # here from /pages/<BUILD_ID>. Read-only: nginx only ever serves them.
+      - riftline_pages:/usr/share/nginx/html/pages:ro
     depends_on:
       # Not a hard gate: nginx re-resolves the upstream, so the site comes up
       # and serves the shell even if the API is still starting.
@@ -94,6 +102,33 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  # The prerender job: the same build as `web`, run to completion rather than
+  # kept up. `docker compose run --rm prerender`, at each deploy before the new
+  # web container starts and each night after the corpus moves. The profile
+  # keeps `up` from starting it.
+  prerender:
+    build:
+      context: ./frontend
+      target: prerender
+      args:
+        BUILD_ID: ${BUILD_ID:-dev}
+    image: riftline-prerender:local
+    profiles: [tools]
+    environment:
+      API_BASE: http://api:8000
+      PRERENDER_OUT: /pages
+    volumes:
+      - riftline_pages:/pages
+    networks: [default]
+    depends_on:
+      api:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
 networks:
   default:
     name: riftline_default
@@ -102,6 +137,9 @@ networks:
     name: edge_default
 
 volumes:
+  # The prerendered pages. Compose's own: it holds nothing that cannot be made
+  # again by running the prerender service.
+  riftline_pages: {}
   # Created by hand before the first deploy (docs/deploy.md, "The corpus"), so
   # the database can be copied in before anything runs, and therefore owned
   # outside this project like `edge_default`. Declared as Compose's own, every

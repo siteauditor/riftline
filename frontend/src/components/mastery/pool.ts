@@ -17,6 +17,7 @@ export type BandId = 'core' | 'middle' | 'tail' | 'unplayed'
 export interface PoolChampion {
   id: number
   name: string
+  slug?: string
   iconUrl: string | null
   tags: string[]
   level: number
@@ -93,6 +94,7 @@ export function buildPool({
     return {
       id: entry.champion.id,
       name: stat?.name ?? entry.champion.name,
+      slug: stat?.slug ?? entry.champion.slug,
       iconUrl: stat?.icon_url ?? entry.champion.icon_url,
       tags: stat?.tags ?? entry.tags,
       level: entry.level,
@@ -111,6 +113,7 @@ export function buildPool({
     .map((c) => ({
       id: c.id,
       name: c.name,
+      slug: c.slug,
       iconUrl: c.icon_url,
       tags: c.tags,
       level: 0,

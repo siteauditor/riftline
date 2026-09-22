@@ -1021,6 +1021,7 @@ export interface ItemRefCost {
 export interface ItemSummary {
   id: number
   name: string
+  slug?: string
   icon_url: string | null
   cost: number
   plaintext: string
@@ -1781,20 +1782,21 @@ export const api = {
   meta: (opts: SliceQuery = {}) =>
     request<MetaResponse>(`/api/meta/champions?${sliceParams(opts, 20)}`),
 
-  champion: (championId: number, opts: SliceQuery = {}) =>
+  /** By slug ("aatrox") or, from older links, by id. */
+  champion: (championId: string | number, opts: SliceQuery = {}) =>
     request<ChampionDetail>(`/api/champions/${championId}?${sliceParams(opts, 5)}`),
 
-  championProfile: (championId: number) =>
+  championProfile: (championId: string | number) =>
     request<ChampionProfile>(`/api/champions/${championId}/profile`),
 
-  championPlayers: (championId: number) =>
+  championPlayers: (championId: string | number) =>
     request<ChampionPlayers>(`/api/champions/${championId}/players`),
 
   topSkins: () => request<TopSkins>('/api/skins/top'),
 
   items: () => request<ItemList>('/api/items'),
 
-  item: (itemId: number, opts: { patch?: string | null; queueId?: number; bracket?: string | null } = {}) => {
+  item: (itemId: string | number, opts: { patch?: string | null; queueId?: number; bracket?: string | null } = {}) => {
     const params = new URLSearchParams()
     if (opts.patch) params.set('patch', opts.patch)
     params.set('queue_id', String(opts.queueId ?? 420))

@@ -7,13 +7,14 @@ an empty list that looks like "no champions are any good".
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from app.api.deps import DbDep, StaticDep
+from app.api.deps import DbDep, SettingsDep, StaticDep
 from app.api.schemas import ChampionRef, epoch_ms
 from app.db.models import ChampionStat, Match
+from app.services import seo
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
@@ -240,4 +241,59 @@ async def get_champion_meta(
             buckets=[LobbyRankBucket(tier=t, games=n) for t, n in mix.buckets],
             as_of=epoch_ms(mix.as_of),
         ),
+    )
+
+
+# --- what search engines are told ---------------------------------------------
+
+
+class PageOut(BaseModel):
+    path: str
+    kind: str
+    indexable: bool
+    # Epoch ms of the data behind the page, when it carries a time.
+    lastmod: int | None = None
+    # A page the prerender must produce, or the build is wrong.
+    required: bool = False
+    reason: str | None = None
+
+
+class PagesResponse(BaseModel):
+    """The prerenderer's manifest: every page, and which may be indexed."""
+
+    origin: str
+    index_patch: str | None = None
+    pages: list[PageOut]
+
+
+@router.get("/pages", response_model=PagesResponse)
+async def get_pages(db: DbDep, sd: StaticDep, settings: SettingsDep) -> PagesResponse:
+    patch, entries = await seo.pages(db, sd)
+    return PagesResponse(
+        origin=settings.site_origin,
+        index_patch=patch,
+        pages=[
+            PageOut(
+                path=p.path,
+                kind=p.kind,
+                indexable=p.indexable,
+                lastmod=epoch_ms(p.lastmod),
+                required=p.required,
+                reason=p.reason,
+            )
+            for p in entries
+        ],
+    )
+
+
+@router.get("/sitemap.xml", include_in_schema=False)
+async def get_sitemap(db: DbDep, sd: StaticDep, settings: SettingsDep) -> Response:
+    """The indexable pages, from the same list the prerenderer renders. nginx
+    serves it at /sitemap.xml. An hour of caching: the numbers behind
+    `lastmod` move once a night."""
+    _, entries = await seo.pages(db, sd)
+    return Response(
+        content=seo.sitemap_xml(settings.site_origin, entries),
+        media_type="application/xml",
+        headers={"Cache-Control": "public, max-age=3600"},
     )

@@ -17,6 +17,7 @@ import {
   type DraftSuggestion,
 } from '../lib/api'
 import { compact, parseRiotId, pct, positionLabel } from '../lib/format'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
 import { useChampionArt } from '../lib/useChampionArt'
@@ -79,8 +80,7 @@ export default function Draft() {
     set({ [key]: list.length ? list.join(',') : null })
 
   const { data: championData } = useQuery({
-    queryKey: ['champions'],
-    queryFn: api.champions,
+    ...queries.champions(),
     staleTime: 6 * 60 * 60 * 1000,
   })
   const championById = useMemo(
@@ -117,7 +117,7 @@ export default function Draft() {
     retry: false,
   })
 
-  const corpus = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
+  const corpus = useQuery(queries.corpus())
   const empty = corpus.data && corpus.data.total_matches === 0
   const boardIsSet = allies.length + enemies.length + bans.length > 0 || lane !== null
   // Who you are facing, or failing that what the list is telling you to pick.

@@ -16,26 +16,43 @@ main() {
   cd /root/riftline
   echo "deploying $(git rev-parse --short HEAD): $(git log -1 --format=%s)"
 
-  docker compose up -d --build
+  # Names this build: the web image reads its prerendered pages from
+  # /pages/<BUILD_ID>, and the prerender job writes them there.
+  export BUILD_ID
+  BUILD_ID=$(git rev-parse --short HEAD)
+
+  # Named, because the prerender service sits behind a profile and a bare
+  # `build` would skip it.
+  docker compose build api web prerender
+  docker compose up -d api
 
   # The app answers, and the corpus is still under it. See healthcheck.py for
   # why the second half is the one that matters.
   docker compose exec -T api python - < deploy/healthcheck.py
 
-  # Captured before matching rather than piped into `grep -q`: grep exits on
-  # its first match, the writer can then die of SIGPIPE, and under pipefail
-  # that reports a working site as a failed one.
-  local page
-  page=$(docker compose exec -T web wget -q -O - http://127.0.0.1/)
-  if [[ "$page" != *'id="root"'* ]]; then
-    echo "the web container is not serving the built bundle" >&2
-    docker compose logs --tail 50 web >&2
-    exit 1
-  fi
-
   # Additive and idempotent, so safe on every deploy, and the only way a new
   # column reaches the live corpus.
   docker compose exec -T api python -m scripts.migrate
+
+  # Every page as HTML, from the API just started, before the new web container
+  # takes over. Fatal on purpose: a build that cannot prerender must not be
+  # switched to, and the web container still running is the last build with
+  # its own pages, which keeps serving.
+  docker compose run --rm prerender
+
+  docker compose up -d web
+
+  # Captured before matching rather than piped into `grep -q`: grep exits on
+  # its first match, the writer can then die of SIGPIPE, and under pipefail
+  # that reports a working site as a failed one. The home page is prerendered,
+  # so a served page carries an <h1>; the empty shell would not.
+  local page
+  page=$(docker compose exec -T web wget -q -O - http://127.0.0.1/)
+  if [[ "$page" != *'id="root"'* || "$page" != *'<h1'* ]]; then
+    echo "the web container is not serving the prerendered site" >&2
+    docker compose logs --tail 50 web >&2
+    exit 1
+  fi
 
   # Storage only, and each a no-op when nothing changed: brings the stored
   # corpus up to the code just deployed instead of leaving the site half on the

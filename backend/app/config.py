@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     group_creates_per_hour: int = Field(default=10, alias="GROUP_CREATES_PER_HOUR")
     group_adds_per_hour: int = Field(default=60, alias="GROUP_ADDS_PER_HOUR")
 
+    # Where the site lives, for the sitemap and the canonical links the
+    # prerenderer writes. Absolute, because a sitemap must be.
+    site_origin: str = Field(default="https://riftline.rhasta.space", alias="SITE_ORIGIN")
+
     cors_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173", alias="CORS_ORIGINS"
     )

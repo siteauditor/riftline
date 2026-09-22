@@ -27,6 +27,12 @@ export interface PageHead {
   image?: string | null
   /** A page shown to people but kept out of search. */
   noindex?: boolean
+  /**
+   * What the robots meta says when `noindex` is set. A private page (a group)
+   * is `noindex, nofollow`; a page that is merely thin on data keeps `follow`,
+   * so the links on it still count.
+   */
+  robots?: 'noindex, nofollow' | 'noindex, follow'
   jsonLd?: Record<string, unknown> | Record<string, unknown>[]
   /** BCP 47, for the day pages exist in more than one language. */
   locale?: string
@@ -64,7 +70,8 @@ export function headTags(head: PageHead): HeadTag[] {
     { key: 'twitter:image', tag: 'meta', attrs: { name: 'twitter:image', content: image } },
   ]
   if (head.noindex) {
-    tags.push({ key: 'robots', tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' } })
+    const content = head.robots ?? 'noindex, nofollow'
+    tags.push({ key: 'robots', tag: 'meta', attrs: { name: 'robots', content } })
   }
   if (head.jsonLd) {
     tags.push({ key: 'jsonld', tag: 'script', attrs: { type: 'application/ld+json' }, text: jsonForHtml(head.jsonLd) })

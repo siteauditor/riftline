@@ -2,14 +2,16 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { PLATFORMS, api, type LeaderboardResponse } from '../lib/api'
+import { PLATFORMS, type LeaderboardResponse } from '../lib/api'
+import { DEFAULT_LADDER, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
+import TimeAgo from '../components/TimeAgo'
 import Crest from '../components/Crest'
 import Head from '../components/Head'
 import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, Spinner } from '../components/StateViews'
-import { compact, pct, tierColor, tierLabel, timeAgo } from '../lib/format'
+import { compact, pct, tierColor, tierLabel } from '../lib/format'
 import { intParam, withParams } from '../lib/searchParams'
 
 /**
@@ -31,7 +33,7 @@ const FALLBACK = {
   ],
   platforms: PLATFORMS,
 }
-const PER_PAGE = 50
+const PER_PAGE = DEFAULT_LADDER.perPage
 
 // Riot sends ladders without names, so each unnamed player costs one lookup,
 // and the server names up to 25 a request while the key allows. A page with
@@ -57,19 +59,18 @@ export default function Leaderboard() {
   const [search, setSearch] = useSearchParams()
 
   const slicesQuery = useQuery({
-    queryKey: ['leaderboard-slices'],
-    queryFn: api.leaderboardSlices,
+    ...queries.leaderboardSlices(),
     // Region and tier lists are fixed for the life of a deployment.
     staleTime: 6 * 60 * 60 * 1000,
     retry: false,
   })
   const slices = slicesQuery.data ?? FALLBACK
 
-  const platform = search.get('platform') ?? 'euw1'
-  const tier = (search.get('tier') ?? 'CHALLENGER').toUpperCase()
-  const division = (search.get('division') ?? 'I').toUpperCase()
-  const queueId = intParam(search, 'queue', 420)
-  const page = intParam(search, 'page', 1)
+  const platform = search.get('platform') ?? DEFAULT_LADDER.platform
+  const tier = (search.get('tier') ?? DEFAULT_LADDER.tier).toUpperCase()
+  const division = (search.get('division') ?? DEFAULT_LADDER.division).toUpperCase()
+  const queueId = intParam(search, 'queue', DEFAULT_LADDER.queueId)
+  const page = intParam(search, 'page', DEFAULT_LADDER.page)
   // A rank to point at: set by "Go to rank" and by a profile's ladder link.
   const rank = intParam(search, 'rank', 0) || null
   const isApex = slices.apex_tiers.includes(tier)
@@ -86,14 +87,13 @@ export default function Leaderboard() {
   // Apex ignores the division server-side, so including it would key two
   // cache entries to one byte-identical response.
   const effectiveDivision = isApex ? 'I' : division
-  const queryKey = ['leaderboard', platform, queueId, tier, effectiveDivision, page]
+  const options = queries.leaderboard(platform, {
+    queueId, tier, division: effectiveDivision, page, perPage: PER_PAGE,
+  })
+  const queryKey = options.queryKey
   const queryClient = useQueryClient()
   const query = useQuery({
-    queryKey,
-    queryFn: () =>
-      api.leaderboard(platform, {
-        queueId, tier, division: effectiveDivision, page, perPage: PER_PAGE,
-      }),
+    ...options,
     // The server caches a snapshot for fifteen minutes, so refetching faster
     // than that buys nothing, apart from the names below.
     staleTime: 300_000,
@@ -241,7 +241,11 @@ export default function Leaderboard() {
             {data.truncated && data.total_on_ladder
               ? `, top ${compact(data.total)} shown`
               : ''}
-            {data.fetched_at && `, snapshot ${timeAgo(data.fetched_at)}`}
+            {data.fetched_at && (
+              <>
+                , snapshot <TimeAgo at={data.fetched_at} />
+              </>
+            )}
             {`, ${data.named_on_page} of ${data.rows.length} named here`}
             {noAccount > 0 && `, ${noAccount} with no Riot ID`}
             {pending > 0 &&

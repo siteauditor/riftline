@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 interface ItemLike {
   id: number | null
   name: string | null
+  slug?: string
   icon_url: string | null
 }
 
@@ -35,7 +36,7 @@ export default function ItemIcon({
   }
   return (
     <Link
-      to={`/items/${item.id}${search}`}
+      to={`/items/${item.slug ?? item.id}${search}`}
       title={item.name ?? undefined}
       aria-label={item.name ?? `Item ${item.id}`}
       className={`${box} outline-offset-1 transition-[filter] hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-bright`}

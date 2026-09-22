@@ -43,7 +43,7 @@ export default function ItemChampions({
             {figures.champions.map((c) => (
               <tr key={c.champion.id} className="lift border-b border-line-soft">
                 <td className="py-1.5">
-                  <Link to={`/champions/${c.champion.id}${linkSuffix}`} className="group flex items-center gap-2">
+                  <Link to={`/champions/${c.champion.slug ?? c.champion.id}${linkSuffix}`} className="group flex items-center gap-2">
                     {c.champion.icon_url && (
                       <img
                         src={c.champion.icon_url}

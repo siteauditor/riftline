@@ -252,7 +252,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
           )}
           <span className="min-w-0">
             <Link
-              to={`/champions/${row.champion.id}${row.main_position ? `?position=${row.main_position}` : ''}`}
+              to={`/champions/${row.champion.slug ?? row.champion.id}${row.main_position ? `?position=${row.main_position}` : ''}`}
               className="display block truncate text-[15px] font-600 text-ink hover:text-gold-bright"
             >
               {row.champion.name}

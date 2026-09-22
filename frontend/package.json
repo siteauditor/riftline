@@ -6,7 +6,8 @@
   "packageManager": "pnpm@10.26.0",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --ssr src/entry-server.tsx --outDir dist/server",
+    "prerender": "node prerender/run.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

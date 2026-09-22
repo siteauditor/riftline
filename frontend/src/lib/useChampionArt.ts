@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 
-import { api } from './api'
+import { queries } from './queries'
 
 /**
  * Centred splash art for a champion, for the page header behind the type.
@@ -13,8 +13,7 @@ import { api } from './api'
  */
 export function useChampionArt(championId: number | null | undefined): string | null {
   const { data } = useQuery({
-    queryKey: ['champions'],
-    queryFn: api.champions,
+    ...queries.champions(),
     staleTime: 6 * 60 * 60 * 1000,
   })
   if (!championId) return null

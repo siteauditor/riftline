@@ -737,6 +737,62 @@ new groups and 60 players added (`GROUP_CREATES_PER_HOUR`,
 `X-Forwarded-For`: uvicorn trusts every proxy here and so takes that header's
 first entry, which the visitor writes. Empty groups are removed after a week.
 
+## Search engines
+
+Every page is served as real HTML with its own title, description, canonical
+link, social card and, where it means something, JSON-LD, and the app hydrates
+over it. Not because Google cannot render a client-side app (it can, and the
+research behind this measured it rendering every page it fetched), but because
+Bing and the social unfurlers do not, Google caches fetched resources for up to
+a month so a client-rendered tier list can be indexed a patch stale, and a site
+whose every URL shared one title had nothing to rank on.
+
+**One page per path, prerendered.** `frontend/prerender/run.mjs` asks the API
+for the manifest of pages (`GET /api/meta/pages`, `app/services/seo.py`),
+renders each through the same route table and components the browser uses
+(`frontend/src/routes.tsx`, `frontend/src/entry-server.tsx`), and writes one
+file per path. The queries a page needs are declared once in
+`frontend/src/lib/queries.ts`, prefetched into a QueryClient on the server and
+dehydrated into the page, so the browser hydrates from the same cache rather
+than fetching everything again. The head is decided by pure functions in
+`frontend/src/lib/seo.ts`, written by the prerenderer and updated in place by
+the client (`frontend/src/lib/head.ts`), so the document never holds two
+titles and the canonical a crawler read is the one the app keeps. It runs at
+every deploy and every night; on this corpus, 396 pages in about 12 seconds.
+
+**Indexable means prerendered.** nginx serves the prerendered file when one
+exists and the app shell otherwise, and the shell carries `X-Robots-Tag:
+noindex`. So a URL that has no page (a typo, a profile nobody has opened)
+never enters an index as an empty document, and there is no user-agent branch
+anywhere: everyone gets the same HTML. A page is written for every champion
+and item, but marked `noindex, follow` when the corpus is thin behind it:
+`TIER_MIN_GAMES` (20) in some role for a champion, 30 buyers for an item,
+measured on a patch with at least 500 ranked games so pages do not flip to
+noindex on patch day. The sitemap (`/sitemap.xml`, proxied to `/api/meta/
+sitemap.xml`) lists the indexable pages from the same manifest, with
+`lastmod` only where the data behind a page carries a time. Match pages and
+profiles are not prerendered yet and so stay out of the index; group pages
+are private by design.
+
+**Slugs.** Champions and items are addressed by name: `/champions/aatrox`,
+`/items/blade-of-the-ruined-king`. A champion slug is its Data Dragon key
+lowercased (`kaisa`, `leesin`, `ksante`), with Wukong the one override; an
+item slug is its name, with the id appended where two items share one. Ids
+keep working forever and redirect to the slug in the browser.
+
+**The four explainers** at `/method/score`, `/method/win-chance`,
+`/method/death-review` and `/method/lane-labels` are the pages competitors
+cannot copy from the same Riot API: each says how a number is made, what it
+was measured against and where it fails, with the nightly figures set into the
+sentences. Champion and item pages carry a paragraph built from their own
+numbers, so a reader who does not know the game, and anything that reads the
+page without clicking a tab, gets the table in sentences.
+
+To check a prerender by hand without Docker: `pnpm build`, then `pnpm
+prerender --api http://127.0.0.1:8000 --out /tmp/pages --build-id local`, then
+`node prerender/serve.mjs --pages /tmp/pages/local` and open a page: it serves
+the files in nginx's `try_files` order.
+
 ## The home page and search
 
 Nothing on the home page calls Riot. The best pick in each role comes from the

@@ -64,13 +64,61 @@ jobs:
       - name: Backend lint
         run: docker run --rm riftline-api:ci ruff check app scripts tests
 
-      # The build stage is `tsc -b && vite build`, so a type error or a broken
-      # bundle fails here rather than shipping.
+      # The build stage is `tsc -b && vite build` twice over (browser and
+      # server bundles), so a type error or a broken bundle fails here rather
+      # than shipping.
       - name: Build the web bundle
-        run: docker build --pull --target build -t riftline-web:ci ./frontend
+        run: docker build --pull --target build --build-arg BUILD_ID=ci -t riftline-web:ci ./frontend
 
       - name: Frontend lint
         run: docker run --rm riftline-web:ci pnpm lint
+
+      # Googlebot reads only the first 2 MB of a file, silently. The bundle is
+      # a third of that today; this is the fence before it grows there.
+      - name: Bundle size budget
+        run: |
+          docker run --rm riftline-web:ci sh -c '
+            big=$(find dist/assets -name "*.js" -size +1500k)
+            if [ -n "$big" ]; then echo "::error::JS file over 1.5 MB: $big"; exit 1; fi
+            ls -l dist/assets'
+
+      # The nginx stage, with its template rendered for a build id, must parse.
+      - name: Build the web image and check its nginx config
+        run: |
+          docker build --pull --build-arg BUILD_ID=ci -t riftline-nginx:ci ./frontend
+          docker run --rm riftline-nginx:ci nginx -t
+
+      # The prerender job end to end, against the real API on an empty
+      # database: every fixed page must come out as HTML with its own title
+      # and heading, the shell must not, and the manifest must agree. With no
+      # corpus every champion is below the floor, which is the noindex path.
+      - name: Prerender against an empty API
+        run: |
+          docker network create ci
+          docker run -d --name api --network ci \
+            -e RIOT_API_KEY=RGAPI-ci-placeholder \
+            -e DATABASE_URL=sqlite+aiosqlite:////tmp/ci.db \
+            riftline-api:ci
+          for i in $(seq 1 30); do
+            if docker exec api python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/meta/pages', timeout=5).status == 200 else 1)" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          docker build --target prerender --build-arg BUILD_ID=ci -t riftline-prerender:ci ./frontend
+          docker run --rm --network ci -v ci_pages:/pages riftline-prerender:ci
+          docker run --rm -v ci_pages:/pages alpine sh -c '
+            set -e
+            test -f /pages/ci/index.html
+            test -f /pages/ci/tierlist.html
+            test -f /pages/ci/method/score.html
+            grep -q "<h1" /pages/ci/tierlist.html
+            grep -q "<title data-head=\"title\">Champion tier list" /pages/ci/tierlist.html
+            grep -q "rel=\"canonical\"" /pages/ci/method/score.html
+            ! grep -q "name=\"robots\"" /pages/ci/tierlist.html
+            grep -q "__RQ_STATE__" /pages/ci/index.html
+            cat /pages/ci/_manifest.json'
+          docker rm -f api
 
       - name: No em dashes
         # A house rule, enforced rather than remembered.

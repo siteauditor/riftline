@@ -479,9 +479,24 @@ def _pair_entry(
     )
 
 
-@router.get("/{champion_id}", response_model=ChampionDetail)
+def _champion_id(ref: str, sd: StaticDataService) -> int:
+    """The path segment is a slug ("aatrox") or, from older links, an id.
+
+    An id is taken as it is, whether or not the static data knows it: the
+    stored games are the authority on which champions have numbers, and a
+    champion released after the cached Data Dragon still has games.
+    """
+    if ref.strip().isdigit():
+        return int(ref)
+    champion = sd.champion_by_ref(ref)
+    if champion is None:
+        raise HTTPException(404, f"No champion called {ref!r}.")
+    return champion.id
+
+
+@router.get("/{champion}", response_model=ChampionDetail)
 async def get_champion(
-    champion_id: int,
+    champion: str,
     db: DbDep,
     sd: StaticDep,
     patch: str | None = Query(None, description="Defaults to the newest patch held."),
@@ -490,6 +505,7 @@ async def get_champion(
     bracket: str = Query(ALL_BRACKETS, description="Crawl provenance, not a measured rank."),
     min_games: int = Query(5, ge=1),
 ) -> ChampionDetail:
+    champion_id = _champion_id(champion, sd)
     bracket = (bracket or ALL_BRACKETS).upper()
     if position:
         position = position.upper()
@@ -748,13 +764,14 @@ async def get_champion(
     )
 
 
-@router.get("/{champion_id}/profile", response_model=ChampionProfile)
-async def get_champion_profile(champion_id: int, db: DbDep, sd: StaticDep) -> ChampionProfile:
+@router.get("/{champion_ref}/profile", response_model=ChampionProfile)
+async def get_champion_profile(champion_ref: str, db: DbDep, sd: StaticDep) -> ChampionProfile:
     """Story, ratings, base stats, abilities and skins. No Riot call, and one
     indexed read for the skin counts.
 
     Answers for every champion Data Dragon knows, games or not.
     """
+    champion_id = _champion_id(champion_ref, sd)
     champion = sd.champion(champion_id)
     if champion is None:
         raise HTTPException(404, f"No champion with id {champion_id}.")
@@ -801,8 +818,8 @@ async def get_champion_profile(champion_id: int, db: DbDep, sd: StaticDep) -> Ch
     )
 
 
-@router.get("/{champion_id}/players", response_model=ChampionPlayers)
-async def get_champion_players(champion_id: int, db: DbDep) -> ChampionPlayers:
+@router.get("/{champion}/players", response_model=ChampionPlayers)
+async def get_champion_players(champion: str, db: DbDep, sd: StaticDep) -> ChampionPlayers:
     """The players who do best on this champion, by average Riftline score.
 
     Counts every Summoner's Rift game we hold rather than the page's patch
@@ -811,6 +828,7 @@ async def get_champion_players(champion_id: int, db: DbDep) -> ChampionPlayers:
     overall, measured 2026-09-21). Remakes are left out, as they are
     everywhere else.
     """
+    champion_id = _champion_id(champion, sd)
     games = func.count(MatchParticipant.id)
     scored = func.count(MatchParticipant.performance_score)
     score = func.avg(MatchParticipant.performance_score)

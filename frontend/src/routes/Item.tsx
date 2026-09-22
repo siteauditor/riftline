@@ -1,4 +1,4 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -10,9 +10,10 @@ import ItemSlots from '../components/items/ItemSlots'
 import ItemTiming from '../components/items/ItemTiming'
 import RecipeTree from '../components/items/RecipeTree'
 import { points } from '../components/items/groups'
-import { api, type ItemDetail, type ItemFigures } from '../lib/api'
+import { type ItemDetail, type ItemFigures } from '../lib/api'
 import { compact, pct } from '../lib/format'
 import { itemSummary } from '../lib/prose'
+import { queries } from '../lib/queries'
 import { sliceFromParams, sliceLink, sliceParams, withParams } from '../lib/searchParams'
 import { heads } from '../lib/seo'
 
@@ -24,8 +25,7 @@ export default function Item() {
   const slice = { patch, queueId, bracket }
 
   const query = useQuery({
-    queryKey: ['item', itemId, slice],
-    queryFn: () => api.item(Number(itemId), slice),
+    ...queries.item(itemId, slice),
     retry: false,
   })
 
@@ -54,6 +54,11 @@ export default function Item() {
   }
 
   const item = query.data
+  // Older links carry the id; the slug is the one address for the page.
+  if (/^\d+$/.test(itemId) && item.slug) {
+    const query = search.toString()
+    return <Navigate to={`/items/${item.slug}${query ? `?${query}` : ''}`} replace />
+  }
   const figures = item.figures
   const finished = item.group === 'finished'
   // Figures exist for items sold on the Rift and bought as themselves.

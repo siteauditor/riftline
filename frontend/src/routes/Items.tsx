@@ -11,7 +11,8 @@ import {
   STAT_FILTERS,
   type StatFilterKey,
 } from '../components/items/groups'
-import { api, type ItemSummary } from '../lib/api'
+import { type ItemSummary } from '../lib/api'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { pct } from '../lib/format'
 import { foldName, useSearchText, withParams } from '../lib/searchParams'
@@ -40,7 +41,7 @@ export default function Items() {
   const toggle = (key: StatFilterKey) =>
     setChosen(chosen.includes(key) ? chosen.filter((k) => k !== key) : [...chosen, key])
 
-  const list = useQuery({ queryKey: ['items'], queryFn: api.items, staleTime: 10 * 60 * 1000 })
+  const list = useQuery({ ...queries.items(), staleTime: 10 * 60 * 1000 })
 
   const sections = useMemo(
     () =>
@@ -171,7 +172,7 @@ function ItemCard({ item, showShare }: { item: ItemSummary; showShare: boolean }
   return (
     <li>
       <Link
-        to={`/items/${item.id}`}
+        to={`/items/${item.slug ?? item.id}`}
         className="lift group flex items-center gap-3 px-2 py-2"
         title={item.plaintext || undefined}
       >

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
-import { api, type MethodReport } from '../../lib/api'
+import type { MethodReport } from '../../lib/api'
+import { queries } from '../../lib/queries'
 
 /** The four explainers, in reading order. */
 export type ExplainerSlug = 'score' | 'win-chance' | 'death-review' | 'lane-labels'
@@ -14,7 +15,7 @@ export const EXPLAINERS: { slug: ExplainerSlug; title: string; short: string }[]
 
 /** One report for the hub and all four pages, so moving between them is free. */
 export function useMethod() {
-  return useQuery({ queryKey: ['method'], queryFn: api.method, staleTime: 10 * 60 * 1000 })
+  return useQuery({ ...queries.method(), staleTime: 10 * 60 * 1000 })
 }
 
 /** When the figures on a page last changed, for the page's own metadata. */

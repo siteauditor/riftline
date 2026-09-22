@@ -157,6 +157,19 @@ run_stage "winmodel" python -m scripts.ingest winmodel || failures=$((failures+1
 run_stage "reviews"  python -m scripts.ingest reviews  || failures=$((failures+1))
 run_stage "audit"    python -m scripts.ingest audit    || failures=$((failures+1))
 
+# Every page as HTML again, now that the numbers behind them have moved. Not
+# through run_stage, which execs inside the api container: this is its own
+# service, built with the deployed image and writing the pages volume nginx
+# reads. A failure keeps yesterday's pages serving, which is the right
+# failure.
+log "=== prerender ==="
+if $COMPOSE run --rm prerender; then
+  log "prerender: done"
+else
+  log "prerender: FAILED (yesterday's pages keep serving)"
+  failures=$((failures+1))
+fi
+
 log "=== corpus now holds ==="
 $COMPOSE exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'
 

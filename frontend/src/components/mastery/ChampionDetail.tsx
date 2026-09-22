@@ -162,7 +162,7 @@ export default function ChampionDetail({
           )}
           {champion.known && (
             <Link
-              to={`/champions/${champion.id}`}
+              to={`/champions/${champion.slug ?? champion.id}`}
               className="text-ink-dim underline decoration-line underline-offset-2 hover:text-gold-bright"
             >
               Champion page

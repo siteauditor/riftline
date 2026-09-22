@@ -80,6 +80,30 @@ ssh MyVPS 'install -m 0755 /root/riftline/deploy/cloudflare-only-web /usr/local/
   && systemctl restart cloudflare-only-web'
 ```
 
+### Crawlers, at the edge
+
+Cloudflare blocks AI crawlers by default on new zones, and since the 2026
+category defaults it can block the multi-purpose ones (Googlebot, bingbot) as
+a side effect of blocking the Training category. Measured on 2026-09-23,
+before the setting was changed: Googlebot, bingbot and PerplexityBot got 200,
+GPTBot and ClaudeBot got 403. The decision for this site is to **allow every
+crawler category** (the site has no ads and wants its explainers cited), and,
+because that opens training crawlers that fetch thousands of pages per
+referral on a box serving six sites, to keep a **rate-limiting rule** on the
+zone ahead of it (60 requests per 10 seconds per address, blocked for 10
+minutes). Both are dashboard settings under the zone's Security section;
+nothing in the repository sets them. To prove them from anywhere:
+
+```bash
+for ua in Googlebot bingbot GPTBot ClaudeBot PerplexityBot; do
+  printf '%s -> ' "$ua"; curl -s -o /dev/null -w '%{http_code}\n' -A "Mozilla/5.0 (compatible; $ua/1.0)" https://riftline.rhasta.space/
+done
+```
+
+Every one should answer 200. The site is registered in Google Search Console
+and Bing Webmaster Tools (DNS TXT records on the zone), with the sitemap at
+`https://riftline.rhasta.space/sitemap.xml` submitted in both.
+
 ### Why the site proxies its own /api
 
 The client fetches relative paths (`/api/...`, see `frontend/src/lib/api.ts`),
@@ -168,6 +192,7 @@ a dead key.
 | `winmodel` | no | **yes** |
 | `reviews` | no | **yes** |
 | `audit` | no | **yes** |
+| `prerender` | no | **yes** |
 
 `groups` fills in the players of every group, most recently viewed first:
 ranks, new games, and older history back to `GROUP_HISTORY_CAP` games each. It
@@ -175,6 +200,10 @@ spends at most `GROUP_NIGHTLY_CALLS` calls (2,000 by default, about 50 minutes
 of a development key), always leaves 20 calls in each two minutes for the
 site's own searches, and removes groups that have had nobody in them for a
 week. Both settings are in `.env`, so changing them is a container restart.
+
+`prerender` renders every page again from the night's numbers (see "The
+prerendered pages" below). It is its own compose service rather than a stage
+inside the api container, and a failure keeps yesterday's pages serving.
 
 The storage stages from `reextract` on also run at the end of every deploy
 (`deploy/deploy.sh`, after `migrate`), because each is a no-op when nothing
@@ -302,6 +331,42 @@ rm riftline_deploy riftline_deploy.pub
 - `main` has a ruleset: changes arrive through a pull request that passes
   **Tests and build**, and it cannot be force-pushed or deleted. The owner can
   bypass it, which is how a direct push to `main` still deploys.
+
+## The prerendered pages
+
+Every page is served as HTML rendered from the API's data, and the app
+hydrates over it (README, "Search engines"). Three things in the deploy make
+that work.
+
+- **`BUILD_ID`**, the short commit sha, exported by `deploy/deploy.sh` and
+  baked into both the `web` and `prerender` images as a build argument. nginx
+  reads its pages from `/usr/share/nginx/html/pages/<BUILD_ID>` and the
+  prerender job writes them there, so the two can only agree, whatever
+  environment a later `docker compose up` happens to have. A hand-run
+  `docker compose up -d` without `BUILD_ID` set rebuilds nothing and changes
+  nothing.
+- **The `riftline_pages` volume**, Compose's own (it holds nothing that a
+  `docker compose run --rm prerender` cannot make again), mounted read-only
+  into `web` and read-write into `prerender`. Each build's pages live in
+  their own directory; the two newest are kept.
+- **The order of a deploy**: build, start the api, migrate, **prerender**,
+  then start the web container. The prerender is fatal on purpose: a build
+  that cannot render its pages is not switched to, and the web container
+  still running is the previous build with its own pages, which keeps
+  serving. The nightly run prerenders again after the storage stages so the
+  numbers on the pages are the night's.
+
+```bash
+ssh MyVPS 'cd /root/riftline && docker compose run --rm prerender'   # render every page now
+ssh MyVPS 'docker run --rm -v riftline_pages:/pages alpine cat /pages/$(cd /root/riftline && git rev-parse --short HEAD)/_manifest.json'
+curl -sI https://riftline.rhasta.space/tierlist | grep -i 'x-prerendered\|x-robots'   # the build id, and no noindex
+curl -sI https://riftline.rhasta.space/no-such-page | grep -i x-robots           # the shell: noindex
+```
+
+The manifest of pages, and which of them are indexable, is `GET
+/api/meta/pages`; the sitemap nginx serves at `/sitemap.xml` is `GET
+/api/meta/sitemap.xml`, the same list filtered. `SITE_ORIGIN` in `.env` is the
+absolute origin both are written with.
 
 ## Operating notes
 
