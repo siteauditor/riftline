@@ -39,6 +39,7 @@ function GroupPage({ slug }: { slug: string }) {
   const editKey = addressKey ?? saved?.key ?? null
   const [editing, setEditing] = useState(false)
   const [warm, setWarm] = useState<GroupWarm | null>(null)
+  const [opened, setOpened] = useState(false)
   const warming = useRef(false)
 
   // An edit link carries its key after '#'. It is kept in this browser and
@@ -98,7 +99,9 @@ function GroupPage({ slug }: { slug: string }) {
   const fetching = data?.fetching ?? false
   const updatedAt = query.dataUpdatedAt
   useEffect(() => {
-    if (!pending || !fetching || warming.current) return
+    // One pass on opening even with nothing pending, because ranks go stale
+    // after an hour and that pass is one call per player at most, often none.
+    if (!fetching || warming.current || (!pending && opened)) return
     const delay = !warm
       ? 0
       : warm.key_busy
@@ -125,15 +128,17 @@ function GroupPage({ slug }: { slug: string }) {
         })
       } finally {
         warming.current = false
+        setOpened(true)
         void queryClient.invalidateQueries({ queryKey: ['group', slug] })
       }
     }, delay)
     return () => window.clearTimeout(timer)
-  }, [pending, fetching, updatedAt, warm, slug, queryClient])
+  }, [pending, fetching, opened, updatedAt, warm, slug, queryClient])
 
   function changed() {
     // Straight into a pass: a player just added has everything to fetch.
     setWarm(null)
+    setOpened(false)
     // And the panel stays open for the next one, which the first add would
     // otherwise close by making the group non-empty.
     setEditing(true)
