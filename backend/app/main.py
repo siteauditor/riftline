@@ -17,6 +17,7 @@ from app.api.routes import items as item_routes
 from app.api.routes import leaderboard as leaderboard_routes
 from app.api.routes import matches as match_routes
 from app.api.routes import meta as meta_routes
+from app.api.routes import method as method_routes
 from app.api.routes import players as player_routes
 from app.api.routes import skins as skin_routes
 from app.api.routes import static_data as static_routes
@@ -177,6 +178,7 @@ def create_app() -> FastAPI:
     app.include_router(summoner_routes.router)
     app.include_router(static_routes.router)
     app.include_router(meta_routes.router)
+    app.include_router(method_routes.router)
     app.include_router(champion_routes.router)
     app.include_router(draft_routes.router)
     app.include_router(leaderboard_routes.router)

@@ -8,6 +8,10 @@
     python -m scripts.ingest score
     python -m scripts.ingest aggregate
     python -m scripts.ingest aggregate --patch 15.18 --queue 420
+    python -m scripts.ingest reextract
+    python -m scripts.ingest winmodel
+    python -m scripts.ingest reviews
+    python -m scripts.ingest audit
 
 ``crawl`` is resumable: stop it whenever and it picks the frontier back up. On a
 development key expect roughly 3,000 matches an hour, and remember the key
@@ -36,6 +40,7 @@ from app.services.aggregate import (
     rebuild_matchup_stats,
     rebuild_synergy_stats,
 )
+from app.services.audit import store_audit
 from app.services.ingest import (
     Ingestor,
     LobbyRankBackfill,
@@ -45,9 +50,12 @@ from app.services.ingest import (
 from app.services.ladders import APEX_TIERS as LADDER_APEX_TIERS
 from app.services.ladders import DIVISIONS as LADDER_DIVISIONS
 from app.services.ladders import LadderService
+from app.services.lanes import rebuild_lane_distributions
+from app.services.reviews import rebuild_reviews
 from app.services.scores import ScoreService
 from app.services.static_data import static_data
-from app.services.timelines import backfill_buy_times
+from app.services.timelines import EXTRACT_VERSION, backfill_buy_times, backfill_extracts
+from app.services.winchance import train as train_win_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -368,6 +376,10 @@ async def cmd_score(args) -> int:
             f"{coverage['scored']:,} of {coverage['participants']:,} participants scored "
             f"({coverage['percent']:.1f}%), {coverage['distributions']} distributions"
         )
+        # The lane labels measure the corpus the same way the score does, so
+        # they are rebuilt with it: every run, from storage, in a second.
+        lanes = await rebuild_lane_distributions(session)
+        print(f"lane labels: {lanes} role distributions")
         if coverage["withheld_matches"]:
             print(
                 f"{coverage['withheld_matches']:,} lobbies withheld: not ten players "
@@ -391,6 +403,77 @@ async def cmd_buy_times(args) -> int:
             f"{stats.mismatched:,} left without times: their stored purchase order no "
             "longer matches a replay of the timeline"
         )
+    return 0
+
+
+async def cmd_reextract(args) -> int:
+    """Bring stored timeline extracts up to the current version.
+
+    Reads `raw_gz`, so like `score` it makes no Riot request and needs no key.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        stats = await backfill_extracts(session)
+    print(f"{stats.rows:,} timelines re-extracted to version {EXTRACT_VERSION}")
+    if stats.skipped:
+        print(f"{stats.skipped:,} skipped: their stored payload has no frames")
+    return 0
+
+
+async def cmd_win_model(args) -> int:
+    """Fit and grade the win-chance model on stored timelines. No Riot call."""
+    await init_db()
+    async with SessionLocal() as session:
+        row = await train_win_model(session)
+    payload = row.payload
+    cv = payload.get("cv") or {}
+    overall = cv.get("overall")
+    print(f"win model v{row.version}: {payload['trained_games']:,} games, "
+          f"{payload['trained_rows']:,} game-minutes")
+    if overall:
+        print(f"held out: accuracy {overall['accuracy']:.3f}, Brier {overall['brier']:.4f} "
+              f"against {overall['baseline_brier']:.4f} guessing, skill {overall['skill']:.3f}, "
+              f"calibration error {cv['ece'] * 100:.1f} points")
+        for phase in cv["phases"]:
+            print(f"  {phase['label']:>8} min: accuracy {phase['accuracy']:.3f}, "
+                  f"Brier {phase['brier']:.4f}, {phase['rows']:,} rows")
+    print("published" if payload["published"] else f"withheld: {payload['withheld']}")
+    return 0
+
+
+async def cmd_reviews(args) -> int:
+    """Weigh every stored game's deaths and takedowns. No Riot call."""
+    await init_db()
+    async with SessionLocal() as session:
+        stats = await rebuild_reviews(session)
+    if stats.withheld:
+        print(f"no reviews written: {stats.withheld}")
+        return 0
+    print(f"{stats.matches:,} games reviewed")
+    if stats.skipped:
+        print(f"{stats.skipped:,} skipped: no usable timeline extract")
+    return 0
+
+
+async def cmd_audit(args) -> int:
+    """How well the Riftline score tracks wins, per role. No Riot call."""
+    await init_db()
+    async with SessionLocal() as session:
+        row = await store_audit(session)
+    report = row.payload
+    overall = report["overall"]
+    print(f"score audit, weights v{report['weights_version']}: {report['games']:,} games, "
+          f"{report['players']:,} players")
+    if report["players"]:
+        print(f"winners {overall['winners_mean']} against losers {overall['losers_mean']}, "
+              f"AUC {overall['auc']}, top scorer on the winning team "
+              f"{overall['top_on_winning_team'] * 100:.1f}%, bottom scorer on the losing team "
+              f"{overall['bottom_on_losing_team'] * 100:.1f}%")
+    for role in report["roles"]:
+        fitted = role["fitted"]["normalised"]
+        pairs = ", ".join(f"{c} {role['set_weights'][c]:.2f}/{fitted[c]:.2f}" for c in role["set_weights"])
+        print(f"  {role['position']:<8} AUC {role['auc']:.3f}  winners {role['winners_mean']} "
+              f"losers {role['losers_mean']}  set/fitted: {pairs}")
     return 0
 
 
@@ -467,6 +550,26 @@ def main() -> int:
         help="Purchase times from the timelines already stored. Reads local storage only.",
     )
 
+    sub.add_parser(
+        "audit",
+        help="How well the Riftline score tracks wins. Reads local storage only.",
+    )
+
+    sub.add_parser(
+        "reviews",
+        help="Death and kill review for every stored game. Reads local storage only.",
+    )
+
+    sub.add_parser(
+        "winmodel",
+        help="Fit and grade the win-chance model. Reads local storage only.",
+    )
+
+    sub.add_parser(
+        "reextract",
+        help="Bring stored timeline extracts up to date. Reads local storage only.",
+    )
+
     agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
     agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
     agg.add_argument("--queue", type=int, default=None)
@@ -511,6 +614,14 @@ def main() -> int:
         return asyncio.run(cmd_aggregate(args))
     if args.command == "buytimes":
         return asyncio.run(cmd_buy_times(args))
+    if args.command == "reextract":
+        return asyncio.run(cmd_reextract(args))
+    if args.command == "winmodel":
+        return asyncio.run(cmd_win_model(args))
+    if args.command == "reviews":
+        return asyncio.run(cmd_reviews(args))
+    if args.command == "audit":
+        return asyncio.run(cmd_audit(args))
     return 1
 
 

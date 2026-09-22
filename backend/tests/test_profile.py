@@ -35,7 +35,7 @@ from app.services.profile_stats import (
     score_profile,
 )
 from app.services.ranks import apply_league_entries
-from app.services.scores import ScoreService
+from app.services.scores import COMPONENTS, ScoreService
 from tests import fixtures as fx
 from tests.test_integration import mock_riot
 from tests.test_scores import seed_distributions
@@ -182,7 +182,7 @@ def played(position: str, score: float | None, *, rank: int = 3, badges=(),
     if score is not None:
         detail = {
             "components": components or {
-                "kill_part": 0.5, "damage": 0.5, "economy": 0.5,
+                "kill_part": 0.5, "damage": 0.5, "efficiency": 0.5, "economy": 0.5,
                 "survival": 0.5, "objectives": 0.5, "vision": 0.9,
             },
             "badges": list(badges),
@@ -248,7 +248,7 @@ async def test_analytics_carries_the_score_profile_and_scored_champion_rows(clie
     [mid] = body["score_profile"]
     assert (mid["position"], mid["scored_games"], mid["enough"]) == ("MIDDLE", 1, False)
     assert mid["min_scored"] == MIN_SCORED_FOR_PROFILE
-    assert len(mid["components"]) == 6
+    assert len(mid["components"]) == len(COMPONENTS)
 
 
 # ----------------------------------------------------------- ladder position

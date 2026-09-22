@@ -260,7 +260,8 @@ class MatchTimeline(Base):
 
     Two representations, deliberately:
 
-    * ``extracted`` is the ~4 KB compact record every feature actually reads.
+    * ``extracted`` is the compact record every feature actually reads, about
+      13 KB since version 2 added the game state.
     * ``raw_gz`` is the whole payload, gzipped. Measured at 1.02 MB raw and 81 KB
       compressed, a 12.6x saving, which is what makes keeping it affordable at
       all. It is insurance: re-fetching a field we failed to extract would cost
@@ -839,4 +840,66 @@ class ItemChampionStat(Base):
             name="uq_item_champion_slice",
         ),
         Index("ix_item_champion_lookup", "patch", "queue_id", "rank_bracket", "item_id"),
+    )
+
+
+class ModelReport(Base):
+    """A model we fit on our own games, and how well it held up.
+
+    One current row per kind: ``win_model`` (the win-chance model behind a
+    game's story) and ``score_audit`` (how the Riftline score tracks wins).
+    Stored whole, because the method page publishes all of it: coefficients,
+    held-out accuracy and calibration, the games it came from. A model the site
+    does not show its working for is one it should not show at all.
+    """
+
+    __tablename__ = "model_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24), unique=True)
+    # Goes up when what a reader would see changes, so rows computed from an
+    # older fit (a game's review) can tell they are stale.
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    payload: Mapped[dict] = mapped_column(JSON)
+    trained_games: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ParticipantReview(Base):
+    """One player's deaths and takedowns in one game, weighed.
+
+    From the game's timeline and the win-chance model. Kept per player rather
+    than recomputed per request because the profile's percentiles read
+    hundreds of games at once, and those need columns to aggregate, not JSON.
+    """
+
+    __tablename__ = "participant_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    match_id: Mapped[str] = mapped_column(
+        String(24), ForeignKey("matches.match_id", ondelete="CASCADE"), index=True
+    )
+    participant_index: Mapped[int] = mapped_column(Integer)
+    puuid: Mapped[str] = mapped_column(String(78), index=True)
+    queue_id: Mapped[int] = mapped_column(Integer)
+    team_position: Mapped[str | None] = mapped_column(String(16))
+    minutes: Mapped[float] = mapped_column(Float, default=0.0)
+    deaths: Mapped[int] = mapped_column(Integer, default=0)
+    # Deaths the team got nothing back for within a minute.
+    untraded: Mapped[int] = mapped_column(Integer, default=0)
+    # Win chance, 0 to 1, that the deaths took from the player's team.
+    win_lost: Mapped[float] = mapped_column(Float, default=0.0)
+    takedowns: Mapped[int] = mapped_column(Integer, default=0)
+    # Takedowns the team turned into an epic monster or a building within a minute.
+    converted: Mapped[int] = mapped_column(Integer, default=0)
+    win_gained: Mapped[float] = mapped_column(Float, default=0.0)
+    # Epic monsters both teams were in on, and how many of those this team took.
+    contests: Mapped[int] = mapped_column(Integer, default=0)
+    contests_won: Mapped[int] = mapped_column(Integer, default=0)
+    model_version: Mapped[int] = mapped_column(Integer, default=0)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("match_id", "participant_index", name="uq_review_player"),
+        Index("ix_review_profile", "puuid", "queue_id"),
     )

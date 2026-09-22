@@ -9,6 +9,7 @@ server rather than in five different components.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -185,7 +186,7 @@ class BadgeOut(BaseModel):
 
 
 class ScoreComponentOut(BaseModel):
-    """One of the six things the Riftline score is made of."""
+    """One of the seven things the Riftline score is made of."""
 
     id: str
     label: str
@@ -256,6 +257,9 @@ class MatchSummary(BaseModel):
     # demand would double the cost of the most common action in the product.
     laning_score: float | None = None
     laning_opponent: ChampionRef | None = None
+    # won_big, won, even, lost or lost_big, by the lane's distance from even
+    # against the role's spread. Null with no timeline or a thin role.
+    laning_label: str | None = None
     gold_diff_14: int | None = None
     cs_diff_14: int | None = None
 
@@ -283,7 +287,7 @@ class MatchSummary(BaseModel):
     score: float | None = None
     placement: int | None = None
     badges: list[BadgeOut] = Field(default_factory=list)
-    # The six components behind the score, and the sample they were measured
+    # The seven components behind the score, and the sample they were measured
     # against, so the number can be taken apart in the UI.
     score_components: list[ScoreComponentOut] = Field(default_factory=list)
     score_sample: int | None = None
@@ -306,6 +310,9 @@ class ScoreboardPlayer(BaseModel):
     position: str | None = None
     win: bool = False
     champ_level: int = 0
+    # The lane at minute 14, as on the match row, and its label.
+    laning_score: float | None = None
+    laning_label: str | None = None
 
     kills: int = 0
     deaths: int = 0
@@ -1038,7 +1045,7 @@ def _badges_out(participant, match) -> list[BadgeOut]:
 
 
 def _score_components_out(participant) -> list[ScoreComponentOut]:
-    """The six components behind one score, with their weights for that role."""
+    """The seven components behind one score, with their weights for that role."""
     detail = participant.performance_detail or {}
     percentiles = detail.get("components") or {}
     weights = WEIGHTS.get(participant.team_position or "", {})
@@ -1059,7 +1066,13 @@ def _score_components_out(participant) -> list[ScoreComponentOut]:
     return out
 
 
-def to_match_summary(match: Match, puuid: str, sd: StaticDataService) -> MatchSummary | None:
+# (queue, role, laning score) -> lane label; see `app.services.lanes`.
+LaneLabel = Callable[[int | None, str | None, float | None], str | None]
+
+
+def to_match_summary(
+    match: Match, puuid: str, sd: StaticDataService, lanes: LaneLabel | None = None
+) -> MatchSummary | None:
     me = next((p for p in match.participants if p.puuid == puuid), None)
     if me is None:
         return None
@@ -1161,6 +1174,9 @@ def to_match_summary(match: Match, puuid: str, sd: StaticDataService) -> MatchSu
             _champion_ref(me.opponent_champion_id, sd)
             if me.opponent_champion_id
             else None
+        ),
+        laning_label=(
+            lanes(match.queue_id, me.team_position, me.laning_score) if lanes else None
         ),
         gold_diff_14=me.gold_diff_14,
         cs_diff_14=me.cs_diff_14,
@@ -1307,6 +1323,42 @@ class PlayStyleTotals(BaseModel):
     damage_per_min: float = 0.0
 
 
+class ReviewMetricOut(BaseModel):
+    metric: str
+    label: str
+    measures: str
+    # The player's own rate over their reviewed games, pooled.
+    value: float
+    # Share of the role's games this player's did better than, averaged per
+    # game. Null when the role's spread is too thin to place anyone.
+    better_than: float | None = None
+    lower_is_better: bool = False
+    games: int = 0
+
+
+class RoleReviewOut(BaseModel):
+    position: str
+    games: int
+    min_games: int
+    # Why the rates are not shown, when they are not.
+    withheld: str | None = None
+    metrics: list[ReviewMetricOut] = Field(default_factory=list)
+    contests: int = 0
+    contests_won: int = 0
+
+
+class LaneRecordOut(BaseModel):
+    """How this player's lanes went, per role, over games with a timeline."""
+
+    position: str
+    games: int
+    won_big: int = 0
+    won: int = 0
+    even: int = 0
+    lost: int = 0
+    lost_big: int = 0
+
+
 class AnalyticsResponse(BaseModel):
     """Play style over the matches we hold.
 
@@ -1327,6 +1379,10 @@ class AnalyticsResponse(BaseModel):
     totals: PlayStyleTotals = Field(default_factory=PlayStyleTotals)
     # Most scored games first.
     score_profile: list[RoleScoreProfileOut] = Field(default_factory=list)
+    # The death and kill review against the role; most reviewed games first.
+    review: list[RoleReviewOut] = Field(default_factory=list)
+    # Won, even and lost lanes per role, by the lane labels.
+    lanes: list[LaneRecordOut] = Field(default_factory=list)
 
 
 def _corpus_record_out(record) -> CorpusRecordOut | None:
@@ -1615,7 +1671,10 @@ def _score_model_out(match: Match) -> ScoreModelOut:
 
 
 def to_match_detail(
-    match: Match, sd: StaticDataService, platform: str | None = None
+    match: Match,
+    sd: StaticDataService,
+    platform: str | None = None,
+    lanes: LaneLabel | None = None,
 ) -> MatchDetailResponse:
     """The expanded scoreboard: every player, the objectives, and the model."""
     minutes = max(1.0, match.game_duration / 60)
@@ -1638,6 +1697,10 @@ def to_match_detail(
                 position=p.team_position,
                 win=p.win,
                 champ_level=p.champ_level,
+                laning_score=p.laning_score,
+                laning_label=(
+                    lanes(match.queue_id, p.team_position, p.laning_score) if lanes else None
+                ),
                 kills=p.kills,
                 deaths=p.deaths,
                 assists=p.assists,

@@ -30,6 +30,7 @@ from app.api.schemas import (
     ClassShare,
     ComponentAverageOut,
     LadderPositionOut,
+    LaneRecordOut,
     LiveGameResponse,
     MasteryResponse,
     MatchHistoryResponse,
@@ -39,6 +40,8 @@ from app.api.schemas import (
     ProfileResponse,
     RankHistoryResponse,
     RankPointOut,
+    ReviewMetricOut,
+    RoleReviewOut,
     RoleScoreProfileOut,
     RoleShare,
     epoch_ms,
@@ -53,11 +56,14 @@ from app.api.schemas import ChampionRef as ChampionRefSchema
 from app.db.models import Match, MatchParticipant, RankHistory
 from app.riot.errors import RiotForbidden
 from app.riot.routing import resolve_platform
+from app.services.lanes import lane_labeler
 from app.services.profile_stats import (
     MIN_SCORED_FOR_PROFILE,
     champion_totals,
     score_profile,
 )
+from app.services.reviews import LOWER_IS_BETTER, MIN_PROFILE_GAMES, review_profile
+from app.services.reviews import METRIC_LABELS as REVIEW_LABELS
 
 log = logging.getLogger(__name__)
 
@@ -188,6 +194,9 @@ async def get_matches(
     # lazy SELECT and fail with MissingGreenlet.
     puuid = player.puuid
 
+    # Lane labels read the role spreads once for the whole page.
+    lanes = await lane_labeler(matches.session)
+
     if champion is not None:
         stored = await matches.stored_history(
             puuid, champion_id=champion, queue=queue, start=start, count=count
@@ -197,7 +206,7 @@ async def get_matches(
             matches=[
                 summary
                 for match in stored.matches
-                if (summary := to_match_summary(match, puuid, sd)) is not None
+                if (summary := to_match_summary(match, puuid, sd, lanes)) is not None
             ],
             start=start,
             count=count,
@@ -209,7 +218,7 @@ async def get_matches(
     page = await matches.history(puuid, platform, start=start, count=count, queue=queue)
     summaries: list[MatchSummary] = []
     for match in page.matches:
-        summary = to_match_summary(match, puuid, sd)
+        summary = to_match_summary(match, puuid, sd, lanes)
         if summary is not None:
             summaries.append(summary)
     return MatchHistoryResponse(
@@ -357,6 +366,30 @@ async def get_analytics(
             )
             for t in champion_totals(rows)
         ],
+        review=[
+            RoleReviewOut(
+                position=r.position,
+                games=r.games,
+                min_games=MIN_PROFILE_GAMES,
+                withheld=r.withheld,
+                metrics=[
+                    ReviewMetricOut(
+                        metric=m.metric,
+                        label=REVIEW_LABELS[m.metric][0],
+                        measures=REVIEW_LABELS[m.metric][1],
+                        value=m.value,
+                        better_than=m.better_than,
+                        lower_is_better=m.metric in LOWER_IS_BETTER,
+                        games=m.games,
+                    )
+                    for m in r.metrics
+                ],
+                contests=r.contests,
+                contests_won=r.contests_won,
+            )
+            for r in await review_profile(matches.session, puuid, queue)
+        ],
+        lanes=await _lane_records(matches.session, puuid, queue, limit),
         score_profile=[
             RoleScoreProfileOut(
                 position=p.position,
@@ -391,6 +424,33 @@ async def get_analytics(
             damage_per_min=totals["damage"] / totals["minutes"],
         ),
     )
+
+
+async def _lane_records(session, puuid: str, queue: int | None, limit: int) -> list[LaneRecordOut]:
+    """Won, even and lost lanes per role, over the newest games with a timeline."""
+    stmt = (
+        select(Match.queue_id, MatchParticipant.team_position, MatchParticipant.laning_score)
+        .join(Match, Match.match_id == MatchParticipant.match_id)
+        .where(
+            MatchParticipant.puuid == puuid,
+            MatchParticipant.laning_score.is_not(None),
+            Match.is_remake.is_(False),
+        )
+        .order_by(Match.game_creation.desc())
+        .limit(limit)
+    )
+    if queue is not None:
+        stmt = stmt.where(Match.queue_id == queue)
+    labeler = await lane_labeler(session)
+    records: dict[str, LaneRecordOut] = {}
+    for queue_id, position, score in (await session.execute(stmt)).all():
+        which = labeler(queue_id, position, score)
+        if which is None or position is None:
+            continue
+        record = records.setdefault(position, LaneRecordOut(position=position, games=0))
+        record.games += 1
+        setattr(record, which, getattr(record, which) + 1)
+    return sorted(records.values(), key=lambda r: -r.games)
 
 
 @router.get("/{platform}/{game_name}/{tag_line}/live", response_model=LiveGameResponse)

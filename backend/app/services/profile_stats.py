@@ -50,7 +50,7 @@ class RoleScoreProfile:
 
 
 def score_profile(rows: Iterable[PlayedRow]) -> list[RoleScoreProfile]:
-    """Per role: the average score, placement, badges and the six components."""
+    """Per role: the average score, placement, badges and the seven components."""
     by_role: dict[str, list[PlayedRow]] = {}
     for row in rows:
         detail = row.performance_detail or {}

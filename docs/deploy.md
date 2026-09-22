@@ -160,8 +160,18 @@ a dead key.
 | `timelines` | yes | skipped |
 | `lobbyranks` | yes | skipped |
 | `ladders` (apex, per `LADDER_PLATFORMS`) | yes | skipped |
+| `buytimes` | no | **yes** |
+| `reextract` | no | **yes** |
 | `aggregate` | no | **yes** |
-| `score` | no | **yes** |
+| `score` (and the lane labels) | no | **yes** |
+| `winmodel` | no | **yes** |
+| `reviews` | no | **yes** |
+| `audit` | no | **yes** |
+
+The storage stages from `reextract` on also run at the end of every deploy
+(`deploy/deploy.sh`, after `migrate`), because each is a no-op when nothing
+changed and a release that changes the score weights or adds a timeline field
+should not wait for 03:20 to take effect.
 
 The script asks Riot one cheap question (the EUW Challenger ladder) to decide
 which half to run, rather than guessing from the clock, because a key can be

@@ -10,6 +10,7 @@ import FormStrip from '../components/FormStrip'
 import MatchRow from '../components/MatchRow'
 import ProfileTabs from '../components/ProfileTabs'
 import RankCard from '../components/RankCard'
+import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
 import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
@@ -409,6 +410,7 @@ export default function Profile() {
               <RankCard key={r.queue} rank={r} player={r.tier ? player : undefined} />
             ))}
             <AnalyticsPanel data={analyticsQuery.data} />
+            <ReviewPanel review={analyticsQuery.data?.review} lanes={analyticsQuery.data?.lanes} />
             {analyticsQuery.data && (
               <MostPlayed
                 analytics={analyticsQuery.data}

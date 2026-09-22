@@ -37,6 +37,19 @@ main() {
   # column reaches the live corpus.
   docker compose exec -T api python -m scripts.migrate
 
+  # Storage only, and each a no-op when nothing changed: brings the stored
+  # corpus up to the code just deployed instead of leaving the site half on the
+  # old rules until the nightly run. New score weights would otherwise show
+  # beside scores computed under the old ones, and a new score component would
+  # withhold every new game, for up to a day. A failure here is reported and
+  # not fatal: the site is already up and serving, and the nightly run retries
+  # every one of these.
+  local stage
+  for stage in reextract "score --rescore" winmodel reviews audit; do
+    # shellcheck disable=SC2086
+    docker compose exec -T api python -m scripts.ingest $stage || echo "post-deploy stage '${stage}' failed; the nightly run retries it" >&2
+  done
+
   docker compose ps
 }
 

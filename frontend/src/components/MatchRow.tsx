@@ -5,6 +5,7 @@ import type { MatchSummary, ParticipantBrief } from '../lib/api'
 import RankBadge from './RankBadge'
 import ItemIcon from './items/ItemIcon'
 import Scoreboard from './match/Scoreboard'
+import { LANE_TEXT, laneColor } from './story/lanes'
 import {
   compact,
   duration,
@@ -228,6 +229,11 @@ export default function MatchRow({
               </span>
               <span className="text-line"> : </span>
               {100 - Math.round(match.laning_score * 100)}
+              {match.laning_label && (
+                <span className="ml-1.5" style={{ color: laneColor(match.laning_label) }}>
+                  {LANE_TEXT[match.laning_label]}
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -311,7 +317,12 @@ export default function MatchRow({
     </div>
 
     {open && (
-      <Scoreboard matchId={match.match_id} subjectPuuid={puuid} platform={platform} />
+      <Scoreboard
+        matchId={match.match_id}
+        subjectPuuid={puuid}
+        platform={platform}
+        storyHref={`/match/${encodeURIComponent(match.match_id)}?player=${encodeURIComponent(puuid)}`}
+      />
     )}
     </article>
   )

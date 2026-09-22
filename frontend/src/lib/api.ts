@@ -479,6 +479,9 @@ export interface MatchSummary {
   /** From the match timeline; null until that match has been backfilled. */
   laning_score: number | null
   laning_opponent: ChampionRef | null
+  /** The lane against its role's spread. Optional: a server one deploy
+   *  behind does not send it. */
+  laning_label?: LaneLabel | null
   gold_diff_14: number | null
   /**
    * Measured lobby rank. `lobby_rank_measured_at` is not optional detail: this
@@ -515,6 +518,8 @@ export interface ScoreboardPlayer {
   position: string | null
   win: boolean
   champ_level: number
+  laning_score?: number | null
+  laning_label?: LaneLabel | null
   kills: number
   deaths: number
   assists: number
@@ -1128,6 +1133,213 @@ export interface Analytics {
   }
   /** Most scored games first. */
   score_profile: RoleScoreProfile[]
+  /** The death and kill review against the role. Optional: a server one
+   *  deploy behind does not send it. */
+  review?: RoleReview[]
+  lanes?: LaneRecord[]
+}
+
+export type LaneLabel = 'won_big' | 'won' | 'even' | 'lost' | 'lost_big'
+
+export interface ReviewMetric {
+  metric: string
+  label: string
+  measures: string
+  /** The player's pooled rate: a share, or win chance per 30 minutes. */
+  value: number
+  /** Share of the role's games this player's did better than, averaged. */
+  better_than: number | null
+  lower_is_better: boolean
+  games: number
+}
+
+export interface RoleReview {
+  position: string
+  games: number
+  min_games: number
+  withheld: string | null
+  metrics: ReviewMetric[]
+  contests: number
+  contests_won: number
+}
+
+export interface LaneRecord {
+  position: string
+  games: number
+  won_big: number
+  won: number
+  even: number
+  lost: number
+  lost_big: number
+}
+
+// --- a game's story ---------------------------------------------------------
+
+export interface StoryPlayerRef {
+  participant_index: number
+  champion: ChampionRef
+}
+
+export interface StoryDeath {
+  ms: number
+  killer: StoryPlayerRef | null
+  assisters: number
+  x: number
+  y: number
+  traded: boolean
+  /** Win chance, 0 to 1, the death took. Null without a published model. */
+  cost: number | null
+}
+
+export interface StoryTakedown {
+  ms: number
+  victim: StoryPlayerRef | null
+  killed: boolean
+  converted: boolean
+  gain: number | null
+}
+
+export interface StoryPlayer {
+  participant_index: number
+  puuid: string
+  team_id: number
+  riot_id: string | null
+  champion: ChampionRef
+  position: string | null
+  deaths: number
+  untraded: number
+  win_lost: number | null
+  takedowns: number
+  converted: number
+  win_gained: number | null
+  contests: number
+  contests_won: number
+  death_list: StoryDeath[]
+  takedown_list: StoryTakedown[]
+}
+
+export interface StoryMoment {
+  start_ms: number
+  end_ms: number
+  /** Blue's chance after minus before. */
+  swing: number
+  /** The side it went for: 100 blue, 200 red. */
+  team: number
+  text: string
+}
+
+export interface GameStory {
+  match_id: string
+  available: boolean
+  /** Riot's rate limit kept the timeline from being fetched just now. */
+  pending: boolean
+  retry_after: number | null
+  reason: string | null
+  queue_id: number | null
+  duration_ms: number
+  blue_won: boolean | null
+  /** Blue's chance to win at each point, 0 to 1; `frame` marks the minutes. */
+  curve: { ms: number; blue: number; frame: boolean }[]
+  moments: StoryMoment[]
+  players: StoryPlayer[]
+  model: {
+    version: number
+    published: boolean
+    withheld: string | null
+    trained_games: number
+    trained_queue: number
+    accuracy: number | null
+    phases: { label: string; accuracy: number }[]
+  } | null
+  map_url: string | null
+}
+
+// --- the method page --------------------------------------------------------
+
+export interface AuditRole {
+  position: string
+  players: number
+  winners_mean: number
+  losers_mean: number
+  auc: number | null
+  deciles: { low: number; high: number; win_rate: number; games: number }[]
+  components: Record<string, number | null>
+  set_weights: Record<string, number>
+  fitted: { per_ten_points: Record<string, number>; normalised: Record<string, number> }
+  correlation: Record<string, Record<string, number>>
+}
+
+export interface ScoreAudit {
+  weights_version: number
+  queue_id: number
+  games: number
+  players: number
+  overall: {
+    winners_mean: number | null
+    losers_mean: number | null
+    auc: number | null
+    top_on_winning_team: number | null
+    bottom_on_losing_team: number | null
+  }
+  roles: AuditRole[]
+}
+
+export interface WinModelMethod {
+  version: number
+  published: boolean
+  withheld: string | null
+  trained_games: number
+  trained_rows: number
+  patches: string[]
+  queue_id: number
+  applies_to: number[]
+  features: { id: string; label: string; unit: string }[]
+  /** Null where the training games never had the feature at that time. */
+  effects: { feature: string; label: string; unit: string; points: Record<string, number | null> }[]
+  cv: {
+    folds?: number
+    overall?: {
+      rows: number
+      accuracy: number
+      brier: number
+      log_loss: number
+      baseline_brier: number
+      skill: number
+    } | null
+    phases?: { label: string; rows: number; accuracy: number; brier: number; log_loss: number }[]
+    reliability?: { low: number; high: number; predicted: number; observed: number; rows: number }[]
+    ece?: number | null
+    blue_win_rate?: number
+  }
+  gate: { min_games?: number; min_skill?: number; max_ece?: number }
+  trained_at: string | null
+}
+
+export interface MethodReport {
+  score: {
+    version: number
+    components: { id: string; label: string; measures: string }[]
+    weights: Record<string, Record<string, number>>
+    min_games: number
+    audit: ScoreAudit | null
+    audited_at: string | null
+  }
+  win_model: WinModelMethod | null
+  review: {
+    trade_seconds: number
+    trade_kinds: string[]
+    convert_kinds: string[]
+    min_profile_games: number
+    metrics: { id: string; label: string; measures: string; lower_is_better: boolean }[]
+    games: number
+    deaths: number
+    traded: number
+    takedowns: number
+    converted: number
+    contests: number
+    contests_won: number
+  }
+  lanes: { even_below: number; big_from: number; labels: Record<string, string>; min_games: number }
 }
 
 /** One champion over the stored games. Each average is over its own count. */
@@ -1359,6 +1571,10 @@ export const api = {
 
   /** The full scoreboard for one stored match. Fetched when a row is expanded. */
   matchDetail: (matchId: string) => request<MatchDetail>(`/api/matches/${enc(matchId)}`),
+
+  matchStory: (matchId: string) => request<GameStory>(`/api/matches/${enc(matchId)}/story`),
+
+  method: () => request<MethodReport>('/api/method'),
 
   profile: (platform: string, name: string, tag: string, refresh = false) =>
     request<Profile>(

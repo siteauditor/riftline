@@ -115,11 +115,19 @@ cd backend
 
 # Score every stored lobby: the Riftline score, placements and badges
 .venv/Scripts/python.exe -m scripts.ingest score
+
+# Bring stored timelines up to the fields the newer features read
+.venv/Scripts/python.exe -m scripts.ingest reextract
+
+# Fit and grade the win-chance model, weigh every game's deaths, audit the score
+.venv/Scripts/python.exe -m scripts.ingest winmodel
+.venv/Scripts/python.exe -m scripts.ingest reviews
+.venv/Scripts/python.exe -m scripts.ingest audit
 ```
 
 Run them in that order: each stage works on what the earlier ones found.
-`aggregate` and `score` read only the stored corpus and make no Riot calls, so they
-can be rerun as often as you like.
+Everything from `aggregate` on reads only the stored corpus and makes no Riot
+calls, so it can be rerun as often as you like.
 
 `lobbyranks` costs far less than it looks. It is one Riot call per *player*,
 not ten per match, and players repeat: measured on 2026-09-19, the corpus held
@@ -149,7 +157,7 @@ skill order, and the ordered build path. Without it the champion page falls back
 to describing final inventories, which is why it says so when it does. The
 command is resumable in the simplest way there is: "which matches lack a
 timeline" is itself the cursor, so an interrupted run just picks up the rest.
-Budget roughly **64 KB of database per match** (a ~4 KB extract of what the
+Budget roughly **73 KB of database per match** (a ~13 KB extract of what the
 features read, plus the raw payload gzipped) and one Riot call each.
 
 The crawler snowballs: it seeds from a ranked ladder, pulls each player's recent
@@ -546,11 +554,12 @@ ones with no score: 19 of 20 on one Grandmaster profile on 2026-09-19. The Lane
 lead badge needs the timeline, which arrives later, so storing a timeline sends
 an already-scored lobby back through the next scoring pass.
 
-**How it is measured.** Six components: kill participation, share of the team's
-damage to champions, gold per minute, share of the game spent alive, objectives
-(towers, plates and epic monsters) and vision score per minute. Each becomes a
-percentile within the player's own queue and role across the matches we hold, and
-the six are combined with published per-role weights (`WEIGHTS` in
+**How it is measured.** Seven components: kill participation, share of the team's
+damage to champions, damage to champions per 1,000 gold, gold per minute, share of
+the game spent alive, objectives (towers, plates and epic monsters) and vision
+score per minute. Each becomes a percentile within the player's own queue and role
+across the matches we hold, and the seven are combined with published per-role
+weights (`WEIGHTS` in
 `app/services/scores.py`, shown in the UI under "How the Riftline score is
 measured"). Percentiles rather than z-scores, because damage and gold have long
 tails and one stomp should not dominate a distribution. Role-relative, so a support
@@ -590,7 +599,95 @@ exactly what the usual badges miss.
 
 `scripts.ingest score` scores new lobbies and `--rebuild-distributions` re-measures
 the percentiles. Changing a weight means bumping `WEIGHTS_VERSION` and running
-`score --rescore`, which recomputes every score made under the old weights.
+`score --rescore`, which recomputes every score made under the old weights. Every
+deploy runs it, so a weights change applies on release rather than at 03:20.
+
+**Version 2: damage per gold.** Kill participation and damage share are both
+shares of a team total, so a player on a team that does little looks good on them
+for doing little more. Damage per gold is the player's own. It took its weight from
+damage share, the component it overlaps. On the same 1,849 ranked games, against
+version 1: AUC 0.731 against 0.720, the lobby's top scorer on the winning team
+88.3% against 88.0%, the bottom scorer on the losing team 84.0% against 83.6%, and
+every role's AUC higher (top 0.684 to 0.700, bottom 0.738 to 0.749). One number did
+not move up: bottom's winners averaged 5.885 against 5.887, a gap far inside the
+noise of that mean. Spreading the weight across four components instead lowered
+the top-scorer figure to 87.6%, so that table was not shipped.
+
+**The audit** (`scripts.ingest audit`, published on `/method`) grades the score in
+public, per role: winners' and losers' means, the AUC, win rate by score tenth,
+each component's own AUC, and a logistic fit of winning on the component
+percentiles set beside the hand-set weights. The fit is not adopted: it puts kill
+participation, damage share and vision at nothing and objectives, economy and
+survival at nearly everything, because winners take objectives and stay alive
+partly because they are already winning. A fit to wins rewards being on the
+winning team; it is a check on the weights, not a replacement for them.
+
+## A game's story
+
+`/match/{id}` opens with each side's chance to win, minute by minute, the three
+moments that decided the game, and every player's deaths and takedowns weighed
+(`/api/matches/{id}/story`). No competitor we checked explains which moments won
+or lost a game, and none publishes how its numbers are made; this page links to
+`/method`, which does.
+
+**The win-chance model** (`app/services/winchance.py`) is a logistic regression on
+the game state, blue minus red: gold, kills, towers, inhibitors down, dragons,
+soul, the Elder and Baron buffs, Voidgrubs, Herald, Atakhan and levels. Each
+feature has a weight at minute 0 and at minute 40 with a straight line between, so
+a gold lead can matter differently at 8 and at 35 minutes without phase models
+jumping at a boundary. No weight may count against the side holding the lead:
+fitted freely it read a tower at 10 minutes as -2.9 points and a Baron buff at 20
+as -4.1, harmless to the curve and absurd as the effect of an event. It is fitted
+nightly on stored ranked solo timelines (`scripts.ingest winmodel`, about two
+seconds) and graded on five folds split by game, never by minute, because the
+minutes of one game are near copies. On 1,678 local games, held out: 71.9% of
+winners called, Brier 0.179 against 0.250 for always guessing blue's win rate,
+calibration error 0.8 points, 61.7% in the first ten minutes and 79.8% from 20
+to 30. Game pages show it only while it removes 10% of the guess's error and the
+calibration error stays under 5 points; below that the curve is withheld, the way
+a thin sample is.
+
+**Moments.** Events closer than 15 seconds are one sequence, and a sequence is
+measured on the curve from just before it to a minute after its last event. The
+model credits a Baron or a tower mostly through the gold and buildings that follow
+(a Baron buff alone is worth 1 to 3 points), so adding up events' own effects made
+the fights that decided games look small. The biggest three, described from their
+events: "Red won a fight 4 for 1 and took Baron, -35.8".
+
+**The timeline on demand.** Profile games get their timeline at the nightly run.
+Opening a story without one fetches it: one Riot call, once, under the request's
+wait budget. On a busy key the section says so and offers a retry.
+
+## The death review
+
+Every death is traded or not, every takedown converted or not, and each carries
+the win chance it cost or gained (`app/services/reviews.py`).
+
+- **Traded**: the dying player's team gains a kill, an epic monster, a tower, an
+  inhibitor or a plate within 60 seconds. It follows PandaSkill's "worthless
+  death", which a 2025 study of 37,388 professional games found among the measures
+  that best separated players. On 1,678 local games 74.5% of deaths were traded.
+- **Converted**: the player's team takes an epic monster or a building within 60
+  seconds of a takedown. 44.2% were.
+- **Cost and gain**: the model's reading of the event itself, the kill's bounty
+  included. Maymin (2020) found kills and deaths weighed this way track team
+  results far more closely than a plain K/D.
+- **Contested objective**: an epic monster credited to players from both teams.
+
+`scripts.ingest reviews` weighs every stored game the current model version has
+not, into `participant_reviews`. A profile places each player's four rates
+(untraded deaths, win chance lost, converted takedowns, win chance gained) against
+the same role as a percentile per game, averaged, and only from 10 reviewed games
+in that role.
+
+## Lane labels
+
+A lane's share of the pair's gold, experience and CS at 14 minutes becomes won,
+even, lost, won big or lost big by how far it sits from even against the same role
+(`app/services/lanes.py`): the closest 30% are even and the widest 10% big, the
+split STRATZ uses for Dota. On our corpus that lands about 0.02 and 0.09 from even.
+A role with fewer than 200 measured lanes gets no labels. The breakpoints are
+rebuilt with the score.
 
 ## The home page and search
 

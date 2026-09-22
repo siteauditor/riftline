@@ -13,6 +13,7 @@ import {
 } from '../../lib/api'
 import { compact, ordinal, pct, positionLabel, scoreColor } from '../../lib/format'
 import ItemIcon from '../items/ItemIcon'
+import { LANE_TEXT, laneColor } from '../story/lanes'
 
 /**
  * The expanded match: every player's game, not just the searched player's.
@@ -30,10 +31,13 @@ export default function Scoreboard({
   matchId,
   subjectPuuid,
   platform,
+  storyHref,
 }: {
   matchId: string
   subjectPuuid: string
   platform: string
+  /** Where the game's full page is, when this is not already it. */
+  storyHref?: string
 }) {
   const query = useQuery({
     queryKey: ['match', matchId],
@@ -71,6 +75,17 @@ export default function Scoreboard({
 
   return (
     <div className="border-t border-line-soft bg-deep/40 px-3 py-4">
+      {storyHref && (
+        <p className="mb-3 text-xs">
+          <Link
+            to={storyHref}
+            className="text-ink-dim underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright"
+          >
+            Game story
+          </Link>
+          <span className="text-ink-faint">: how the win chance moved, and every death weighed</span>
+        </p>
+      )}
       {detail.score_withheld && (
         <p className="mb-4 border-l-2 border-gold/50 py-1 pl-3 text-xs leading-relaxed text-ink-dim">
           <span className="text-ink">No Riftline score for this game.</span>{' '}
@@ -250,6 +265,19 @@ function Row({
               {player.champion.name}
             </span>
           )}
+          {player.laning_label && (
+            <span
+              className="hidden shrink-0 text-[10px] font-600 sm:inline"
+              style={{ color: laneColor(player.laning_label) }}
+              title={
+                player.laning_score != null
+                  ? `Lane at 14 minutes: ${Math.round(player.laning_score * 100)} : ${100 - Math.round(player.laning_score * 100)}`
+                  : undefined
+              }
+            >
+              {LANE_TEXT[player.laning_label]}
+            </span>
+          )}
           {player.badges.slice(0, 2).map((badge) => (
             <span
               key={badge.id}
@@ -403,6 +431,12 @@ function ModelNote({
       >
         How the Riftline score is measured {open ? '(hide)' : ''}
       </button>
+      <Link
+        to="/method"
+        className="ml-3 text-[11px] text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink-dim"
+      >
+        How well it tracks wins
+      </Link>
       {open && (
         <div className="mt-2 space-y-3">
           <p className="max-w-[80ch] text-[11px] leading-relaxed text-ink-dim">

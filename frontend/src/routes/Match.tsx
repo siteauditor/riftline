@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import ArtHeader from '../components/ArtHeader'
 import PositionIcon from '../components/PositionIcon'
 import Scoreboard from '../components/match/Scoreboard'
+import StorySection from '../components/story/StorySection'
 import { ErrorView, Spinner } from '../components/StateViews'
 import { api } from '../lib/api'
 import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../lib/format'
@@ -122,10 +123,11 @@ export default function Match() {
         </div>
       </ArtHeader>
 
-      <div className="mx-auto max-w-[1280px] px-4 py-6">
+      <div className="mx-auto max-w-[1280px] space-y-6 px-4 py-6">
+        <StorySection matchId={matchId} subjectPuuid={subjectPuuid} />
         <div className="frame">
           <Scoreboard matchId={matchId} subjectPuuid={subjectPuuid} platform={platform} />
-      </div>
+        </div>
       </div>
     </div>
   )

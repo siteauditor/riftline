@@ -87,10 +87,19 @@ export default function App() {
       </main>
 
       <footer className="border-t border-line-soft py-6">
-        <div className="mx-auto max-w-[1280px] px-4 text-xs leading-relaxed text-ink-faint">
-          {PRODUCT_NAME} isn't endorsed by Riot Games and doesn't reflect the views or
-          opinions of Riot Games or anyone officially involved in producing or managing
-          League of Legends.
+        <div className="mx-auto max-w-[1280px] space-y-2 px-4 text-xs leading-relaxed text-ink-faint">
+          <p>
+            <Link to="/method" className="underline decoration-line underline-offset-2 hover:text-ink-dim">
+              How our numbers are made
+            </Link>
+            : the score's weights and how well they track wins, the win-chance model's accuracy,
+            and the rules behind the death review.
+          </p>
+          <p>
+            {PRODUCT_NAME} isn't endorsed by Riot Games and doesn't reflect the views or
+            opinions of Riot Games or anyone officially involved in producing or managing
+            League of Legends.
+          </p>
         </div>
       </footer>
     </div>

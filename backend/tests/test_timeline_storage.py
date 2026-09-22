@@ -216,6 +216,39 @@ async def test_purchase_times_are_filled_from_a_timeline_already_stored(client):
 
 
 @respx.mock
+async def test_reextract_brings_an_old_extract_up_to_date_once(client):
+    """Timelines stored before version 2 hold every event in `raw_gz`, so the
+    new keys come from disk, once, with no Riot call."""
+    from app.services.timelines import EXTRACT_VERSION, backfill_extracts
+
+    match_id = "EUW1_6000000041"
+    await seed_match(client, match_id)
+    route = mock_timeline(timeline_payload())
+    async with SessionLocal() as session:
+        await service(session).ensure_timelines(await stored_matches(session, match_id))
+        stored = await session.get(MatchTimeline, match_id)
+        # As a version 1 row looks: no `tf`, `ev` or `v`.
+        stored.extracted = {
+            k: v for k, v in stored.extracted.items() if k not in ("tf", "ev", "v")
+        }
+        await session.commit()
+    calls = route.call_count
+
+    async with SessionLocal() as session:
+        first = await backfill_extracts(session)
+    async with SessionLocal() as session:
+        second = await backfill_extracts(session)
+        upgraded = (await session.get(MatchTimeline, match_id)).extracted
+
+    assert first.rows >= 1
+    assert upgraded["v"] == EXTRACT_VERSION
+    assert len(upgraded["tf"]) == 30
+    assert upgraded["buys"], "the keys that were already there are kept"
+    assert second.rows == 0, "a second run has nothing left to do"
+    assert route.call_count == calls, "re-extraction reads storage, not Riot"
+
+
+@respx.mock
 async def test_backfill_skips_what_it_already_holds(client):
     match_id = "EUW1_6000000032"
     await seed_match(client, match_id)

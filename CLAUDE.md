@@ -16,7 +16,7 @@ python -m pytest "tests/test_integration.py::test_mastery_reads_the_shard_the_ac
 python -m pytest -q -k shard                     # by name substring
 python -m ruff check app scripts tests
 python -m scripts.migrate                        # additive schema migration, idempotent
-python -m scripts.ingest status                  # also: crawl, timelines, lobbyranks, ladders, aggregate, score
+python -m scripts.ingest status                  # also: crawl, timelines, lobbyranks, ladders, aggregate, score, reextract, winmodel, reviews, audit
 ```
 
 Frontend commands run from `frontend/` (pnpm is pinned by `packageManager`):

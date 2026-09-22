@@ -128,8 +128,10 @@ esac
 # what keeps the tier list, the champion pages and the scores consistent with
 # whatever is on disk, key or no key. Purchase times first: the item guide's
 # figures in `aggregate` read them, and timelines stored before they were
-# recorded are filled from their own raw events.
+# recorded are filled from their own raw events. `reextract` brings stored
+# timelines up to the fields the win-chance model and the review read.
 run_stage "buytimes"  python -m scripts.ingest buytimes  || failures=$((failures+1))
+run_stage "reextract" python -m scripts.ingest reextract || failures=$((failures+1))
 run_stage "aggregate" python -m scripts.ingest aggregate || failures=$((failures+1))
 
 # --rescore costs one query and makes a change to the weights self-applying on
@@ -143,6 +145,13 @@ if [ "$ingested" -eq 1 ]; then
   score_stage+=(--rebuild-distributions)
 fi
 run_stage "score" "${score_stage[@]}" || failures=$((failures+1))
+
+# The win-chance model is refitted on whatever timelines are stored, then every
+# game its new version has not weighed is reviewed, and the score is audited
+# against the night's corpus. All three read storage only.
+run_stage "winmodel" python -m scripts.ingest winmodel || failures=$((failures+1))
+run_stage "reviews"  python -m scripts.ingest reviews  || failures=$((failures+1))
+run_stage "audit"    python -m scripts.ingest audit    || failures=$((failures+1))
 
 log "=== corpus now holds ==="
 $COMPOSE exec -T api python -m scripts.ingest status 2>&1 | sed -n '1,12p'

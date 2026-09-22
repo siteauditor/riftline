@@ -15,6 +15,7 @@ import pytest
 
 from app.services.timelines import (
     CS_FLOOR,
+    EXTRACT_VERSION,
     Lane,
     extract,
     laning_scores,
@@ -144,6 +145,9 @@ def test_selling_an_item_does_not_erase_it_from_the_build():
 
 
 def test_objectives_capture_time_kind_and_team():
+    """A building's ``teamId`` is the side that lost it. Measured on a stored
+    game: participant 4, on blue, killed a tower whose event says 200, at red's
+    bottom outer position. So that tower is blue's."""
     events = [
         {"type": "ELITE_MONSTER_KILL", "timestamp": 600_000, "monsterType": "DRAGON", "killerTeamId": 100},
         {"type": "BUILDING_KILL", "timestamp": 900_000, "buildingType": "TOWER_BUILDING", "teamId": 200},
@@ -151,8 +155,62 @@ def test_objectives_capture_time_kind_and_team():
     out = extract(timeline([frame({1: pframe(0, 0, 0)}, events)]), duration_seconds=1200)
     assert out["obj"] == [
         [600, "monster", "DRAGON", 100],
-        [900, "building", "TOWER_BUILDING", 200],
+        [900, "building", "TOWER_BUILDING", 100],
     ]
+
+
+def test_team_frames_sum_each_side_at_every_frame():
+    people = {pid: pframe(1000 * pid, 0, 10, level=pid) for pid in range(1, 11)}
+    frames = [frame(people) for _ in range(3)]
+    for minute, f in enumerate(frames):
+        f["timestamp"] = minute * 60_000
+    out = extract(timeline(frames), duration_seconds=3 * 60)
+
+    # Blue is 1 to 5, red 6 to 10: gold 15k against 40k, levels 15 against 40.
+    assert out["tf"][2] == [120_000, 15_000, 40_000, 15, 40, 50, 50]
+    assert len(out["tf"]) == 3
+    assert out["v"] == EXTRACT_VERSION
+
+
+def test_state_events_credit_the_team_that_gained():
+    events = [
+        # Red's 7 kills blue's 2 with 8 assisting, for a bounty and a shutdown.
+        {"type": "CHAMPION_KILL", "timestamp": 61_000, "killerId": 7, "victimId": 2,
+         "assistingParticipantIds": [8], "bounty": 300, "shutdownBounty": 150,
+         "position": {"x": 100, "y": 200}},
+        # A turret finishes blue's 3: nobody killed them, red still gained.
+        {"type": "CHAMPION_KILL", "timestamp": 62_000, "killerId": 0, "victimId": 3},
+        {"type": "ELITE_MONSTER_KILL", "timestamp": 63_000, "monsterType": "DRAGON",
+         "monsterSubType": "FIRE_DRAGON", "killerTeamId": 100, "killerId": 1,
+         "assistingParticipantIds": [2, 7]},
+        {"type": "ELITE_MONSTER_KILL", "timestamp": 64_000, "monsterType": "DRAGON",
+         "monsterSubType": "ELDER_DRAGON", "killerTeamId": 200, "killerId": 6},
+        {"type": "ELITE_MONSTER_KILL", "timestamp": 65_000, "monsterType": "HORDE",
+         "killerTeamId": 200, "killerId": 7},
+        {"type": "ELITE_MONSTER_KILL", "timestamp": 66_000, "monsterType": "SOMETHING_NEW",
+         "killerTeamId": 200},
+        {"type": "BUILDING_KILL", "timestamp": 67_000, "buildingType": "TOWER_BUILDING",
+         "teamId": 200, "killerId": 4},
+        {"type": "BUILDING_KILL", "timestamp": 68_000, "buildingType": "INHIBITOR_BUILDING",
+         "teamId": 100, "killerId": 9},
+        {"type": "TURRET_PLATE_DESTROYED", "timestamp": 69_000, "teamId": 100, "killerId": 8},
+    ]
+    out = extract(timeline([frame({1: pframe(0, 0, 0)}, events)]), duration_seconds=1200)
+    rows = [(r[1], r[2], r[3], r[4], r[5], r[8]) for r in out["ev"]]
+
+    assert rows == [
+        ("kill", 200, 7, 2, [8], 450),
+        ("kill", 200, 0, 3, [], 0),
+        # Assisters from both teams: a contested dragon, kept as Riot sent it.
+        ("dragon", 100, 1, 0, [2, 7], 0),
+        ("elder", 200, 6, 0, [], 0),
+        ("grubs", 200, 7, 0, [], 0),
+        # The unknown monster is dropped rather than guessed at.
+        ("tower", 100, 4, 0, [], 0),
+        ("inhib", 200, 9, 0, [], 0),
+        ("plate", 200, 8, 0, [], 0),
+    ]
+    assert out["ev"][0][6:8] == [100, 200], "the position is kept for the death map"
 
 
 # ----------------------------------------------------------------- laning score

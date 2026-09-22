@@ -8,9 +8,10 @@ nobody should trust.
 How it works
 ------------
 
-Six components, each measuring a different thing a player can contribute. Every
-one is converted to a **percentile within its own (queue, role) distribution**
-over the matches we hold, then combined with per-role weights into 0 to 10.
+Seven components, each measuring a different thing a player can contribute.
+Every one is converted to a **percentile within its own (queue, role)
+distribution** over the matches we hold, then combined with per-role weights
+into 0 to 10.
 
 The role-relative step is what makes the number mean anything. A support with
 1.2k gold a minute is not failing at economy, they are playing support, so they
@@ -27,7 +28,11 @@ it: "better than 78% of mid laners in our corpus".
 Validated before it was written. Over 1,200 ranked games, the winning team
 averaged 5.69 against the losers' 4.23, the lobby's top scorer was on the
 winning team 87.8% of the time, the bottom scorer was on the losing team 84.2%
-of the time, and every role's mean landed between 4.93 and 4.97.
+of the time, and every role's mean landed between 4.93 and 4.97. Version 2,
+measured on 1,849 ranked games by the score audit (`scripts.ingest audit`,
+published on the method page): winners 5.77 against 4.33, the top scorer on the
+winning team 88.3% of the time against version 1's 88.0% on the same games, and
+an AUC of 0.731 against 0.720.
 
 What it is not
 --------------
@@ -59,39 +64,52 @@ log = logging.getLogger(__name__)
 # Bump when a weight, a component or a percentile rule changes. Scores carry the
 # version they were computed under, so a change makes old rows visibly stale
 # instead of quietly inconsistent with new ones.
-WEIGHTS_VERSION = 1
+# 2: damage per gold, the first component measured on the player alone. Kill
+# participation and damage share are both shares of a team total, so a player
+# on a team that does little looks good on them for doing little more.
+WEIGHTS_VERSION = 2
 
-# Six components. The keys are stored in `performance_detail` and shipped to the
-# UI, so they are short but readable rather than indices.
-COMPONENTS = ("kill_part", "damage", "economy", "survival", "objectives", "vision")
+# Seven components. The keys are stored in `performance_detail` and shipped to
+# the UI, so they are short but readable rather than indices.
+COMPONENTS = (
+    "kill_part", "damage", "efficiency", "economy", "survival", "objectives", "vision",
+)
 
 # What each one is called where a person reads it, and what it measures. Shipped
 # with the score so the explanation cannot drift from the code.
 COMPONENT_LABELS: dict[str, tuple[str, str]] = {
     "kill_part": ("Kill participation", "Share of the team's kills you took part in"),
     "damage": ("Damage share", "Share of the team's damage to champions"),
+    "efficiency": ("Damage per gold", "Damage to champions per 1,000 gold earned"),
     "economy": ("Economy", "Gold earned per minute"),
     "survival": ("Survival", "Share of the game spent alive"),
     "objectives": ("Objectives", "Towers, plates and epic monsters taken"),
     "vision": ("Vision", "Vision score per minute"),
 }
 
-# Per-role weights, each row summing to 1.0. These are the values the validation
-# in the module docstring was measured with.
+# Per-role weights, each row summing to 1.0. Set by hand and published; the
+# score audit (`scripts.ingest audit`, shown on the method page) sets beside
+# them what a fit to wins would suggest, which the site does not adopt because
+# a fit to wins partly measures who won.
 #
 # The shape of the table is the argument: a support is weighted on vision and
 # participation and barely on farm, a jungler on objectives, a marksman on
 # damage. Without that, every role-neutral rating quietly ranks supports last.
+# Damage per gold took its weight from damage share alone, the component it
+# overlaps. Spread across four components instead, on the same 1,849 games, the
+# lobby's top scorer landed on the winning team 87.6% of the time against v1's
+# 88.0%; taken from damage share it is 88.3%, and every role's AUC rose (bottom
+# 0.738 to 0.749, top 0.684 to 0.700).
 WEIGHTS: dict[str, dict[str, float]] = {
-    "TOP":     {"kill_part": 0.20, "damage": 0.22, "economy": 0.18,
+    "TOP":     {"kill_part": 0.20, "damage": 0.12, "efficiency": 0.10, "economy": 0.18,
                 "survival": 0.18, "objectives": 0.14, "vision": 0.08},
-    "JUNGLE":  {"kill_part": 0.24, "damage": 0.16, "economy": 0.14,
+    "JUNGLE":  {"kill_part": 0.24, "damage": 0.08, "efficiency": 0.08, "economy": 0.14,
                 "survival": 0.16, "objectives": 0.22, "vision": 0.08},
-    "MIDDLE":  {"kill_part": 0.22, "damage": 0.26, "economy": 0.18,
+    "MIDDLE":  {"kill_part": 0.22, "damage": 0.16, "efficiency": 0.10, "economy": 0.18,
                 "survival": 0.16, "objectives": 0.10, "vision": 0.08},
-    "BOTTOM":  {"kill_part": 0.20, "damage": 0.28, "economy": 0.20,
+    "BOTTOM":  {"kill_part": 0.20, "damage": 0.18, "efficiency": 0.10, "economy": 0.20,
                 "survival": 0.16, "objectives": 0.10, "vision": 0.06},
-    "UTILITY": {"kill_part": 0.26, "damage": 0.10, "economy": 0.08,
+    "UTILITY": {"kill_part": 0.26, "damage": 0.04, "efficiency": 0.06, "economy": 0.08,
                 "survival": 0.16, "objectives": 0.08, "vision": 0.32},
 }
 
@@ -240,7 +258,7 @@ def component_values(
     team_damage: int,
     team_kills: int,
 ) -> dict[str, float] | None:
-    """The six raw component values for one participant.
+    """The seven raw component values for one participant.
 
     ``None`` when the row has not been lifted out of `raw` yet, which is a
     different answer from zero and must not be scored as if it were.
@@ -257,6 +275,9 @@ def component_values(
         "damage": (
             participant.damage_to_champions / team_damage if team_damage else 0.0
         ),
+        # The player's own damage for the gold they were given: a player on a
+        # team that deals little cannot look good on it by dealing little.
+        "efficiency": participant.damage_to_champions / max(1, participant.gold_earned) * 1000,
         "economy": participant.gold_earned / minutes,
         # Time alive, not deaths. A death at minute 4 costs a fraction of what
         # one at minute 34 costs, and Riot gives us the actual dead time.
@@ -268,6 +289,17 @@ def component_values(
         ),
         "vision": participant.vision_score / minutes,
     }
+
+
+def quantile_breakpoints(values: list[float]) -> list[float]:
+    """The value at each of the 101 percentiles of ``values``, ascending.
+
+    Shared by the score, the lane labels and the death review, so every
+    percentile on the site is measured the same way.
+    """
+    ordered = sorted(values)
+    last = len(ordered) - 1
+    return [ordered[round(i * last / (QUANTILES - 1))] for i in range(QUANTILES)]
 
 
 def percentile(breakpoints: list[float], value: float) -> float:
@@ -288,7 +320,7 @@ def percentile(breakpoints: list[float], value: float) -> float:
 
 
 def combine(percentiles: dict[str, float], role: str) -> float:
-    """Weighted mean of the six percentiles, on a 0 to 10 scale."""
+    """Weighted mean of the seven percentiles, on a 0 to 10 scale."""
     weights = WEIGHTS[role]
     return 10.0 * sum(weights[c] * percentiles[c] for c in COMPONENTS)
 
@@ -538,7 +570,7 @@ class ScoreService:
             )
         ).all()
 
-        # Only whole lobbies. Two of the six components are shares of a team
+        # Only whole lobbies. Two of the seven components are shares of a team
         # total, and that total is summed from the rows this query returned: a
         # 5v5 with one position missing would contribute nine inflated shares to
         # the yardstick every other game is then measured against. The scorer
@@ -570,6 +602,7 @@ class ScoreService:
             values = {
                 "kill_part": ((r.kills + r.assists) / kills) if kills else 0.0,
                 "damage": (r.damage_to_champions / damage) if damage else 0.0,
+                "efficiency": r.damage_to_champions / max(1, r.gold_earned) * 1000,
                 "economy": r.gold_earned / minutes,
                 "survival": 1.0
                 - min(1.0, (r.time_dead or 0) / max(1, r.game_duration)),
@@ -585,14 +618,15 @@ class ScoreService:
                     (r.queue_id, r.team_position, metric), []
                 ).append(float(value))
 
-        await self.session.execute(RoleMetricStat.__table__.delete())
+        # Only the score's own rows. The lane labels and the death review keep
+        # their breakpoints in the same table and rebuild them on their own
+        # schedule; deleting them here would withhold both until those ran.
+        await self.session.execute(
+            RoleMetricStat.__table__.delete().where(RoleMetricStat.metric.in_(COMPONENTS))
+        )
         payload = []
         for (queue_id, position, metric), values in samples.items():
-            values.sort()
-            last = len(values) - 1
-            breakpoints = [
-                values[round(i * last / (QUANTILES - 1))] for i in range(QUANTILES)
-            ]
+            breakpoints = quantile_breakpoints(values)
             payload.append(
                 {
                     "queue_id": queue_id,
@@ -824,8 +858,15 @@ class ScoreService:
     # ------------------------------------------------------------ reporting
 
     async def has_distributions(self) -> bool:
-        stmt = select(func.count(RoleMetricStat.id))
-        return bool((await self.session.execute(stmt)).scalar())
+        """Whether every component has been measured.
+
+        Any row at all was the old test, and a component added since the last
+        rebuild then had no breakpoints, which withholds every lobby as a queue
+        the corpus cannot carry. A new component is exactly when a rebuild is due.
+        """
+        stmt = select(RoleMetricStat.metric).where(RoleMetricStat.metric.in_(COMPONENTS)).distinct()
+        measured = set((await self.session.execute(stmt)).scalars())
+        return measured >= set(COMPONENTS)
 
     async def coverage(self) -> dict[str, Any]:
         """What share of the corpus carries a score, and what was withheld.

@@ -49,6 +49,25 @@ def test_every_role_weights_to_exactly_one():
         assert sum(weights.values()) == pytest.approx(1.0), role
 
 
+def test_damage_per_gold_is_the_players_own_and_not_a_team_share():
+    """Version 2's component: a player on a team that deals little cannot look
+    good on it by dealing little, as they can on damage share."""
+    from types import SimpleNamespace
+
+    from app.services.scores import component_values
+
+    player = SimpleNamespace(
+        time_dead=0, kills=2, assists=3, damage_to_champions=24_000, gold_earned=12_000,
+        vision_score=30, turret_takedowns=1, turret_plates=0, epic_takedowns=0,
+    )
+    low_team = component_values(player, duration_seconds=1800, team_damage=30_000, team_kills=10)
+    high_team = component_values(player, duration_seconds=1800, team_damage=90_000, team_kills=10)
+
+    assert low_team["efficiency"] == pytest.approx(2000.0)
+    assert high_team["efficiency"] == low_team["efficiency"]
+    assert low_team["damage"] > high_team["damage"], "the share moves with the team"
+
+
 def test_a_median_game_in_every_component_scores_five():
     """5.0 is the corpus median by construction. The UI's neutral band sits
     there, so this is load-bearing rather than cosmetic."""
@@ -121,13 +140,15 @@ def test_lifting_an_empty_participant_is_all_zeroes_not_an_error():
 # ------------------------------------------------------------- the database
 
 
-# The range each metric actually occupies. A single 0..100 ramp for all six
+# The range each metric actually occupies. A single 0..100 ramp for all seven
 # would put kill participation (0..1) inside one breakpoint and make every
 # player's participation identical, which is a property of the fixture rather
 # than of the score.
 METRIC_RANGE = {
     "kill_part": 1.0,
     "damage": 1.0,
+    # Damage to champions per 1,000 gold earned.
+    "efficiency": 4000.0,
     "economy": 1000.0,
     "survival": 1.0,
     "objectives": 15.0,
@@ -741,3 +762,32 @@ async def test_objective_counts_are_withheld_when_riot_s_teams_do_not_line_up(cl
         assert (side["baron"], side["dragon"], side["tower"]) == (0, 0, 0)
         # Kills still reported: summed from that side's own nine players.
         assert side["kills"] == 45
+
+
+async def test_a_component_with_no_breakpoints_means_the_distributions_need_a_rebuild():
+    """Version 2 added a component. Any row at all used to count as measured,
+    so the first run after the release scored nothing: every lobby was withheld
+    for want of the new component's breakpoints."""
+    from sqlalchemy import delete, select
+
+    await seed_distributions(99430)
+    async with SessionLocal() as session:
+        service = ScoreService(session)
+        assert await service.has_distributions()
+
+        kept = [
+            {c: getattr(r, c) for c in ("queue_id", "team_position", "metric", "breakpoints", "games")}
+            for r in (
+                await session.execute(
+                    select(RoleMetricStat).where(RoleMetricStat.metric == "efficiency")
+                )
+            ).scalars()
+        ]
+        await session.execute(delete(RoleMetricStat).where(RoleMetricStat.metric == "efficiency"))
+        await session.commit()
+        try:
+            assert not await service.has_distributions()
+        finally:
+            await session.execute(RoleMetricStat.__table__.insert(), kept)
+            await session.commit()
+        assert await service.has_distributions()
