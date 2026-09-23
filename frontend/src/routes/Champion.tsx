@@ -143,7 +143,10 @@ export default function Champion() {
             src={info.art_url}
             alt=""
             aria-hidden
-            className="pointer-events-none absolute inset-0 -z-10 size-full object-cover object-[72%_18%] opacity-80" loading="lazy" decoding="async" />
+            className="pointer-events-none absolute inset-0 -z-10 size-full object-cover object-[72%_18%] opacity-80"
+            // The page's largest image: loaded at once and first, not lazily.
+            fetchPriority="high"
+          />
         )}
         <div className="art-scrim absolute inset-0 -z-10" />
 

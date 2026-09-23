@@ -27,6 +27,8 @@ from app.services.aggregate import (
     available_brackets,
     cached_lobby_rank_mix,
     default_patch,
+    poolable_patches,
+    rates_differ,
     tier_for,
     wilson_lower_bound,
     wilson_upper_bound,
@@ -73,6 +75,12 @@ class ChampionMetaRow(BaseModel):
     # under `MIN_LANING_TIMELINES` of them.
     avg_gold_diff_14: float | None = None
     timeline_games: int = 0
+    # The same champion and role on `previous_patch`, and whether the win rate
+    # moved by more than chance (the two 95% ranges stop overlapping). Most rows
+    # never move by that test, which is why the page marks only those that do.
+    previous_win_rate: float | None = None
+    previous_games: int = 0
+    win_rate_moved: bool = False
 
 
 class MetaResponse(BaseModel):
@@ -84,6 +92,8 @@ class MetaResponse(BaseModel):
     min_games: int
     rows: list[ChampionMetaRow] = Field(default_factory=list)
     lobby_ranks: LobbyRanksOut | None = None
+    # The close earlier patch each row is compared with, when one is held.
+    previous_patch: str | None = None
     # The games a champion needs in a role to carry a letter, whatever
     # `min_games` shows: the field every page's letters are places in.
     tier_min_games: int = TIER_MIN_GAMES
@@ -175,8 +185,9 @@ async def get_champion_meta(
         if position not in POSITIONS:
             raise HTTPException(400, f"position must be one of {', '.join(POSITIONS)}")
 
+    slices = await aggregated_slices(db)
     if patch is None:
-        patch = default_patch(await aggregated_slices(db), queue_id)
+        patch = default_patch(slices, queue_id)
         if patch is None:
             # The ingest hint is for whoever runs the server, not for a reader.
             log.warning(
@@ -236,6 +247,38 @@ async def get_champion_meta(
         for s in stats
     ]
 
+    # The trend: each row against the close earlier patch, as the champion
+    # page's change figure, so the list and the page agree.
+    held = [s["patch"] for s in slices if s["queue_id"] == queue_id]
+    close = poolable_patches(held or [patch], patch)
+    previous_patch = close[1] if len(close) > 1 else None
+    if previous_patch:
+        before = {
+            (c, pos): (w, g)
+            for c, pos, w, g in (
+                await db.execute(
+                    select(
+                        ChampionStat.champion_id,
+                        ChampionStat.team_position,
+                        ChampionStat.wins,
+                        ChampionStat.games,
+                    ).where(
+                        ChampionStat.patch == previous_patch,
+                        ChampionStat.queue_id == queue_id,
+                        ChampionStat.rank_bracket == bracket,
+                        ChampionStat.games > 0,
+                    )
+                )
+            ).all()
+        }
+        for row in rows:
+            held_before = before.get((row.champion.id, row.position))
+            if held_before:
+                wins, games = held_before
+                row.previous_win_rate = wins / games
+                row.previous_games = games
+                row.win_rate_moved = rates_differ(row.wins, row.games, wins, games)
+
     rows.sort(key=lambda r: r.confidence_win_rate, reverse=True)
     assign_tiers([r for r in rows if r.games >= TIER_MIN_GAMES])
     shown = [r for r in rows if r.games >= min_games]
@@ -250,6 +293,7 @@ async def get_champion_meta(
         min_games=min_games,
         rows=shown,
         lobby_ranks=lobby_ranks_out(mix),
+        previous_patch=previous_patch,
         separated_above=sum(1 for r in shown if r.confidence_win_rate >= 0.5),
         separated_below=sum(1 for r in shown if r.confidence_high <= 0.5),
         # An empty list is an answer, not an error: the floor is above what the

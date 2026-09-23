@@ -230,3 +230,32 @@ async def test_a_floor_above_the_slice_is_an_answer_with_a_way_out(client):
     body = response.json()
     assert (body["rows"], body["empty_reason"], body["most_games"]) == ([], "min_games", 100)
 
+
+
+async def test_a_row_says_when_its_win_rate_moved_since_the_close_earlier_patch(client):
+    """Against the close earlier patch, the champion page's rule: marked only
+    where the two ranges stop overlapping, which 2 of 293 big moves did."""
+    queue = 4430
+    async with SessionLocal() as session:
+        if not await session.get(Match, "TREND_8_1"):
+            for match_id, patch in (("TREND_8_1", "8.1"), ("TREND_8_2", "8.2")):
+                session.add(Match(
+                    match_id=match_id, platform_id="EUW1", queue_id=queue, patch=patch,
+                    game_creation=1, game_duration=1800, is_remake=False, teams=[],
+                ))
+            for patch, rows in (("8.1", ((9501, 30), (9502, 50))), ("8.2", ((9501, 70), (9502, 50)))):
+                for champion, wins in rows:
+                    session.add(ChampionStat(
+                        patch=patch, queue_id=queue, rank_bracket="ALL", champion_id=champion,
+                        team_position="MIDDLE", games=100, wins=wins, pool_games=1000, bans=0,
+                    ))
+            await session.commit()
+
+    body = (await client.get(
+        "/api/meta/champions", params={"patch": "8.2", "queue_id": queue, "min_games": 1}
+    )).json()
+
+    assert body["previous_patch"] == "8.1"
+    rows = {r["champion"]["id"]: r for r in body["rows"]}
+    assert (rows[9501]["previous_win_rate"], rows[9501]["win_rate_moved"]) == (0.3, True)
+    assert (rows[9502]["previous_games"], rows[9502]["win_rate_moved"]) == (100, False)

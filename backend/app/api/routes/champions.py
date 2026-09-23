@@ -57,6 +57,7 @@ from app.services.aggregate import (
     cached_lobby_rank_mix,
     default_patch,
     poolable_patches,
+    rates_differ,
     tier_for,
     wilson_lower_bound,
     wilson_upper_bound,
@@ -510,15 +511,6 @@ def _champion_info(champion_id: int, sd: StaticDataService) -> ChampionInfo:
     )
 
 
-def _moved(wins_a: int, games_a: int, wins_b: int, games_b: int) -> bool:
-    """True when two proportions' Wilson intervals do not overlap."""
-    if not games_a or not games_b:
-        return False
-    return wilson_lower_bound(wins_a, games_a) > wilson_upper_bound(
-        wins_b, games_b
-    ) or wilson_lower_bound(wins_b, games_b) > wilson_upper_bound(wins_a, games_a)
-
-
 def _facet_entry(row: ChampionFacetStat, sd, kind: str) -> FacetEntry:
     ids = list(row.facet_ids or [])
     entry = FacetEntry(
@@ -693,7 +685,11 @@ async def get_champion(
             f"Riftline holds no ranked games of {sd.champion_name(champion_id)} "
             f"on patch {asked_patch or patch} yet.",
         )
-    previous_patch = held[held.index(patch) + 1] if patch in held[:-1] else None
+    # The close earlier patch, as the counters pool: the next one held was taken
+    # whatever the season or the gap, so a champion's "change" could be set
+    # against a patch from months before.
+    close = poolable_patches(held or [patch], patch)
+    previous_patch = close[1] if len(close) > 1 else None
 
     slice_where = (
         ChampionStat.patch == patch,
@@ -779,8 +775,8 @@ async def get_champion(
                 games=before.games,
                 win_rate=before.win_rate,
                 pick_rate=before.pick_rate,
-                win_rate_moved=_moved(stat.wins, stat.games, before.wins, before.games),
-                pick_rate_moved=_moved(
+                win_rate_moved=rates_differ(stat.wins, stat.games, before.wins, before.games),
+                pick_rate_moved=rates_differ(
                     stat.games, stat.pool_games, before.games, before.pool_games
                 ),
             )

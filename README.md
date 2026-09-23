@@ -242,6 +242,15 @@ counts above the rows. Ranking another way does not fix it: ordered by the low e
 a shrunk estimate or by raw rate, the top tenth of 16.17 won 52% on 16.18 and the
 bottom tenth 48%, whichever rule chose them.
 
+Each row also says when its win rate moved since the close earlier patch, by the
+champion page's rule: only where the two 95% ranges stop overlapping, which 2 of 293
+twenty-point moves did between 16.17 and 16.18. The list is one grid for every width,
+a table's columns from `md` and a row with a line beneath on a phone, and draws its
+first 60 rows until asked for all. It used to render a table and a list of cards,
+both in the HTML: 13,096 DOM nodes and 1.38 MB for production's 247 rows. Its header
+art, the top pick's splash, is in the prerendered page too; it used to wait for
+hydration and a request, and the list painted in 1.9 s against a champion page's 0.8.
+
 The tier list also says how its games were ranked: each lobby's measured median
 rank, bucketed, with Master and above merged because apex cutoffs are live and per
 region. On 16.18, 95% were Master+ lobbies. That replaced the "Crawled from" filter

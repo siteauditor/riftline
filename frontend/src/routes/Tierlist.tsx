@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
@@ -134,9 +134,8 @@ export default function Tierlist() {
 
   // Ranked on the whole list, then filtered, so a search keeps each champion's
   // real place rather than renumbering the matches from one.
-  const ranked = useMemo(() => {
-    const rows = [...(meta.data?.rows ?? [])]
-    rows.sort((a, b) => {
+  const ranked = [...(meta.data?.rows ?? [])]
+    .sort((a, b) => {
       const va = sortValue(a, sort)
       const vb = sortValue(b, sort)
       if (va === null && vb === null) return b.confidence_win_rate - a.confidence_win_rate
@@ -144,13 +143,14 @@ export default function Tierlist() {
       if (vb === null) return -1
       return vb - va
     })
-    return rows.map((row, i) => ({ row, place: i + 1 }))
-  }, [meta.data, sort])
+    .map((row, i) => ({ row, place: i + 1 }))
+  const [showAll, setShowAll] = useState(false)
 
   const query = foldName(search)
   const shown = query
     ? ranked.filter(({ row }) => foldName(row.champion.name).includes(query))
     : ranked
+  const visible = showAll || query ? shown : shown.slice(0, FIRST_ROWS)
   const queueName = slice.queueId === 440 ? 'ranked flex' : 'ranked solo'
   const linkFor = (row: ChampionMetaRow) =>
     `/champions/${row.champion.slug ?? row.champion.id}${sliceLink({ ...slice, position: row.position })}`
@@ -278,20 +278,21 @@ export default function Tierlist() {
                 </p>
               ) : (
                 <>
-                  <Table
-                    rows={shown}
+                  <Rows
+                    rows={visible}
+                    total={shown.length}
                     sort={sort}
                     onSort={setSort}
                     showRole={!position}
                     linkFor={linkFor}
                     tierFloor={meta.data?.tier_min_games ?? MIN_GAMES}
+                    previousPatch={meta.data?.previous_patch ?? null}
                   />
-                  <Cards
-                    rows={shown}
-                    showRole={!position}
-                    linkFor={linkFor}
-                    tierFloor={meta.data?.tier_min_games ?? MIN_GAMES}
-                  />
+                  {visible.length < shown.length && (
+                    <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowAll(true)}>
+                      Show all {shown.length} picks
+                    </Button>
+                  )}
                 </>
               )}
             </>
@@ -413,155 +414,173 @@ const COLUMNS: { key: SortKey; label: string; hint: string }[] = [
     label: 'Win rate',
     hint: 'Ranked by the low end of the range the sample supports',
   },
-  { key: 'pick_rate', label: 'Pick', hint: 'Share of games this champion was picked' },
-  { key: 'ban_rate', label: 'Ban', hint: 'Share of games this champion was banned' },
+  { key: 'pick_rate', label: 'Pick', hint: 'Share of games this champion was picked in this role' },
+  { key: 'ban_rate', label: 'Ban', hint: 'Share of games this champion was banned, in any role' },
   { key: 'games', label: 'Games', hint: 'Sample size' },
-  { key: 'gold', label: 'Gold @14', hint: 'Average gold lead at 14 minutes' },
+  { key: 'gold', label: 'Gold @14', hint: 'Average gold lead at 14 minutes, from ten or more games with a timeline' },
   { key: 'avg_kda', label: 'KDA', hint: 'Kills and assists per death' },
   { key: 'avg_cs_per_min', label: 'CS/m', hint: 'Minions and monsters per minute' },
 ]
 
-function Table({
+// One grid for every width. Below md a row is the place, the letter, the
+// champion and the range, with the secondary figures on a line beneath; from
+// md the same cells become a table's columns. The page used to render a table
+// for wide screens and a list of cards for phones, both in the HTML: 13,096
+// DOM nodes and 1.38 MB for production's 247 rows, and 0.7 s of blocking on a
+// phone while React hydrated both (measured 2026-09-24).
+const GRID =
+  'grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5 ' +
+  'md:grid-cols-[2.25rem_3rem_minmax(0,1fr)_8rem_4.5rem_4.5rem_4.5rem_5rem_3.5rem_3.5rem] md:gap-x-3'
+
+// Rows drawn before "Show all": enough to scroll a role's whole list, few
+// enough that the page stays light. A search or a role shows every match.
+const FIRST_ROWS = 60
+
+function Rows({
   rows,
+  total,
   sort,
   onSort,
   showRole,
   linkFor,
   tierFloor,
+  previousPatch,
 }: {
   rows: { row: ChampionMetaRow; place: number }[]
+  /** Every row the list holds, for the "show all" button. */
+  total: number
   sort: SortKey
   onSort: (key: SortKey) => void
   showRole: boolean
   linkFor: (row: ChampionMetaRow) => string
   tierFloor: number
+  previousPatch: string | null
 }) {
   return (
-    <div className="mt-3 hidden overflow-x-auto md:block">
-      <table className="w-full min-w-[720px] border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-line text-xs text-ink-faint">
-            <th className="w-9 py-2.5 text-left font-500">#</th>
-            <th className="w-12 py-2.5 text-left font-500">
-              <Hint text={tierLegend(tierFloor)}>
-                <span
-                  tabIndex={0}
-                  className="cursor-help rounded-sm underline decoration-line decoration-dotted underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-                >
-                  Tier
-                </span>
-              </Hint>
-            </th>
-            <th className="py-2.5 text-left font-500">Champion</th>
-            {COLUMNS.map((c) => (
-              <th
-                key={c.key}
-                aria-sort={sort === c.key ? 'descending' : 'none'}
-                className="py-2.5 text-right font-500"
+    <div role="table" aria-label="Champion tier list" aria-rowcount={total + 1} className="mt-3">
+      <div role="rowgroup" className="hidden md:block">
+        <div role="row" className={`${GRID} border-b border-line py-2.5 text-xs text-ink-faint`}>
+          <span role="columnheader" className="font-500">
+            #
+          </span>
+          <span role="columnheader" className="font-500">
+            <Hint text={tierLegend(tierFloor)}>
+              <span
+                tabIndex={0}
+                className="cursor-help rounded-sm underline decoration-line decoration-dotted underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
               >
-                <Hint text={c.hint}>
+                Tier
+              </span>
+            </Hint>
+          </span>
+          <span role="columnheader" className="font-500">
+            Champion
+          </span>
+          {COLUMNS.map((c) => (
+            <span
+              key={c.key}
+              role="columnheader"
+              aria-sort={sort === c.key ? 'descending' : 'none'}
+              className="text-right font-500"
+            >
+              <Hint text={c.hint}>
                 <button
+                  type="button"
                   onClick={() => onSort(c.key)}
                   className={`border-b-2 pb-0.5 transition-colors ${
-                    sort === c.key
-                      ? 'border-gold text-gold-bright'
-                      : 'border-transparent hover:text-ink'
+                    sort === c.key ? 'border-gold text-gold-bright' : 'border-transparent hover:text-ink'
                   }`}
                 >
                   {c.label}
                 </button>
-                </Hint>
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ row, place }) => (
-            <tr
-              key={`${row.champion.id}-${row.position}`}
-              className="lift border-b border-line-soft"
-            >
-              <td className="tnum py-2.5 text-xs text-ink-faint">{place}</td>
-              <td className="py-2.5">
-                <TierBadge row={row} floor={tierFloor} />
-              </td>
-              <td className="py-2.5">
-                <Link to={linkFor(row)} viewTransition className="group block">
-                  <ChampionCell row={row} showRole={showRole} />
-                </Link>
-              </td>
-              <td className="py-2.5 text-right">
-                <WinRateRange
-                  rate={row.win_rate}
-                  low={row.confidence_win_rate}
-                  high={row.confidence_high}
-                  games={row.games}
-                />
-              </td>
-              <td className="tnum py-2.5 text-right text-ink-dim">{pct(row.pick_rate, 1)}</td>
-              <td className="tnum py-2.5 text-right text-ink-dim">{pct(row.ban_rate, 1)}</td>
-              <td className="tnum py-2.5 text-right text-ink-faint">{compact(row.games)}</td>
-              <td className="tnum py-2.5 text-right">
-                <Gold row={row} />
-              </td>
-              <td className="tnum py-2.5 text-right text-ink-dim">{row.avg_kda.toFixed(2)}</td>
-              <td className="tnum py-2.5 text-right text-ink-dim">
-                {row.avg_cs_per_min.toFixed(1)}
-              </td>
-            </tr>
+              </Hint>
+            </span>
           ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-/**
- * The phone layout: one card per champion.
- *
- * The table needed 720px, so at 390px its win rate column sat off-screen and a
- * reader saw names and tiers but no number without scrolling sideways. A card
- * puts the tier, the champion and the win rate range in one row, with the rest
- * on a line beneath.
- */
-function Cards({
-  rows,
-  showRole,
-  linkFor,
-  tierFloor,
-}: {
-  rows: { row: ChampionMetaRow; place: number }[]
-  showRole: boolean
-  linkFor: (row: ChampionMetaRow) => string
-  tierFloor: number
-}) {
-  return (
-    <ul className="mt-3 md:hidden">
-      {rows.map(({ row, place }) => (
-        <li key={`${row.champion.id}-${row.position}`} className="border-b border-line-soft">
-          <Link to={linkFor(row)} viewTransition className="group block py-3">
-            <span className="grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5">
-              <span className="tnum text-xs text-ink-faint">{place}</span>
+        </div>
+      </div>
+      <div role="rowgroup">
+        {rows.map(({ row, place }) => (
+          <div
+            key={`${row.champion.id}-${row.position}`}
+            role="row"
+            aria-rowindex={place + 1}
+            className={`${GRID} lift relative border-b border-line-soft py-3 md:py-2.5`}
+          >
+            <span role="cell" className="tnum text-xs text-ink-faint">
+              {place}
+            </span>
+            <span role="cell">
               <TierBadge row={row} floor={tierFloor} />
-              <ChampionCell row={row} showRole={showRole} />
+            </span>
+            <span role="cell" className="min-w-0">
+              {/* The whole row answers the click: the link's box is stretched
+                  over it, as the phone cards were links end to end. */}
+              <Link
+                to={linkFor(row)}
+                viewTransition
+                className="group block rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <ChampionCell row={row} showRole={showRole} />
+              </Link>
+            </span>
+            <span role="cell" className="text-right">
               <WinRateRange
                 rate={row.win_rate}
                 low={row.confidence_win_rate}
                 high={row.confidence_high}
                 games={row.games}
+                description={`${pct(row.win_rate, 1)} over ${row.games} games, a range of ${pct(row.confidence_win_rate, 1)} to ${pct(row.confidence_high, 1)}`}
               />
+              <Trend row={row} previousPatch={previousPatch} />
             </span>
-            <span className="tnum mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 pl-[4.5rem] text-[11px] text-ink-faint">
-              <span>{compact(row.games)} games</span>
-              <span>Pick {pct(row.pick_rate, 1)}</span>
-              <span>Ban {pct(row.ban_rate, 1)}</span>
-              <span>
-                Gold @14 <Gold row={row} />
+            {/* A box on a phone, the next line under the champion; from md it
+                steps aside and its cells take their own columns. */}
+            <div
+              role="none"
+              className="tnum col-span-2 col-start-3 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint md:contents md:text-sm"
+            >
+              <span role="cell" className="md:text-right md:text-ink-dim">
+                <span className="md:sr-only">Pick </span>
+                {pct(row.pick_rate, 1)}
               </span>
+              <span role="cell" className="md:text-right md:text-ink-dim">
+                <span className="md:sr-only">Ban </span>
+                {pct(row.ban_rate, 1)}
+              </span>
+              <span role="cell" className="md:text-right">
+                {compact(row.games)}
+                <span className="md:sr-only"> games</span>
+              </span>
+              <span role="cell" className="md:text-right">
+                <span className="md:sr-only">Gold @14 </span>
+                <Gold row={row} />
+              </span>
+            </div>
+            <span role="cell" className="tnum hidden text-right text-ink-dim md:block">
+              {row.avg_kda.toFixed(2)}
             </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+            <span role="cell" className="tnum hidden text-right text-ink-dim md:block">
+              {row.avg_cs_per_min.toFixed(1)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The move since the close earlier patch, only where it is real: the two 95%
+ * ranges no longer overlap, which 2 of 293 twenty-point moves did between
+ * 16.17 and 16.18. An unmarked row is the ordinary case, not a gap.
+ */
+function Trend({ row, previousPatch }: { row: ChampionMetaRow; previousPatch: string | null }) {
+  if (!row.win_rate_moved || row.previous_win_rate === null || !previousPatch) return null
+  const points = (row.win_rate - row.previous_win_rate) * 100
+  return (
+    <span className={`tnum mt-1 block text-[11px] ${points >= 0 ? 'text-win' : 'text-loss'}`}>
+      {points >= 0 ? '+' : ''}
+      {points.toFixed(1)} since {previousPatch}
+    </span>
   )
 }

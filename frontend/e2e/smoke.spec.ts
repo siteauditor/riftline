@@ -310,6 +310,23 @@ test('the runes tab names every rune it draws, stat shards included', async ({ p
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test('the tier list is one list, with its header art already in the served page', async ({ page, request }) => {
+  const html = await (await request.get('/tierlist')).text()
+  test.skip(html.includes('No ranked games yet'), 'The tier list needs a corpus of matches.')
+  // The largest image, in the HTML rather than after hydration and a request.
+  expect(html).toContain('splash-art/centered')
+  const errors = await open(page, '/tierlist')
+  const list = page.getByRole('table', { name: 'Champion tier list' })
+  await expect(list).toHaveCount(1)
+  const drawn = await list.getByRole('row').count()
+  const more = page.getByRole('button', { name: /^Show all d+ picks$/ })
+  if (await more.isVisible()) {
+    await more.click()
+    expect(await list.getByRole('row').count()).toBeGreaterThan(drawn)
+  }
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

@@ -3074,6 +3074,27 @@
       "type": "integer",
       "title": "Timeline Games",
       "default": 0
+     },
+     "previous_win_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous Win Rate"
+     },
+     "previous_games": {
+      "type": "integer",
+      "title": "Previous Games",
+      "default": 0
+     },
+     "win_rate_moved": {
+      "type": "boolean",
+      "title": "Win Rate Moved",
+      "default": false
      }
     },
     "type": "object",
@@ -8359,6 +8380,17 @@
         "type": "null"
        }
       ]
+     },
+     "previous_patch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Previous Patch"
      },
      "tier_min_games": {
       "type": "integer",

@@ -95,6 +95,21 @@ def wilson_upper_bound(wins: int, games: int, z: float = WILSON_Z) -> float:
     return min(1.0, max(phat, (centre + margin) / denominator))
 
 
+def rates_differ(wins_a: int, games_a: int, wins_b: int, games_b: int) -> bool:
+    """True when two win rates' 95% Wilson intervals do not overlap.
+
+    What the champion page and the tier list call a change between patches.
+    Measured on 2026-09-21: of 760 champion and role rows held on both 16.17 and
+    16.18, the win rate moved 20 points or more on 293, and 2 of those moves
+    survive this test, so an unmarked figure is the ordinary case.
+    """
+    if not games_a or not games_b:
+        return False
+    return wilson_lower_bound(wins_a, games_a) > wilson_upper_bound(
+        wins_b, games_b
+    ) or wilson_lower_bound(wins_b, games_b) > wilson_upper_bound(wins_a, games_a)
+
+
 # Fewer rows than this and a percentile describes the list's length rather than
 # the champions in it: with one row, that row is automatically "the top 10%".
 MIN_ROWS_FOR_TIERS = 10

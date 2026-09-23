@@ -1050,6 +1050,18 @@ export interface components {
              * @default 0
              */
             timeline_games: number;
+            /** Previous Win Rate */
+            previous_win_rate: number | null;
+            /**
+             * Previous Games
+             * @default 0
+             */
+            previous_games: number;
+            /**
+             * Win Rate Moved
+             * @default false
+             */
+            win_rate_moved: boolean;
         };
         /** ChampionOverview */
         ChampionOverview: {
@@ -3116,6 +3128,8 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["ChampionMetaRow"][];
             lobby_ranks: components["schemas"]["LobbyRanksOut"] | null;
+            /** Previous Patch */
+            previous_patch: string | null;
             /**
              * Tier Min Games
              * @default 20

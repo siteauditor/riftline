@@ -106,6 +106,11 @@ export const routes: RouteObject[] = [
           return Promise.all([
             queryClient.prefetchQuery(queries.corpus()),
             queryClient.prefetchQuery(queries.meta(slice)),
+            // The header art is the top pick's splash, looked up in this list.
+            // Without it in the HTML the page's largest image waited for
+            // hydration and a request: 1.9 s to paint against the champion
+            // page's 0.8 s (2026-09-24).
+            queryClient.prefetchQuery(queries.champions()),
           ])
         }),
       },

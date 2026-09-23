@@ -34,6 +34,8 @@ export default function ArtHeader({
           // Off to the right and high: splash art puts the face around a third
           // in, and the type sits on the left, so this keeps them apart.
           className="pointer-events-none absolute inset-0 size-full object-cover object-[70%_22%] opacity-60"
+          // The page's largest image, so the first one fetched.
+          fetchPriority="high"
         />
       )}
       <span aria-hidden className="art-scrim absolute inset-0" />
