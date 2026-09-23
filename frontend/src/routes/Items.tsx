@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -15,7 +15,7 @@ import { type ItemSummary } from '../lib/api'
 import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { pct } from '../lib/format'
-import { foldName, useSearchText, withParams } from '../lib/searchParams'
+import { foldName, useHydratedSearchParams, useSearchText, withParams } from '../lib/searchParams'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import Hint from '../components/Hint'
 
@@ -29,7 +29,7 @@ import Hint from '../components/Hint'
  */
 export default function Items() {
   // In the URL, so a filtered list survives opening an item and coming back.
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const [query, setQuery] = useSearchText('q', 120)
   const needle = foldName(query)
   // Memoised on the parameter's text: the list below refilters only when it changes.

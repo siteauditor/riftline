@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -19,6 +19,7 @@ import {
   sliceFromParams,
   sliceLink,
   sliceParams,
+  useHydratedSearchParams,
   useSearchText,
   withParams,
 } from '../lib/searchParams'
@@ -88,7 +89,7 @@ export default function Tierlist() {
   // Everything that shapes the list lives in the URL. In component state it
   // was lost on the way back from a champion: pick Jungle, open Skarner, press
   // back, and the list was on All roles again (reproduced on the live site).
-  const [params, setParams] = useSearchParams()
+  const [params, setParams] = useHydratedSearchParams()
   // No bracket: the list hides "Crawled from" and describes its lobbies instead.
   const slice: SliceValue = { ...sliceFromParams(params, MIN_GAMES), bracket: null }
   const sort = parseSort(params.get('sort'))

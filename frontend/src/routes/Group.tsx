@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { ApiError, api, type GroupWarm } from '../lib/api'
 import { heads } from '../lib/seo'
 import { forgetGroup, keyInHash, rememberGroup, useSavedGroups, viewLink } from '../lib/groups'
-import { withParams } from '../lib/searchParams'
+import { useHydratedSearchParams, withParams } from '../lib/searchParams'
 import CopyButton from '../components/group/CopyButton'
 import Head from '../components/Head'
 import EditPanel from '../components/group/EditPanel'
@@ -33,7 +33,7 @@ export default function GroupRoute() {
 function GroupPage({ slug }: { slug: string }) {
   const navigate = useNavigate()
   const location = useLocation()
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const queryClient = useQueryClient()
   // The key in the address wins, then the one this browser kept. Read on every
   // render rather than once: pasting the edit link over the view link of an

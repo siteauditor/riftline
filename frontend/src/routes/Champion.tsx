@@ -1,4 +1,4 @@
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import Head from '../components/Head'
@@ -24,6 +24,7 @@ import {
   sliceFromParams,
   sliceLink,
   sliceParams,
+  useHydratedSearchParams,
   useSearchText,
   withParams,
 } from '../lib/searchParams'
@@ -36,7 +37,7 @@ const MIN_GAMES = CHAMPION_MIN_GAMES
 export default function Champion() {
   // A slug ("aatrox"), or an id from an older link; the API takes either.
   const { championId = '' } = useParams()
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
 
   // Slice state lives in the URL so a champion page stays deep-linkable and the
   // back button behaves.

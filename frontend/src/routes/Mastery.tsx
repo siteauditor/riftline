@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -14,7 +14,7 @@ import { EmptyState, ErrorView, GridSkeleton } from '../components/StateViews'
 import { api } from '../lib/api'
 import { heads } from '../lib/seo'
 import { compact, pct, timeAgo } from '../lib/format'
-import { foldName, useSearchText, withParams } from '../lib/searchParams'
+import { foldName, useHydratedSearchParams, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
 
@@ -25,7 +25,7 @@ const ANALYTICS_LIMIT = 1000
 export default function Mastery() {
   const { platform = '', name = '', tag = '' } = useParams()
   // In the URL, so the filter survives opening a champion and coming back.
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const [query, setQuery] = useSearchText('q', 120)
   const recentOnly = search.get('recent') === '1'
   const setRecentOnly = (on: boolean) =>

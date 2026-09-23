@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -17,7 +17,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
-import { intParam, withParams } from '../lib/searchParams'
+import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 
@@ -80,7 +80,7 @@ export default function PlayerChampions() {
   const { platform = '', name = '', tag = '' } = useParams()
   // In the URL, so the table comes back as it was left after opening a
   // champion or a filtered history.
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const queue = intParam(search, 'queue', 0) || null
   const sort: SortKey = COLUMNS.find((c) => c.key === search.get('sort'))?.key ?? 'games'
   const descending = search.get('dir') !== 'asc'

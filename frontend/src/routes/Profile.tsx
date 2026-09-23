@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
@@ -33,7 +33,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
-import { intParam, withParams } from '../lib/searchParams'
+import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { rememberSearch } from '../lib/storage'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import Hint from '../components/Hint'
@@ -85,7 +85,7 @@ export default function Profile() {
   const { platform = '', name = '', tag = '' } = useParams()
   // In the URL, so a filtered history survives a reload, a shared link, and
   // the way back from an item or another player opened out of a game.
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const queue = intParam(search, 'queue', 0) || null
   const championFilter = intParam(search, 'champion', 0) || null
   const setFilter = (patch: { queue?: number | null; champion?: number | null }) =>

@@ -1,4 +1,4 @@
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -14,13 +14,13 @@ import { type ItemDetail, type ItemFigures } from '../lib/api'
 import { compact, pct } from '../lib/format'
 import { itemSummary } from '../lib/prose'
 import { queries } from '../lib/queries'
-import { sliceFromParams, sliceLink, sliceParams, withParams } from '../lib/searchParams'
+import { sliceFromParams, sliceLink, sliceParams, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { heads } from '../lib/seo'
 import CountUp from '../components/CountUp'
 
 export default function Item() {
   const { itemId = '' } = useParams()
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   // Patch, queue and bracket only: an item page has no role or sample floor.
   const { patch, queueId, bracket } = sliceFromParams(search, 1)
   const slice = { patch, queueId, bracket }

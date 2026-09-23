@@ -1,4 +1,4 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -12,6 +12,7 @@ import { heads } from '../lib/seo'
 import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../lib/format'
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
+import { useHydratedSearchParams } from '../lib/searchParams'
 
 /**
  * One stored game on its own page.
@@ -23,7 +24,7 @@ import CountUp from '../components/CountUp'
  */
 export default function Match() {
   const { matchId = '' } = useParams()
-  const [search] = useSearchParams()
+  const [search] = useHydratedSearchParams()
   const subjectPuuid = search.get('player') ?? ''
 
   // The same key the scoreboard uses, so it renders from this response rather

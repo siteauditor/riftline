@@ -197,6 +197,44 @@ test('the draft picker lists champions over the fields below it and adds one', a
   await expect(page.getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
 })
 
+test('a link with a query string hydrates the page it was prerendered as', async ({ page }) => {
+  // nginx serves the file prerendered for the bare path whatever the query
+  // string, and every one of these threw React error #418 on production
+  // (2026-09-24). They render on an empty corpus too, so CI checks them.
+  for (const path of ['/leaderboards?queue=440', '/tierlist?position=TOP', '/champions/aatrox?tab=runes']) {
+    const errors = await open(page, path)
+    expect(hydrationErrors(errors), path).toEqual([])
+  }
+})
+
+test('the draft hydrates with a remembered region and Riot ID and a board in the link', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('riftline.region', 'kr')
+    localStorage.setItem('riftline.riotId', 'Faker#KR1')
+  })
+  // comfort=0: mastery off, so the page never asks Riot about the Riot ID.
+  const errors = await open(page, '/draft?role=TOP&comfort=0')
+  expect(hydrationErrors(errors)).toEqual([])
+  const top = page.getByRole('button', { name: 'Top', exact: true })
+  const empty = page.getByText('No matches ingested yet')
+  await expect(top.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The draft board needs a corpus of matches.')
+  await expect(top).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByPlaceholder('Caps#EUW').last()).toHaveValue('Faker#KR1')
+})
+
+test('removing the lane opponent takes them off the board, not only the mark', async ({ page }) => {
+  const errors = await open(page, '/draft?enemies=157,64&lane=157')
+  const yasuo = page.getByRole('button', { name: /^(Remove )?Yasuo$/ })
+  const empty = page.getByText('No matches ingested yet')
+  await expect(yasuo.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The draft board needs a corpus of matches.')
+  await yasuo.click()
+  await expect(page).toHaveURL(/enemies=64(&|$)/)
+  await expect(page).not.toHaveURL(/157/)
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

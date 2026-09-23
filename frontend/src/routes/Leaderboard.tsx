@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { PLATFORMS, type LeaderboardResponse } from '../lib/api'
@@ -13,7 +13,7 @@ import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
 import { ErrorView, TableSkeleton } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel } from '../lib/format'
-import { intParam, withParams } from '../lib/searchParams'
+import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { Button } from '@/components/ui/button'
 
 /**
@@ -58,7 +58,7 @@ const pendingNames = (d: LeaderboardResponse) =>
 export default function Leaderboard() {
   // Filters live in the URL, the way the champion page already does it, so a
   // ladder can be linked to.
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
 
   const slicesQuery = useQuery({
     ...queries.leaderboardSlices(),
