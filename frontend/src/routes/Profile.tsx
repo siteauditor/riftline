@@ -132,6 +132,16 @@ export default function Profile() {
   const stored = matchesQuery.data?.pages[0]?.source === 'stored'
   const storedTotal = matchesQuery.data?.pages[0]?.stored_total ?? null
 
+  // As with the header: when the live history fails on a prerendered page,
+  // the stored games it was rendered with stay on screen under a line that
+  // says so, rather than an error where the games were. Only for the
+  // unfiltered list, which is the one that was stored.
+  const storedPage =
+    matchesQuery.isError && matches.length === 0 && queue === null && championFilter === null
+      ? queryClient.getQueryData(queries.matchesStored(platform, name, tag).queryKey)
+      : undefined
+  const rows = storedPage?.matches ?? matches
+
   // The champions this player has stored games on, for the champion filter.
   // Storage only, so it costs no Riot call.
   const playedQuery = useQuery({
@@ -414,11 +424,25 @@ export default function Profile() {
 
             {matchesQuery.isLoading && <MatchListSkeleton />}
 
-            {matchesQuery.isError && (
+            {matchesQuery.isError && !storedPage && (
               <ErrorView
                 error={matchesQuery.error}
                 onRetry={() => matchesQuery.refetch()}
               />
+            )}
+
+            {storedPage && (
+              <p className="accent-edge py-2 pl-4 text-sm leading-relaxed text-ink-dim">
+                <span className="text-ink">Live history is unavailable right now.</span> These
+                are the games Riftline holds.{' '}
+                <button
+                  type="button"
+                  onClick={() => matchesQuery.refetch()}
+                  className="underline decoration-line underline-offset-2 hover:text-gold-bright"
+                >
+                  Try again
+                </button>
+              </p>
             )}
 
             {matchesQuery.isSuccess && matches.length === 0 && (
@@ -433,7 +457,7 @@ export default function Profile() {
             )}
 
             <div className="border-t border-line-soft">
-              {matches.map((m) => (
+              {rows.map((m) => (
                 <MatchRow
                   key={m.match_id}
                   match={m}

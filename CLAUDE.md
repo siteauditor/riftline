@@ -27,6 +27,7 @@ pnpm build      # tsc -b, then the browser bundle and the server bundle: this is
 pnpm lint       # oxlint
 pnpm test       # vitest: the lib and component tests, jsdom, no network
 pnpm api:types  # src/lib/api.gen.d.ts from openapi.json (written by `python -m scripts.openapi ../frontend/openapi.json` in backend/)
+pnpm exec playwright test   # e2e/smoke.spec.ts against a served build (E2E_BASE_URL, default the page server on :6123); CI runs it on the prerendered pages
 pnpm prerender --api http://127.0.0.1:8000 --out /tmp/pages --build-id local   # every page as HTML, from a running API
 node prerender/serve.mjs --pages /tmp/pages/local                             # serve them in nginx's try_files order
 ```

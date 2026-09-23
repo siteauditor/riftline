@@ -28,6 +28,14 @@ export default function App() {
     refetchInterval: 30_000,
   })
 
+  // Says the app has taken the document over. A prerendered page is complete
+  // HTML before any script runs, and the browser test must not click into it
+  // until it is live: the search form would submit natively and a select
+  // would be a button that does nothing.
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = 'true'
+  }, [])
+
   // The search, from anywhere: Ctrl+K (Cmd+K on a Mac), or the button the
   // header shows where it has no room for the field itself. The dialog is
   // the same search bar the home page has, so there is one search to learn.

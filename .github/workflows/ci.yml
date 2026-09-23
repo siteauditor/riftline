@@ -134,7 +134,33 @@ jobs:
             ! grep -q "name=\"robots\"" /pages/ci/tierlist.html
             grep -q "__RQ_STATE__" /pages/ci/index.html
             cat /pages/ci/_manifest.json'
-          docker rm -f api
+
+      # The served site in a real browser: the prerendered pages hydrate with
+      # no hydration error, the selects and tabs are real controls, the
+      # search navigates, the search dialog opens from the keyboard. The page
+      # server is prerender/serve.mjs, which serves the pages volume in
+      # nginx's try_files order and proxies /api to the container above;
+      # Playwright runs on the runner against it.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Browser smoke test
+        working-directory: frontend
+        run: |
+          docker run -d --name web-ci --network ci -p 6123:6123 -v ci_pages:/pages riftline-prerender:ci \
+            node prerender/serve.mjs --pages /pages/ci --api http://api:8000 --port 6123
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          for i in $(seq 1 15); do curl -sf -o /dev/null http://127.0.0.1:6123/ && break; sleep 2; done
+          E2E_BASE_URL=http://127.0.0.1:6123 pnpm exec playwright test
+      - name: Stop the CI containers
+        if: always()
+        run: docker rm -f web-ci api 2>/dev/null || true
 
       - name: No em dashes
         # A house rule, enforced rather than remembered.
