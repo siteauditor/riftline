@@ -239,7 +239,8 @@ export default function Champion() {
 
         <ChampionTabs active={tab} onChange={selectTab} />
 
-        <div className="mt-5">
+        {/* Keyed on the tab, so each section fades in as it replaces the last. */}
+        <div key={tab} className="mt-5 animate-in fade-in-0 duration-200">
           {NUMBER_TABS.has(tab) && !d ? (
             query.isLoading ? (
               <Spinner label="Loading champion statistics" />

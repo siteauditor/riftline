@@ -43,6 +43,9 @@ export default function MatchRow({
   puuid: string
 }) {
   const [open, setOpen] = useState(false)
+  // Once opened the scoreboard stays mounted, so closing rolls it shut rather
+  // than cutting it off, and opening again costs no request.
+  const [opened, setOpened] = useState(false)
   const now = useNow()
   const { win, is_remake: remake } = match
 
@@ -300,7 +303,10 @@ export default function MatchRow({
           ))}
         </div>
         <button
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setOpen((o) => !o)
+            setOpened(true)
+          }}
           aria-expanded={open}
           aria-label={open ? 'Hide the scoreboard' : 'Show the scoreboard'}
           title={open ? 'Hide the scoreboard' : 'Every player, scored'}
@@ -324,20 +330,31 @@ export default function MatchRow({
       </div>
     </div>
 
-    {open && (
-      <Scoreboard
-        matchId={match.match_id}
-        subjectPuuid={puuid}
-        platform={platform}
-        // Only where a story exists: the win-chance model is trained on ranked
-        // Summoner's Rift, and ARAM or Arena would link to a page saying so.
-        storyHref={
-          STORY_QUEUES.has(match.queue_id)
-            ? `/match/${encodeURIComponent(match.match_id)}?player=${encodeURIComponent(puuid)}`
-            : undefined
-        }
-      />
-    )}
+    {/* The scoreboard rolls open rather than appearing. A grid row going from
+        0fr to 1fr is the one way CSS animates to a height it does not know;
+        the inner box clips while the row grows. */}
+    <div
+      className="grid transition-[grid-template-rows] duration-200 ease-out"
+      style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+    >
+      <div className="min-h-0 overflow-hidden" inert={!open} aria-hidden={!open}>
+        {opened && (
+          <Scoreboard
+            matchId={match.match_id}
+            subjectPuuid={puuid}
+            platform={platform}
+            // Only where a story exists: the win-chance model is trained on
+            // ranked Summoner's Rift, and ARAM or Arena would link to a page
+            // saying so.
+            storyHref={
+              STORY_QUEUES.has(match.queue_id)
+                ? `/match/${encodeURIComponent(match.match_id)}?player=${encodeURIComponent(puuid)}`
+                : undefined
+            }
+          />
+        )}
+      </div>
+    </div>
     </article>
   )
 }

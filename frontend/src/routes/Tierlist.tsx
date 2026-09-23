@@ -447,7 +447,7 @@ function Table({
                 <TierBadge tier={row.tier} />
               </td>
               <td className="py-2.5">
-                <Link to={linkFor(row)} className="group block">
+                <Link to={linkFor(row)} viewTransition className="group block">
                   <ChampionCell row={row} showRole={showRole} />
                 </Link>
               </td>
@@ -498,7 +498,7 @@ function Cards({
     <ul className="mt-3 md:hidden">
       {rows.map(({ row, place }) => (
         <li key={`${row.champion.id}-${row.position}`} className="border-b border-line-soft">
-          <Link to={linkFor(row)} className="group block py-3">
+          <Link to={linkFor(row)} viewTransition className="group block py-3">
             <span className="grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5">
               <span className="tnum text-xs text-ink-faint">{place}</span>
               <TierBadge tier={row.tier} />

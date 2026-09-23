@@ -46,7 +46,7 @@ export default function App() {
   return (
     <TooltipProvider>
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-40 border-b border-line bg-deep/90 backdrop-blur">
+      <header className="site-header sticky top-0 z-40 border-b border-line bg-deep/90 backdrop-blur">
         {/* `min-w-0` and a scrollable nav: nothing in this row could shrink,
             so adding a third link pushed the whole document into horizontal
             scroll below about 390px, and the sticky background stopped at the
@@ -54,6 +54,7 @@ export default function App() {
         <div className="mx-auto flex h-14 max-w-[1280px] items-center gap-3 px-4 sm:gap-6">
           <Link
             to="/"
+            viewTransition
             className="shrink-0 font-display text-lg font-800 tracking-tight text-ink hover:text-gold-bright"
           >
             <span className="uppercase tracking-[0.06em]">{PRODUCT_NAME}</span>
@@ -71,6 +72,7 @@ export default function App() {
               <NavLink
                 key={item.to}
                 to={item.to}
+                viewTransition
                 className={({ isActive }) =>
                   `flex h-14 shrink-0 items-center border-b-2 px-2.5 font-display text-[13px] font-600 uppercase tracking-[0.12em] transition-colors ${
                     isActive

@@ -469,6 +469,16 @@
    * A row that answers the pointer. Two pixels of travel and the accent picked
    * up on the left edge: enough to feel live, not enough to move the page.
    */
+  /*
+   * Page changes are view transitions (React Router's `viewTransition` on
+   * the links that move between pages): the document cross-fades for a
+   * moment, from the platform, with no animation library behind it. The
+   * header is named so it holds still while the page under it changes.
+   */
+  .site-header {
+    view-transition-name: site-header;
+  }
+
   .lift {
     transition:
       transform 120ms ease,
@@ -512,6 +522,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+
   *,
   *::before,
   *::after {

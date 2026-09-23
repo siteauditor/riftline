@@ -172,6 +172,7 @@ function ItemCard({ item, showShare }: { item: ItemSummary; showShare: boolean }
   return (
     <li>
       <Link
+        viewTransition
         to={`/items/${item.slug ?? item.id}`}
         className="lift group flex items-center gap-3 px-2 py-2"
         title={item.plaintext || undefined}
