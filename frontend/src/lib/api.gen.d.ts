@@ -1475,6 +1475,7 @@ export interface components {
              * @default false
              */
             personalised: boolean;
+            personalisation: components["schemas"]["PersonalisationOut"];
             /** Suggestions */
             suggestions: components["schemas"]["SuggestionOut"][];
             /**
@@ -3077,6 +3078,32 @@ export interface components {
              * @default false
              */
             pick_rate_moved: boolean;
+        };
+        /**
+         * PersonalisationOut
+         * @description Whether the list was weighted by a player's mastery, and if not, why.
+         *
+         *     ``off``: no Riot ID, or the mastery weight is off. ``used``: fresh mastery.
+         *     ``stale``: Riot did not answer in time, so the mastery stored from an earlier
+         *     lookup was used. ``not_found``: no such account (or a Riot ID that cannot
+         *     exist, which is not asked about). ``busy``: Riot did not answer and nothing
+         *     is stored. ``no_mastery``: the account has no champion mastery.
+         */
+        PersonalisationOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "off" | "used" | "stale" | "not_found" | "busy" | "no_mastery";
+            /** Riot Id */
+            riot_id: string | null;
+            /** Platform */
+            platform: string | null;
+            /**
+             * Champions
+             * @default 0
+             */
+            champions: number;
         };
         /** PlatformOptionOut */
         PlatformOptionOut: {

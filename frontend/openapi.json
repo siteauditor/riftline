@@ -4115,6 +4115,9 @@
       "title": "Personalised",
       "default": false
      },
+     "personalisation": {
+      "$ref": "#/components/schemas/PersonalisationOut"
+     },
      "suggestions": {
       "items": {
        "$ref": "#/components/schemas/SuggestionOut"
@@ -8260,6 +8263,55 @@
     ],
     "title": "PatchChange",
     "description": "The same champion, role and bracket on the patch before.\n\nMeasured on 2026-09-21: of 760 champion and role rows held on both 16.17\nand 16.18, the win rate moved 20 points or more on 293, and 2 of those\nmoves survive a test for chance. So a change is published only where the\ntwo 95% Wilson intervals stop overlapping, and ``*_moved`` says when that\nis. Pick rate stands on the whole slice, so 32 of its moves survive."
+   },
+   "PersonalisationOut": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "off",
+       "used",
+       "stale",
+       "not_found",
+       "busy",
+       "no_mastery"
+      ],
+      "title": "Status"
+     },
+     "riot_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Riot Id"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Platform"
+     },
+     "champions": {
+      "type": "integer",
+      "title": "Champions",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "required": [
+     "status"
+    ],
+    "title": "PersonalisationOut",
+    "description": "Whether the list was weighted by a player's mastery, and if not, why.\n\n``off``: no Riot ID, or the mastery weight is off. ``used``: fresh mastery.\n``stale``: Riot did not answer in time, so the mastery stored from an earlier\nlookup was used. ``not_found``: no such account (or a Riot ID that cannot\nexist, which is not asked about). ``busy``: Riot did not answer and nothing\nis stored. ``no_mastery``: the account has no champion mastery."
    },
    "PlatformOptionOut": {
     "properties": {

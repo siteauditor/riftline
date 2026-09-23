@@ -74,6 +74,16 @@ export function lastRiotId(): string | null {
 
 export function rememberRiotId(value: string) {
   writeRaw(RIOT_ID_KEY, value.trim() || null)
+  listeners.forEach((notify) => notify())
+}
+
+/**
+ * The saved Riot ID as a subscription, null on the server and while a page
+ * hydrates, for the reason `useLastRegion` gives: the prerendered HTML has no
+ * Riot ID, and a first render that read this browser's would not match it.
+ */
+export function useLastRiotId(): string | null {
+  return useSyncExternalStore(subscribe, lastRiotId, () => null)
 }
 
 // --- recent profiles ----------------------------------------------------------

@@ -127,6 +127,17 @@ export function positionLabel(position?: string | null): string {
 }
 
 /** Parse "Name#TAG" into its parts, tolerating missing or spaced tags. */
+/**
+ * Whether a parsed Riot ID could exist, before anybody asks Riot about it.
+ *
+ * Riot's tags are three to five letters or digits. The tag is the part still
+ * being typed when a request would go out, and "Caps#E" cost an account lookup
+ * for an account that cannot exist. The server applies the same rule.
+ */
+export function plausibleRiotId(id: { name: string; tag: string }): boolean {
+  return id.name.length <= 16 && /^[\p{L}\p{N}]{3,5}$/u.test(id.tag)
+}
+
 export function parseRiotId(input: string): { name: string; tag: string } | null {
   const trimmed = input.trim()
   if (!trimmed) return null

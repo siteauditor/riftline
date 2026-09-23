@@ -364,5 +364,195 @@ async def test_personalisation_reads_mastery_on_the_shard_the_account_is_on(clie
     assert not wrong_shard.called
     body = response.json()
     assert body["personalised"] is True
+    assert body["personalisation"] == {
+        "status": "used", "riot_id": "Drafter#OCE", "platform": "sg2", "champions": 1,
+    }
     by_id = {s["champion"]["id"]: s for s in body["suggestions"]}
     assert by_id[702]["mastery_points"] == 400_000, "the mastery behind the word"
+
+
+# ------------------------------------------------ what personalisation costs
+
+
+@pytest.fixture
+def _fresh_misses():
+    from app.services.players import clear_miss_cache
+
+    clear_miss_cache()
+    yield
+    clear_miss_cache()
+
+
+def _draft_body(patch, **kw):
+    return {"position": POSITION, "patch": patch, "min_games": 1, **kw}
+
+
+ACCOUNT_ROUTE = r".*/riot/account/v1/accounts/by-riot-id/.*"
+
+
+@respx.mock
+async def test_a_riot_id_riot_does_not_know_is_asked_about_once(client, _fresh_misses):
+    """A mistyped saved Riot ID cost an account-v1 call on every board change
+    (measured 2026-09-24: three calls for three changes). The spellings Riot
+    treats as one account are one question."""
+    patch = "D20.00"
+    await seed_stat(720, 100, 55, patch=patch)
+    lookup = respx.get(url__regex=ACCOUNT_ROUTE).mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+
+    for name in ("Nobody Here", "nobodyhere", "Nöbody Here"):
+        response = await client.post(
+            "/api/draft/suggest",
+            json=_draft_body(patch, platform="euw1", game_name=name, tag_line="ZZ9"),
+        )
+        assert response.status_code == 200, response.text[:300]
+        body = response.json()
+        assert body["personalisation"]["status"] == "not_found"
+        assert body["personalised"] is False
+
+    assert lookup.call_count == 1
+
+
+@respx.mock
+async def test_a_refusal_from_riot_is_not_remembered_as_a_missing_account(client, _fresh_misses):
+    """Only a 404 says the account does not exist. A refusal says nothing about
+    it, so the next board change asks again."""
+    patch = "D21.00"
+    await seed_stat(721, 100, 55, patch=patch)
+    lookup = respx.get(url__regex=ACCOUNT_ROUTE).mock(
+        return_value=httpx.Response(403, json={"status": {"status_code": 403}})
+    )
+
+    for _ in range(2):
+        response = await client.post(
+            "/api/draft/suggest",
+            json=_draft_body(patch, platform="euw1", game_name="Refused", tag_line="EUW"),
+        )
+        assert response.json()["personalisation"]["status"] == "busy"
+
+    assert lookup.call_count == 2
+
+
+@respx.mock
+async def test_a_riot_id_that_cannot_exist_is_never_asked_about(client, _fresh_misses):
+    """Riot's tags are three to five letters or digits. "Caps#E" is someone
+    still typing, and it used to be an account-v1 call."""
+    patch = "D22.00"
+    await seed_stat(722, 100, 55, patch=patch)
+    lookup = respx.get(url__regex=ACCOUNT_ROUTE).mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json=_draft_body(patch, platform="euw1", game_name="Caps", tag_line="E"),
+    )
+
+    assert response.json()["personalisation"] == {
+        "status": "not_found", "riot_id": "Caps#E", "platform": "euw1", "champions": 0,
+    }
+    assert not lookup.called
+
+
+@respx.mock
+async def test_mastery_switched_off_costs_no_lookup(client, _fresh_misses):
+    patch = "D23.00"
+    await seed_stat(723, 100, 55, patch=patch)
+    lookup = respx.get(url__regex=ACCOUNT_ROUTE).mock(
+        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
+    )
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json=_draft_body(
+            patch, platform="euw1", game_name="Caps", tag_line="EUW", comfort_weight=0
+        ),
+    )
+
+    assert response.json()["personalisation"]["status"] == "off"
+    assert not lookup.called
+
+
+async def _store_player(puuid, name, tag, *, mastery=None):
+    from app.db.models import ChampionMastery, Player
+    from app.services.players import normalize_riot_name
+
+    async with SessionLocal() as session:
+        session.add(
+            Player(
+                puuid=puuid, game_name=name, tag_line=tag, platform="euw1",
+                search_name=normalize_riot_name(name),
+            )
+        )
+        for champion_id, points in (mastery or {}).items():
+            session.add(
+                ChampionMastery(
+                    puuid=puuid, champion_id=champion_id, champion_level=20,
+                    champion_points=points,
+                )
+            )
+        await session.commit()
+
+
+def _slow_account(puuid, name, tag):
+    import time
+
+    def answer(request):
+        # Blocks the loop past the budget, the way a slow Riot answer outlasts
+        # it; the timeout fires at the next await.
+        time.sleep(0.3)
+        return httpx.Response(200, json={"puuid": puuid, "gameName": name, "tagLine": tag})
+
+    return answer
+
+
+@respx.mock
+async def test_a_slow_riot_answer_uses_the_mastery_already_stored(
+    client, monkeypatch, _fresh_misses
+):
+    """The limiter lets a request wait 40 seconds for a slot and the nightly
+    crawl shares the key. Past the budget the board answers with what it holds."""
+    from app.api.routes import draft as draft_route
+
+    patch = "D24.00"
+    await seed_stat(724, 100, 55, patch=patch)
+    await seed_stat(725, 100, 55, patch=patch)
+    puuid = "draft-stale-mastery".ljust(78, "0")
+    await _store_player(puuid, "Stale", "EUW", mastery={725: 250_000})
+    monkeypatch.setattr(draft_route, "PERSONALISE_BUDGET_SECONDS", 0.05)
+    respx.get(url__regex=ACCOUNT_ROUTE).mock(side_effect=_slow_account(puuid, "Stale", "EUW"))
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json=_draft_body(patch, platform="euw1", game_name="Stale", tag_line="EUW"),
+    )
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert body["personalisation"] == {
+        "status": "stale", "riot_id": "Stale#EUW", "platform": "euw1", "champions": 1,
+    }
+    by_id = {s["champion"]["id"]: s for s in body["suggestions"]}
+    assert by_id[725]["mastery_points"] == 250_000
+
+
+@respx.mock
+async def test_a_slow_riot_answer_with_nothing_stored_is_busy(client, monkeypatch, _fresh_misses):
+    from app.api.routes import draft as draft_route
+
+    patch = "D25.00"
+    await seed_stat(726, 100, 55, patch=patch)
+    monkeypatch.setattr(draft_route, "PERSONALISE_BUDGET_SECONDS", 0.05)
+    respx.get(url__regex=ACCOUNT_ROUTE).mock(
+        side_effect=_slow_account("draft-busy".ljust(78, "0"), "Busy", "EUW")
+    )
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json=_draft_body(patch, platform="euw1", game_name="Busy", tag_line="EUW"),
+    )
+
+    assert response.status_code == 200, response.text[:300]
+    assert response.json()["personalisation"]["status"] == "busy"
+    assert response.json()["personalised"] is False

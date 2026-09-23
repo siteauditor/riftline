@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -7,33 +6,46 @@ import Head from '../components/Head'
 import SelectField from '../components/SelectField'
 import ChampionPicker from '../components/ChampionPicker'
 import PositionIcon from '../components/PositionIcon'
+import RiotIdField from '../components/draft/RiotIdField'
 import { EmptyState, ErrorView } from '../components/StateViews'
 import {
   api,
-  PLATFORMS,
   POSITIONS,
   type ChampionStatic,
   type DraftEvidence,
+  type DraftRequest,
   type DraftResponse,
   type DraftSuggestion,
 } from '../lib/api'
-import { compact, parseRiotId, pct, positionLabel } from '../lib/format'
+import {
+  COMFORT_LEVELS,
+  addTo,
+  boardIsSet,
+  boardParams,
+  clearBoard,
+  minGamesOptions,
+  parseBoard,
+  removeFrom,
+  requestKey,
+  setComfort,
+  setMinGames,
+  setRole,
+  toggleLane,
+  type Board,
+  type RiotIdChoice,
+} from '../lib/draftBoard'
+import { compact, parseRiotId, pct, plausibleRiotId, positionLabel } from '../lib/format'
 import { queries } from '../lib/queries'
+import { useHydrated, useHydratedSearchParams } from '../lib/searchParams'
 import { heads } from '../lib/seo'
-import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
+import { rememberRegion, useLastRegion, useLastRiotId } from '../lib/storage'
 import { useChampionArt } from '../lib/useChampionArt'
 import { useDebounced } from '../lib/useDebounced'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import { toast } from 'sonner'
 
-const COMFORT_LEVELS = [
-  { value: 0, label: 'Off' },
-  { value: 0.15, label: 'Light' },
-  { value: 0.4, label: 'Strong' },
-]
-
-// Long enough that typing a Riot ID is one request, short enough that adding a
-// champion re-ranks while the hand is still on the mouse.
+// Long enough that adding two champions in a row is one request, short enough
+// that the list re-ranks while the hand is still on the mouse.
 const RERANK_MS = 250
 
 /**
@@ -45,42 +57,30 @@ const RERANK_MS = 250
  * from 50.7% to 60.0% and putting it top. The page therefore shows both the
  * supported score it ranks on and the unrestrained "if that holds" figure.
  *
- * The board lives in the URL so a draft can be shared or reloaded. The Riot ID
- * does not: it identifies a person, so it stays in this browser.
+ * The board lives in the URL so a draft can be shared or reloaded, read through
+ * `useHydratedSearchParams` because the prerendered HTML is the empty board
+ * whatever the link says. The Riot ID does not: it identifies a person, so it
+ * stays in this browser.
  */
 export default function Draft() {
-  const [search, setSearch] = useSearchParams()
-  const [platform, setPlatform] = useState(() => lastRegion() ?? 'euw1')
-  const [riotId, setRiotId] = useState(() => lastRiotId() ?? '')
+  const [search, setSearch] = useHydratedSearchParams()
+  const hydrated = useHydrated()
+  const board = parseBoard(search)
+  // One transform and one write per action, from the URL as it is now.
+  const update = (change: (board: Board) => Board) =>
+    setSearch((current) => boardParams(change(parseBoard(current)), current), {
+      replace: true,
+    })
 
-  const ids = (key: string): number[] =>
-    (search.get(key) ?? '')
-      .split(',')
-      .map(Number)
-      .filter((n) => Number.isFinite(n) && n > 0)
-
-  const position = (search.get('role') ?? 'MIDDLE').toUpperCase()
-  const allies = ids('allies')
-  const enemies = ids('enemies')
-  const bans = ids('bans')
-  const laneId = Number(search.get('lane')) || null
-  const lane = laneId && enemies.includes(laneId) ? laneId : null
-  const minGames = Math.max(1, Number(search.get('min')) || 20)
-  const comfort = COMFORT_LEVELS.some((c) => c.value === Number(search.get('comfort')))
-    ? Number(search.get('comfort'))
-    : 0.15
-
-  function set(patch: Record<string, string | null>) {
-    const next = new URLSearchParams(search)
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === null || value === '') next.delete(key)
-      else next.set(key, value)
-    }
-    setSearch(next, { replace: true })
-  }
-
-  const setIds = (key: string, list: number[]) =>
-    set({ [key]: list.length ? list.join(',') : null })
+  const [chosenRegion, setChosenRegion] = useState<string | null>(null)
+  const rememberedRegion = useLastRegion()
+  const platform = chosenRegion ?? rememberedRegion ?? 'euw1'
+  const savedRiotId = useLastRiotId()
+  const parsedRiotId = savedRiotId ? parseRiotId(savedRiotId) : null
+  const riot: RiotIdChoice | null =
+    parsedRiotId && plausibleRiotId(parsedRiotId)
+      ? { platform, name: parsedRiotId.name, tag: parsedRiotId.tag }
+      : null
 
   const { data: championData } = useQuery({
     ...queries.champions(),
@@ -91,29 +91,17 @@ export default function Draft() {
     [championData],
   )
 
-  // Settled, so dragging a slider or typing an ID is not one request per key.
-  const settledRiotId = useDebounced(riotId, RERANK_MS)
-  const board = useDebounced(
-    { position, allies, enemies, lane, bans, minGames, comfort },
-    RERANK_MS,
-  )
-  const parsed = parseRiotId(settledRiotId)
-
+  // The request as a string, settled: a primitive, so the debounce compares by
+  // value, and the query waits until it has settled rather than asking once for
+  // every champion added in a burst.
+  const key = requestKey(board, riot)
+  const settledKey = useDebounced(key, RERANK_MS)
   const draft = useQuery({
-    queryKey: ['draft', board, platform, parsed?.name ?? '', parsed?.tag ?? ''],
-    queryFn: () =>
-      api.draft({
-        position: board.position,
-        allies: board.allies,
-        enemies: board.enemies,
-        bans: board.bans,
-        enemy_laner: board.lane,
-        min_games: board.minGames,
-        comfort_weight: board.comfort,
-        platform: parsed ? platform : null,
-        game_name: parsed?.name ?? null,
-        tag_line: parsed?.tag ?? null,
-      }),
+    queryKey: ['draft', settledKey],
+    queryFn: ({ signal }) => api.draft(JSON.parse(settledKey) as DraftRequest, signal),
+    // Not while hydrating (the prerendered page is the empty board) and not
+    // while the key is still settling, so a link with a board in it asks once.
+    enabled: hydrated && settledKey === key,
     // The previous ranking stays on screen while the next one loads, so adding
     // a champion never blanks the page.
     placeholderData: keepPreviousData,
@@ -122,15 +110,16 @@ export default function Draft() {
 
   const corpus = useQuery(queries.corpus())
   const empty = corpus.data && corpus.data.total_matches === 0
-  const boardIsSet = allies.length + enemies.length + bans.length > 0 || lane !== null
-  // Who you are facing, or failing that what the list is telling you to pick.
-  const heroArt = useChampionArt(lane ?? draft.data?.suggestions[0]?.champion.id)
+  // Who you are facing, else who you know is on the board. Not the top
+  // suggestion: that changed with every champion added, and the header art
+  // swapped with it.
+  const heroArt = useChampionArt(board.lane ?? board.enemies[0] ?? board.allies[0] ?? null)
 
   return (
     <div>
       <Head {...heads.draft()} />
       <ArtHeader art={heroArt}>
-        <p className="eyebrow">{positionLabel(position)} · pick phase</p>
+        <p className="eyebrow">{positionLabel(board.role)} · pick phase</p>
         <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
           Draft assistant
         </h1>
@@ -158,7 +147,12 @@ export default function Draft() {
               <span className="mb-1 block text-xs text-ink-faint">Your role</span>
               <ChipGroup label="Your role" className="gap-1">
                 {POSITIONS.map((p) => (
-                  <Chip key={p.id} size="sm" active={position === p.id} onClick={() => set({ role: p.id })}>
+                  <Chip
+                    key={p.id}
+                    size="sm"
+                    active={board.role === p.id}
+                    onClick={() => update(setRole(p.id))}
+                  >
                     <PositionIcon position={p.id} className="size-4" />
                     {p.label}
                   </Chip>
@@ -169,90 +163,64 @@ export default function Draft() {
             <Slot
               label="Your team"
               placeholder="Add an ally"
-              ids={allies}
+              ids={board.allies}
               championById={championById}
-              onAdd={(id) => setIds('allies', [...allies, id])}
-              onRemove={(id) => setIds('allies', allies.filter((c) => c !== id))}
+              onAdd={(id) => update(addTo('allies', id))}
+              onRemove={(id) => update(removeFrom('allies', id))}
             />
 
             <Slot
               label="Enemy team"
               placeholder="Add an enemy"
-              ids={enemies}
+              ids={board.enemies}
               championById={championById}
-              onAdd={(id) => setIds('enemies', [...enemies, id])}
-              onRemove={(id) => {
-                setIds('enemies', enemies.filter((c) => c !== id))
-                if (lane === id) set({ lane: null })
-              }}
+              onAdd={(id) => update(addTo('enemies', id))}
+              onRemove={(id) => update(removeFrom('enemies', id))}
               markLabel="lane"
-              marked={lane}
-              onMark={(id) => set({ lane: lane === id ? null : String(id) })}
+              marked={board.lane}
+              onMark={(id) => update(toggleLane(id))}
             />
 
             <Slot
               label="Banned"
               placeholder="Add a champion"
-              ids={bans}
+              ids={board.bans}
               championById={championById}
-              onAdd={(id) => setIds('bans', [...bans, id])}
-              onRemove={(id) => setIds('bans', bans.filter((c) => c !== id))}
+              onAdd={(id) => update(addTo('bans', id))}
+              onRemove={(id) => update(removeFrom('bans', id))}
             />
 
-            <div>
-              <span className="mb-1 block text-xs text-ink-faint">
-                Your Riot ID (optional, weighs your mastery)
-              </span>
-              <div className="flex gap-1">
-                <SelectField
-                  ariaLabel="Region"
-                  value={platform}
-                  onValueChange={(v) => {
-                    setPlatform(v)
-                    rememberRegion(v)
-                  }}
-                  triggerClassName="h-10 shrink-0"
-                  options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
-                />
-                <input
-                  value={riotId}
-                  onChange={(e) => {
-                    setRiotId(e.target.value)
-                    rememberRiotId(e.target.value)
-                  }}
-                  placeholder="Caps#EUW"
-                  className="control h-10 min-w-0 flex-1 px-3 text-sm placeholder:text-ink-faint"
-                />
-              </div>
-              <p className="mt-1 text-[11px] text-ink-faint">
-                Remembered on this device, and kept out of the link.
-              </p>
-            </div>
+            <RiotIdField
+              platform={platform}
+              onPlatformChange={(v) => {
+                setChosenRegion(v)
+                rememberRegion(v)
+              }}
+              status={draft.data?.personalisation}
+              comfort={board.comfort}
+            />
 
             <SelectField
               label="Weigh what you can play"
               className="justify-between text-sm"
-              value={String(comfort)}
-              onValueChange={(v) => set({ comfort: v })}
-              disabled={!parsed}
+              value={String(board.comfort)}
+              onValueChange={(v) => update(setComfort(Number(v)))}
+              disabled={!riot}
               options={COMFORT_LEVELS.map((c) => ({ value: String(c.value), label: c.label }))}
             />
 
-            <label className="flex items-center justify-between gap-2 text-sm text-ink-dim">
-              <span className="text-xs text-ink-faint">Min games per champion</span>
-              <input
-                type="number"
-                min={1}
-                value={minGames}
-                onChange={(e) => set({ min: String(Math.max(1, Number(e.target.value) || 1)) })}
-                className="control tnum w-16"
-              />
-            </label>
+            <SelectField
+              label="Min games per champion"
+              className="justify-between text-sm"
+              value={String(board.min)}
+              onValueChange={(v) => update(setMinGames(Number(v)))}
+              options={minGamesOptions(board.min)}
+            />
 
-            {boardIsSet && (
+            {boardIsSet(board) && (
               <button
                 onClick={() => {
-                  set({ allies: null, enemies: null, bans: null, lane: null })
+                  update(clearBoard)
                   toast('Board cleared')
                 }}
                 className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
@@ -268,9 +236,11 @@ export default function Draft() {
               <ErrorView error={draft.error} onRetry={() => draft.refetch()} />
             )}
 
-            {draft.isLoading && <SuggestionSkeleton />}
+            {draft.isPending && !draft.isError && <SuggestionSkeleton />}
 
-            {draft.data && <Results data={draft.data} stale={draft.isPlaceholderData} />}
+            {draft.data && (
+              <Results data={draft.data} comfort={board.comfort} stale={draft.isPlaceholderData} />
+            )}
           </div>
         </div>
       )}
@@ -376,7 +346,28 @@ function SuggestionSkeleton() {
   )
 }
 
-function Results({ data, stale }: { data: DraftResponse; stale: boolean }) {
+/** What the results line says about mastery: only what actually happened. */
+function masteryNote(data: DraftResponse, comfort: number): string {
+  if (comfort <= 0) return 'mastery off'
+  switch (data.personalisation.status) {
+    case 'used':
+      return 'weighted by your mastery'
+    case 'stale':
+      return 'weighted by your stored mastery'
+    default:
+      return 'not personalised'
+  }
+}
+
+function Results({
+  data,
+  comfort,
+  stale,
+}: {
+  data: DraftResponse
+  comfort: number
+  stale: boolean
+}) {
   return (
     <div className={stale ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <div className="flex flex-wrap items-baseline gap-x-3 text-xs text-ink-faint">
@@ -393,7 +384,7 @@ function Results({ data, stale }: { data: DraftResponse; stale: boolean }) {
             {data.allies.length} {data.allies.length === 1 ? 'ally' : 'allies'} read
           </span>
         )}
-        <span>{data.personalised ? 'weighted by your mastery' : 'not personalised'}</span>
+        <span>{masteryNote(data, comfort)}</span>
       </div>
 
       <ol className="mt-3">
@@ -402,9 +393,11 @@ function Results({ data, stale }: { data: DraftResponse; stale: boolean }) {
         ))}
       </ol>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+      {/* items-start: the folded "How this is scored" box stretched to the ban
+          list's height and sat there as a large empty frame. */}
+      <div className="mt-6 grid items-start gap-6 lg:grid-cols-2">
         <Bans data={data} />
-        <HowScored data={data} />
+        <HowScored data={data} comfort={comfort} />
       </div>
     </div>
   )
@@ -559,7 +552,9 @@ function Bans({ data }: { data: DraftResponse }) {
       <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
         {data.bans_read_the_draft
           ? 'Strongest against the champions your team has locked in.'
-          : 'Nothing is locked in yet, so these are simply the patch’s strongest picks.'}
+          : data.enemies.length > 0
+            ? 'None of your team is locked in yet, so these are simply the patch’s strongest picks.'
+            : 'Nothing is locked in yet, so these are simply the patch’s strongest picks.'}
       </p>
       <ol className="mt-2">
         {data.ban_candidates.map((c) => (
@@ -587,8 +582,14 @@ function Bans({ data }: { data: DraftResponse }) {
   )
 }
 
-function HowScored({ data }: { data: DraftResponse }) {
+function HowScored({ data, comfort }: { data: DraftResponse; comfort: number }) {
   const m = data.model
+  // The bonus scales with the weight, so the largest gain is at the largest
+  // weight the page offers, not at a weight of 1. The text said 10 points "at
+  // the strongest setting", where the strongest setting gives 4.
+  const strongest = COMFORT_LEVELS[COMFORT_LEVELS.length - 1]
+  const level = COMFORT_LEVELS.find((c) => c.value === comfort) ?? COMFORT_LEVELS[0]
+  const points = (weight: number) => (weight * m.comfort_max_bonus * 100).toFixed(1)
   return (
     <details className="frame px-4 py-3 text-xs leading-relaxed text-ink-dim">
       <summary className="cursor-pointer text-ink">How this is scored</summary>
@@ -608,13 +609,15 @@ function HowScored({ data }: { data: DraftResponse }) {
         <span className="tnum text-ink">{(m.context_lift_cap * 100).toFixed(0)} points</span>.
       </p>
       <p className="mt-2">
-        Mastery is a preference, not evidence: at the strongest setting a fully mastered
-        champion gains{' '}
-        <span className="tnum text-ink">
-          {(m.comfort_max_bonus * 100).toFixed(1)} points
-        </span>
-        , scaled by the weight you choose (now{' '}
-        <span className="tnum text-ink">{m.comfort_weight}</span>).
+        Mastery is a preference, not evidence: a fully mastered champion gains up to{' '}
+        <span className="tnum text-ink">{points(strongest.value)} points</span> at{' '}
+        {strongest.label}. The weight is now {level.label}
+        {level.value > 0 && (
+          <>
+            , worth up to <span className="tnum text-ink">{points(level.value)} points</span>
+          </>
+        )}
+        .
       </p>
     </details>
   )

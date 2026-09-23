@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import type { SliceValue } from '../components/SliceFilters'
@@ -17,6 +17,36 @@ import { useDebounced } from './useDebounced'
  * history entry, so back leaves the page instead of stepping through every
  * tweak, and a page number pushes one, so back returns to the previous page.
  */
+
+const subscribeNever = () => () => {}
+
+/**
+ * False while React hydrates a prerendered page; true from the render after,
+ * and at once on a page React renders itself (a client navigation, the shell).
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(subscribeNever, () => true, () => false)
+}
+
+// Never mutated: every writer copies before it changes anything (`withParams`).
+const NO_PARAMS = new URLSearchParams()
+
+/**
+ * `useSearchParams`, except empty while the page hydrates.
+ *
+ * nginx serves the file prerendered for the bare path whatever the query
+ * string, so `/tierlist?position=TOP` arrives as the HTML of `/tierlist`. A
+ * first render that read the URL drew the Top list over the All list's HTML,
+ * and React threw the page away with error #418 (measured on production on
+ * 2026-09-24 on the tier list, the leaderboards, a champion page and the
+ * draft). Reading nothing until hydration has finished makes the first render
+ * match the HTML; the render straight after is the view the link asked for.
+ * Every route that reads URL state in render goes through this.
+ */
+export function useHydratedSearchParams(): ReturnType<typeof useSearchParams> {
+  const [search, setSearch] = useSearchParams()
+  return [useHydrated() ? search : NO_PARAMS, setSearch]
+}
 
 /** Case, accents, spaces and punctuation folded: "kaisa" finds Kai'Sa and
  *  "rabadons" finds Rabadon's Deathcap. */
@@ -80,7 +110,7 @@ export function withParams(
  * letter. A change from outside (back, forward, a link) is copied into the box.
  */
 export function useSearchText(key = 'q', ms = 200): [string, (value: string) => void] {
-  const [search, setSearch] = useSearchParams()
+  const [search, setSearch] = useHydratedSearchParams()
   const inUrl = search.get(key) ?? ''
   const [text, setText] = useState(inUrl)
   const settled = useDebounced(text, ms)

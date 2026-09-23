@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbDep, PlayerServiceDep, StaticDep
 from app.api.schemas import ChampionRef
+from app.db.models import ChampionMastery
 from app.riot.errors import RiotApiError
 from app.riot.routing import UnknownPlatform, resolve_platform
 from app.services.aggregate import ALL_BRACKETS, aggregated_slices, default_patch
@@ -19,11 +25,20 @@ from app.services.draft import (
     DraftAdvisor,
     DraftContext,
 )
-from app.services.players import PlayerNotFound
+from app.services.players import PlayerNotFound, PlayerService
 
 router = APIRouter(prefix="/api/draft", tags=["draft"])
 
 POSITIONS = ("TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY")
+
+# How long the board waits for Riot to say who the Riot ID is and what they
+# play. The limiter lets a web request wait up to 40 seconds for a slot, and
+# the nightly crawl shares the key, so without this a draft could hang for as
+# long as the crawl held the key. Mastery is a preference: past two seconds
+# the board answers without it, or with what is stored.
+PERSONALISE_BUDGET_SECONDS = 2.0
+
+PersonalisationStatus = Literal["off", "used", "stale", "not_found", "busy", "no_mastery"]
 
 
 class DraftRequest(BaseModel):
@@ -94,6 +109,24 @@ class BanCandidateOut(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class PersonalisationOut(BaseModel):
+    """Whether the list was weighted by a player's mastery, and if not, why.
+
+    ``off``: no Riot ID, or the mastery weight is off. ``used``: fresh mastery.
+    ``stale``: Riot did not answer in time, so the mastery stored from an earlier
+    lookup was used. ``not_found``: no such account (or a Riot ID that cannot
+    exist, which is not asked about). ``busy``: Riot did not answer and nothing
+    is stored. ``no_mastery``: the account has no champion mastery.
+    """
+
+    status: PersonalisationStatus
+    # As Riot spells it once found, else as it was asked for.
+    riot_id: str | None = None
+    platform: str | None = None
+    # Champions with mastery behind the weighting.
+    champions: int = 0
+
+
 class DraftModelOut(BaseModel):
     """The constants behind the score, so the page can state them."""
 
@@ -111,7 +144,11 @@ class DraftResponse(BaseModel):
     enemy_laner: ChampionRef | None = None
     allies: list[ChampionRef] = Field(default_factory=list)
     enemies: list[ChampionRef] = Field(default_factory=list)
+    # Kept for one release, for pages loaded before `personalisation` existed.
     personalised: bool = False
+    personalisation: PersonalisationOut = Field(
+        default_factory=lambda: PersonalisationOut(status="off")
+    )
     suggestions: list[SuggestionOut] = Field(default_factory=list)
     # Who to deny. False when no ally is locked in yet: then these are simply
     # the patch's strongest picks, which the page has to say rather than imply
@@ -119,6 +156,83 @@ class DraftResponse(BaseModel):
     bans_read_the_draft: bool = False
     ban_candidates: list[BanCandidateOut] = Field(default_factory=list)
     model: DraftModelOut
+
+
+def _plausible_riot_id(name: str, tag: str) -> bool:
+    """Whether a Riot ID could exist, before anybody asks Riot about it.
+
+    Riot's tags are three to five letters or digits. The tag is the part people
+    are still typing when a request goes out, and "Caps#E" was an account-v1
+    call for an account that cannot exist. Names are only bounded above: a
+    lower bound in characters is not the rule in every script.
+    """
+    return 1 <= len(name) <= 16 and 3 <= len(tag) <= 5 and tag.isalnum()
+
+
+async def _mastery_count(db: AsyncSession, puuid: str) -> int:
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(ChampionMastery)
+            .where(ChampionMastery.puuid == puuid)
+        )
+    ).scalar_one()
+
+
+async def _personalise(
+    body: DraftRequest, players: PlayerService, db: AsyncSession
+) -> tuple[str | None, PersonalisationOut]:
+    """The puuid whose mastery weights the list, and what to tell the page.
+
+    Personalisation is a bonus and must never cost the advice: a bad Riot ID,
+    an expired key, a rate limit or a slow Riot answer each cost the mastery
+    weighting only, and the page is told which of those it was.
+    """
+    if not (body.platform and body.game_name and body.tag_line) or body.comfort_weight <= 0:
+        return None, PersonalisationOut(status="off")
+    name = body.game_name.strip()
+    tag = body.tag_line.strip().lstrip("#")
+    missing = PersonalisationOut(status="not_found", riot_id=f"{name}#{tag}", platform=body.platform)
+    try:
+        platform = resolve_platform(body.platform)
+    except UnknownPlatform:
+        return None, missing
+    missing.platform = platform.id
+    if not _plausible_riot_id(name, tag):
+        return None, missing
+
+    try:
+        async with asyncio.timeout(PERSONALISE_BUDGET_SECONDS):
+            player = await players.resolve(platform.id, name, tag, remember_miss=True)
+            # The home shard, as the mastery page reads it. champion-mastery-v4
+            # answers 200 with an empty list on any other, so an OCE Riot ID
+            # whose account is on SG2 came back "personalised" with no mastery
+            # behind it, and stamped that empty answer as fresh.
+            home = await players.effective_platform(player, platform)
+            await players.masteries(player, home.id)
+    except PlayerNotFound:
+        return None, missing
+    except (RiotApiError, TimeoutError):
+        # The cancelled lookup may have stopped half way through a write.
+        await db.rollback()
+        try:
+            stored = await players.resolve_stored(platform.id, name, tag)
+        except PlayerNotFound:
+            return None, missing.model_copy(update={"status": "busy"})
+        count = await _mastery_count(db, stored.puuid)
+        if not count:
+            return None, missing.model_copy(update={"status": "busy"})
+        return stored.puuid, PersonalisationOut(
+            status="stale", riot_id=stored.riot_id, platform=platform.id, champions=count
+        )
+
+    count = await _mastery_count(db, player.puuid)
+    return (player.puuid if count else None), PersonalisationOut(
+        status="used" if count else "no_mastery",
+        riot_id=player.riot_id,
+        platform=home.id,
+        champions=count,
+    )
 
 
 @router.post("/suggest", response_model=DraftResponse)
@@ -143,24 +257,7 @@ async def suggest(
                 "`python -m scripts.ingest aggregate` to build the corpus this uses.",
             )
 
-    # Personalisation is optional and must never break the core suggestion.
-    puuid = None
-    if body.platform and body.game_name and body.tag_line:
-        try:
-            player = await players.resolve(body.platform, body.game_name, body.tag_line)
-            # The home shard, as the mastery page reads it. champion-mastery-v4
-            # answers 200 with an empty list on any other, so an OCE Riot ID
-            # whose account is on SG2 came back "personalised" with no mastery
-            # behind it, and stamped that empty answer as fresh.
-            home = await players.effective_platform(
-                player, resolve_platform(body.platform)
-            )
-            await players.masteries(player, home.id)
-            puuid = player.puuid
-        except (PlayerNotFound, UnknownPlatform, RiotApiError):
-            # Personalisation is a bonus. A bad Riot ID, an expired key or a
-            # rate limit should cost you the mastery weighting, not the advice.
-            puuid = None
+    puuid, personalisation = await _personalise(body, players, db)
 
     ctx = DraftContext(
         position=position,
@@ -200,6 +297,7 @@ async def suggest(
         allies=[champion(c) for c in dict.fromkeys(body.allies)],
         enemies=[champion(c) for c in dict.fromkeys(body.enemies)],
         personalised=puuid is not None,
+        personalisation=personalisation,
         suggestions=[
             SuggestionOut(
                 champion=champion(s.champion_id),

@@ -296,6 +296,9 @@ export type DraftModel = S['DraftModelOut']
 
 export type DraftResponse = S['DraftResponse']
 
+/** Whether the list was weighted by a player's mastery, and if not, why. */
+export type DraftPersonalisation = S['PersonalisationOut']
+
 export type DraftRequest = S['DraftRequest']
 
 // --- groups -------------------------------------------------------------------
@@ -565,11 +568,12 @@ export const api = {
     )
   },
 
-  draft: (body: DraftRequest) =>
+  draft: (body: DraftRequest, signal?: AbortSignal) =>
     request<DraftResponse>('/api/draft/suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal,
     }),
 
   createGroup: (name: string) =>

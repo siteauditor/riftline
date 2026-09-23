@@ -9,6 +9,7 @@ league); a warm one inside its TTL costs zero.
 from __future__ import annotations
 
 import logging
+import time
 import unicodedata
 
 from sqlalchemy import func, select
@@ -76,6 +77,50 @@ def _cached_is_good(stamp, ttl: int, refresh: bool) -> bool:
     return _is_fresh(stamp, min(ttl, REFRESH_FLOOR_SECONDS) if refresh else ttl)
 
 
+# A Riot ID account-v1 does not know, remembered per process for this long. The
+# draft board sends the Riot ID with every change, and a mistyped saved one cost
+# an account-v1 call for every champion added (measured 2026-09-24: three calls
+# for three board changes). Only a 404 is remembered: a rate limit or an outage
+# says nothing about whether the account exists. The API runs one worker, so a
+# process-local dict is the whole cache.
+MISS_TTL_SECONDS = 600
+MISS_CACHE_SIZE = 5000
+_misses: dict[tuple[str, str, str], float] = {}
+
+
+def _miss_key(platform: Platform, game_name: str, tag_line: str) -> tuple[str, str, str]:
+    # By account region, the level account-v1 answers at: an OCE and an SG2
+    # spelling of one Riot ID are one question to Riot, so they are one entry.
+    return (
+        str(platform.account_region),
+        normalize_riot_name(game_name),
+        tag_line.strip().lstrip("#").lower(),
+    )
+
+
+def _known_miss(key: tuple[str, str, str]) -> bool:
+    at = _misses.get(key)
+    if at is None:
+        return False
+    if time.monotonic() - at > MISS_TTL_SECONDS:
+        _misses.pop(key, None)
+        return False
+    return True
+
+
+def _remember_miss(key: tuple[str, str, str]) -> None:
+    _misses.pop(key, None)
+    if len(_misses) >= MISS_CACHE_SIZE:
+        # Dicts keep insertion order, so the first key is the oldest miss.
+        _misses.pop(next(iter(_misses)))
+    _misses[key] = time.monotonic()
+
+
+def clear_miss_cache() -> None:
+    """Forget every remembered miss. For tests."""
+    _misses.clear()
+
+
 class PlayerService:
     def __init__(self, session: AsyncSession, client: RiotClient, settings) -> None:
         self.session = session
@@ -85,12 +130,23 @@ class PlayerService:
     # ----------------------------------------------------------------- lookup
 
     async def resolve(
-        self, platform_name: str, game_name: str, tag_line: str, *, refresh: bool = False
+        self,
+        platform_name: str,
+        game_name: str,
+        tag_line: str,
+        *,
+        refresh: bool = False,
+        remember_miss: bool = False,
     ) -> Player:
         """Find a player by Riot ID, hitting Riot only when the cache is cold.
 
         Riot IDs are case- and space-insensitive for lookup but we store them as
         Riot returns them, so the UI shows the player's own capitalisation.
+
+        ``remember_miss`` answers a Riot ID account-v1 has just said it does not
+        know from memory for ``MISS_TTL_SECONDS``. The draft board opts in; the
+        profile search does not, so an account made a minute ago is found the
+        moment somebody searches for it.
         """
         platform = resolve_platform(platform_name)
         tag_line = tag_line.lstrip("#")
@@ -100,6 +156,9 @@ class PlayerService:
         if player is None or not _cached_is_good(
             player.account_fetched_at, self.settings.ttl_account, refresh
         ):
+            miss = _miss_key(platform, game_name, tag_line) if remember_miss else None
+            if player is None and miss is not None and _known_miss(miss):
+                raise PlayerNotFound(f"{game_name}#{tag_line} not found on {platform.label}")
             try:
                 account = await self.client.account_by_riot_id(
                     game_name, tag_line, platform.account_region
@@ -110,6 +169,8 @@ class PlayerService:
                     # likely. Serve what we have rather than 404ing the user.
                     log.info("account-v1 miss for %s#%s; serving cache", game_name, tag_line)
                     return player
+                if miss is not None:
+                    _remember_miss(miss)
                 raise PlayerNotFound(f"{game_name}#{tag_line} not found on {platform.label}") from None
             player = await self._upsert_from_account(account, platform, existing=player)
 
