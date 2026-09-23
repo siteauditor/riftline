@@ -1,4 +1,10 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* The site is dark only. The components under src/components/ui carry
+   `dark:` variants from their shadcn/ui origin; this makes those the only
+   variants, whatever the visitor's system scheme says. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /*
  * Riftline.
@@ -140,6 +146,8 @@
   --radius-md: 0px;
   --radius-lg: 0px;
   --radius-xl: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
 
   /* Tailwind v4 emits `font-700` only where a token declares it. */
   --font-weight-400: 400;
@@ -147,6 +155,33 @@
   --font-weight-600: 600;
   --font-weight-700: 700;
   --font-weight-800: 800;
+}
+
+/*
+ * The vocabulary the components under src/components/ui use (they began as
+ * shadcn/ui's), each name pointed at one of the tokens above so a
+ * `bg-popover` or `text-muted-foreground` in one of them is the site's own
+ * colour. `accent` is already the site's teal, and that is what it means in
+ * those components too: the hovered, the selected, the interface.
+ */
+@theme inline {
+  --color-background: var(--color-deep);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-panel);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-raised);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: var(--color-deep);
+  --color-secondary: var(--color-raised);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-raised);
+  --color-muted-foreground: var(--color-ink-dim);
+  --color-accent-foreground: var(--color-deep);
+  --color-destructive: var(--color-loss);
+  --color-border: var(--color-line);
+  --color-input: var(--color-line);
+  --color-ring: var(--color-accent);
 }
 
 @layer base {
@@ -300,42 +335,6 @@
     border-color: var(--color-gold);
   }
 
-  select.control,
-  select.control-bare {
-    cursor: pointer;
-    /*
-     * The open option list takes its ground from this element's own
-     * `background-color`, which is dark. An earlier fix here assumed the
-     * opposite, that Chrome on Windows always paints the popup light and
-     * ignores author colours inside it, and pinned `color-scheme: light` with a
-     * dark ink on the options to suit. The popup stayed dark and every option
-     * went with it: a seventeen-row list with one readable entry, the selected
-     * one, visible only because the system highlight sat behind it.
-     *
-     * So the scheme matches the ground the popup actually gets, and the options
-     * below state both halves of the pair rather than relying on either being
-     * inherited.
-     */
-    color-scheme: dark;
-    /* Room for the chevron. A caller that sets `px-*` overrides this and the
-       text runs under the arrow, so selects take their padding from here. */
-    padding-right: 1.55rem;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2393a9b2' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 0.5rem center;
-    background-size: 9px 6px;
-  }
-
-  /*
-   * For a select inside a composite field, which must not draw its own box. It
-   * deliberately sets nothing else: the caller owns the type and colour.
-   */
-  select.control-bare {
-    appearance: none;
-    background-color: transparent;
-    border: 0;
-  }
-
   /*
    * Loading placeholders.
    *
@@ -359,26 +358,18 @@
 
   /* The spinner is a third piece of native chrome, and nobody steps a game
      count one at a time. */
+  /*
+   * Selects are no longer native: src/components/ui/select.tsx draws its own
+   * list, so the popup the browser painted outside the document, which came
+   * out unreadable twice, is gone with it. `.control` stays for the inputs.
+   */
   .control::-webkit-inner-spin-button,
   .control::-webkit-outer-spin-button {
     appearance: none;
     margin: 0;
   }
 
-  /*
-   * Both halves, stated together. Whether the popup takes its ground from the
-   * select, from these options or from the colour scheme, the pair is the same
-   * one, so the list cannot come out one colour on itself the way it did twice.
-   *
-   * Literal values rather than the tokens: these are read by the browser's own
-   * popup, outside the document, and a custom property that failed to resolve
-   * there would fall back to "no colour" and take the text with it.
-   */
-  select.control option,
-  select.control-bare option {
-    background-color: #111b1f;
-    color: #e8f0f2;
-  }
+
 
   /*
    * A label above a number or a section: condensed, upper case, tracked out.

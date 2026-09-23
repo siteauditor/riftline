@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+
 /**
  * A labelled figure, the way a broadcast graphic sets one: a tracked-out label
  * above, the number large and condensed below.
@@ -21,8 +23,8 @@ export function Stat({
   color?: string
   title?: string
 }) {
-  return (
-    <div title={title} className="min-w-0">
+  const body = (
+    <div className="min-w-0" tabIndex={title ? 0 : undefined}>
       <p className="eyebrow truncate">{label}</p>
       <p
         className="tnum display mt-0.5 text-2xl font-700 leading-none text-ink sm:text-[28px]"
@@ -32,6 +34,13 @@ export function Stat({
       </p>
       {sub && <p className="mt-1 truncate text-[11px] text-ink-faint">{sub}</p>}
     </div>
+  )
+  if (!title) return body
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{body}</TooltipTrigger>
+      <TooltipContent>{title}</TooltipContent>
+    </Tooltip>
   )
 }
 

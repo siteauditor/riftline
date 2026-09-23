@@ -4,6 +4,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
+import SelectField from '../components/SelectField'
 import ChampionPicker from '../components/ChampionPicker'
 import PositionIcon from '../components/PositionIcon'
 import { EmptyState, ErrorView } from '../components/StateViews'
@@ -210,20 +211,16 @@ export default function Draft() {
                 Your Riot ID (optional, weighs your mastery)
               </span>
               <div className="flex gap-1">
-                <select
+                <SelectField
+                  ariaLabel="Region"
                   value={platform}
-                  onChange={(e) => {
-                    setPlatform(e.target.value)
-                    rememberRegion(e.target.value)
+                  onValueChange={(v) => {
+                    setPlatform(v)
+                    rememberRegion(v)
                   }}
-                  className="control h-10 shrink-0 text-sm"
-                >
-                  {PLATFORMS.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
+                  triggerClassName="h-10 shrink-0"
+                  options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+                />
                 <input
                   value={riotId}
                   onChange={(e) => {
@@ -239,26 +236,14 @@ export default function Draft() {
               </p>
             </div>
 
-            <label className="flex items-center justify-between gap-2 text-sm">
-              <span className="text-xs text-ink-faint">Weigh what you can play</span>
-              <select
-                value={comfort}
-                onChange={(e) => set({ comfort: e.target.value })}
-                className="control"
-                disabled={!parsed}
-                title={
-                  parsed
-                    ? 'How much mastery counts toward the score'
-                    : 'Add your Riot ID to weigh your mastery'
-                }
-              >
-                {COMFORT_LEVELS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Weigh what you can play"
+              className="justify-between text-sm"
+              value={String(comfort)}
+              onValueChange={(v) => set({ comfort: v })}
+              disabled={!parsed}
+              options={COMFORT_LEVELS.map((c) => ({ value: String(c.value), label: c.label }))}
+            />
 
             <label className="flex items-center justify-between gap-2 text-sm text-ink-dim">
               <span className="text-xs text-ink-faint">Min games per champion</span>

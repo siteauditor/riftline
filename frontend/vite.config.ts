@@ -1,4 +1,6 @@
 /// <reference types="vitest/config" />
+import path from 'node:path'
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -14,6 +16,8 @@ export default defineConfig(({ isSsrBuild }) => ({
   // The server bundle is one file the prerenderer imports; it has no use for
   // a copy of public/ beside it.
   publicDir: isSsrBuild ? false : 'public',
+  // `@/` is src/, the alias the shadcn/ui components are written against.
+  resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: {
     port: 5173,
     // Proxying /api to FastAPI keeps the browser on one origin in development,

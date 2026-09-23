@@ -12,6 +12,8 @@ import MatchRow from '../components/MatchRow'
 import ProfileTabs from '../components/ProfileTabs'
 import AddToGroup from '../components/group/AddToGroup'
 import RankCard from '../components/RankCard'
+import SelectField from '../components/SelectField'
+import { Button } from '@/components/ui/button'
 import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
 import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
@@ -58,6 +60,9 @@ const UPDATE_COOLDOWN_MS = 60_000
 
 // The leaderboard's page size, to link a ladder position to the right page.
 const LADDER_PAGE = 50
+
+// The champion filter's "any" choice needs a word: Radix refuses an empty item value.
+const ALL_CHAMPIONS = 'all'
 
 const UNRANKED_SOLO = {
   queue: 'RANKED_SOLO_5x5',
@@ -171,7 +176,11 @@ export default function Profile() {
     )
   }
 
-  if (profileQuery.isError) {
+  // The stored answer a prerendered page carries outlives a failed live
+  // fetch: Riot being down, or a key that has expired, is worth a line over
+  // the page, not a blank page over data we hold.
+  const storedProfile = queryClient.getQueryData(queries.profileStored(platform, name, tag).queryKey)
+  if (profileQuery.isError && !storedProfile) {
     return (
       <div className="mx-auto max-w-[1280px] px-4 py-10">
         <ErrorView
@@ -183,7 +192,7 @@ export default function Profile() {
     )
   }
 
-  const profile = profileQuery.data!
+  const profile = (profileQuery.data ?? storedProfile)!
 
   // The page takes its colour from this player's rank. Solo queue first,
   // because that is the rank people mean when they say "my rank".
@@ -279,6 +288,20 @@ export default function Profile() {
           no avatar, "Level -" and "Unranked this season": three blanks that
           looked like facts about the player rather than about the search.
         */}
+        {profileQuery.isError && !profileQuery.data && (
+          <p className="accent-edge mb-5 py-2 pl-4 text-sm leading-relaxed text-ink-dim">
+            <span className="text-ink">Live data is unavailable right now.</span> This is the
+            profile as Riftline last stored it.{' '}
+            <button
+              type="button"
+              onClick={() => profileQuery.refetch()}
+              className="underline decoration-line underline-offset-2 hover:text-gold-bright"
+            >
+              Try again
+            </button>
+          </p>
+        )}
+
         {profile.plays_on && (
           <p className="accent-edge mb-5 py-2 pl-4 text-sm leading-relaxed text-ink-dim">
             <span className="text-ink">
@@ -351,26 +374,25 @@ export default function Profile() {
                   {f.label}
                 </button>
               ))}
-              <label className="ml-auto flex items-center gap-2">
-                <span className="text-xs text-ink-faint">Champion</span>
-                <select
-                  value={championFilter ?? ''}
-                  onChange={(e) => setFilter({ champion: Number(e.target.value) || null })}
-                  className="control max-w-[11rem]"
-                >
-                  <option value="">All champions</option>
-                  {/* A link can name a champion with no stored games yet. */}
-                  {championFilter &&
-                    !playedQuery.data?.champions.some((c) => c.champion.id === championFilter) && (
-                      <option value={championFilter}>{championName}</option>
-                    )}
-                  {(playedQuery.data?.champions ?? []).map((c) => (
-                    <option key={c.champion.id} value={c.champion.id}>
-                      {c.champion.name} ({c.games})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <SelectField
+                label="Champion"
+                className="ml-auto"
+                value={championFilter ? String(championFilter) : ALL_CHAMPIONS}
+                onValueChange={(v) => setFilter({ champion: v === ALL_CHAMPIONS ? null : Number(v) })}
+                triggerClassName="max-w-[11rem]"
+                options={[
+                  { value: ALL_CHAMPIONS, label: 'All champions' },
+                  // A link can name a champion with no stored games yet.
+                  ...(championFilter &&
+                  !playedQuery.data?.champions.some((c) => c.champion.id === championFilter)
+                    ? [{ value: String(championFilter), label: championName }]
+                    : []),
+                  ...(playedQuery.data?.champions ?? []).map((c) => ({
+                    value: String(c.champion.id),
+                    label: `${c.champion.name} (${c.games})`,
+                  })),
+                ]}
+              />
               {matchesQuery.isFetching && !matchesQuery.isFetchingNextPage && <Spinner />}
             </div>
 
@@ -422,10 +444,11 @@ export default function Profile() {
             </div>
 
             {matchesQuery.hasNextPage && (
-              <button
+              <Button
+                variant="outline"
                 onClick={() => matchesQuery.fetchNextPage()}
                 disabled={matchesQuery.isFetchingNextPage}
-                className="w-full frame py-2.5 text-sm font-500 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-60"
+                className="h-auto w-full py-2.5"
               >
                 {matchesQuery.isFetchingNextPage
                   ? stored
@@ -434,7 +457,7 @@ export default function Profile() {
                   : stored
                     ? 'Show 20 more'
                     : 'Load 20 more'}
-              </button>
+              </Button>
             )}
 
             {matches.length > 0 && (
@@ -539,15 +562,16 @@ function UpdateControl({
       {updatedAt !== null && (
         <span>Updated {now - updatedAt < 60_000 ? 'just now' : timeAgo(updatedAt)}</span>
       )}
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="xs"
         onClick={run}
         disabled={busy || cooling}
-        className="rounded-sm border border-line px-2 py-0.5 font-600 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:cursor-default disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink-dim"
+        className="font-600"
         title={cooling ? 'Riot was asked less than a minute ago.' : 'Ask Riot for the latest rank and games.'}
       >
         {busy ? 'Updating…' : 'Update'}
-      </button>
+      </Button>
       {failed && (
         <span role="alert" className="text-loss">
           {failed}

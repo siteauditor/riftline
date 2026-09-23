@@ -1,5 +1,11 @@
+import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { SearchIcon } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 import SearchBar from './components/SearchBar'
 import { api } from './lib/api'
@@ -22,7 +28,23 @@ export default function App() {
     refetchInterval: 30_000,
   })
 
+  // The search, from anywhere: Ctrl+K (Cmd+K on a Mac), or the button the
+  // header shows where it has no room for the field itself. The dialog is
+  // the same search bar the home page has, so there is one search to learn.
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   return (
+    <TooltipProvider>
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-40 border-b border-line bg-deep/90 backdrop-blur">
         {/* `min-w-0` and a scrollable nav: nothing in this row could shrink,
@@ -67,6 +89,17 @@ export default function App() {
               <SearchBar />
             </div>
           )}
+          {!isHome && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Search a player"
+              onClick={() => setSearchOpen(true)}
+              className="md:hidden"
+            >
+              <SearchIcon />
+            </Button>
+          )}
 
           <div className="ml-auto flex items-center gap-4 text-xs text-ink-faint">
             {health?.static_data_version && (
@@ -87,6 +120,16 @@ export default function App() {
         <Outlet />
       </main>
 
+      <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+        <DialogContent
+          showCloseButton={false}
+          className="top-[15vh] translate-y-0 gap-0 rounded-[2px] border-line bg-deep p-2 sm:max-w-xl"
+        >
+          <DialogTitle className="sr-only">Search a player</DialogTitle>
+          {searchOpen && <SearchBar size="large" autoFocus onNavigate={() => setSearchOpen(false)} />}
+        </DialogContent>
+      </Dialog>
+
       <footer className="border-t border-line-soft py-6">
         <div className="mx-auto max-w-[1280px] space-y-2 px-4 text-xs leading-relaxed text-ink-faint">
           <p>
@@ -104,5 +147,6 @@ export default function App() {
         </div>
       </footer>
     </div>
+    </TooltipProvider>
   )
 }

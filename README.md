@@ -5,7 +5,7 @@ per-game performance score, a champion mastery dashboard, live games, champion t
 lists and pages, ranked leaderboards, and a draft assistant.
 
 Live at <https://www.rhasta.space>. FastAPI + SQLAlchemy on the backend,
-React + Vite + Tailwind on the front.
+React 19 + Vite + Tailwind v4 on the front, with Radix primitives (via shadcn/ui) for the controls.
 
 ---
 

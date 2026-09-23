@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import SelectField from '../SelectField'
+
 import type { StoryPlayer } from '../../lib/api'
 import { clock, points } from './lanes'
 
@@ -48,20 +50,14 @@ export default function DeathReview({
         <h3 id="review-heading" className="display text-base font-600 text-ink">
           Deaths and takedowns
         </h3>
-        <label className="flex items-center gap-2 text-xs">
-          <span className="text-ink-faint">Player</span>
-          <select
-            value={player.participant_index}
-            onChange={(e) => setChosen(Number(e.target.value))}
-            className="control max-w-[14rem]"
-          >
-            {players.map((p) => (
-              <option key={p.participant_index} value={p.participant_index}>
-                {label(p)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          label="Player"
+          className="text-xs"
+          value={String(player.participant_index)}
+          onValueChange={(v) => setChosen(Number(v))}
+          triggerClassName="max-w-[14rem]"
+          options={players.map((p) => ({ value: String(p.participant_index), label: label(p) }))}
+        />
       </div>
 
       <p className="mt-2 text-sm leading-relaxed text-ink-dim">

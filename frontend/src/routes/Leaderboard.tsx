@@ -7,6 +7,7 @@ import { DEFAULT_LADDER, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import TimeAgo from '../components/TimeAgo'
 import Crest from '../components/Crest'
+import SelectField from '../components/SelectField'
 import Head from '../components/Head'
 import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
@@ -196,42 +197,40 @@ export default function Leaderboard() {
       </header>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-        <Field label="Region">
-          <Select value={platform} onChange={(v) => set({ platform: v })}>
-            {/* A URL can name a region the server does not list. Without this
-                the select silently displayed the first option while the query
-                fetched something else. */}
-            {!slices.platforms.some((p) => p.id === platform) && (
-              <option value={platform}>{platform}</option>
-            )}
-            {slices.platforms.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Queue">
-          <Select value={String(queueId)} onChange={(v) => set({ queue: v })}>
-            {slices.queues.map((q) => (
-              <option key={q.id} value={String(q.id)}>{q.label}</option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Tier">
-          <Select value={tier} onChange={(v) => set({ tier: v })}>
-            {!slices.tiers.includes(tier) && <option value={tier}>{tier}</option>}
-            {slices.tiers.map((t) => (
-              <option key={t} value={t}>{t[0] + t.slice(1).toLowerCase()}</option>
-            ))}
-          </Select>
-        </Field>
+        <SelectField
+          label="Region"
+          value={platform}
+          onValueChange={(v) => set({ platform: v })}
+          options={[
+            // A URL can name a region the server does not list. Without this
+            // the select silently displayed the first option while the query
+            // fetched something else.
+            ...(slices.platforms.some((p) => p.id === platform) ? [] : [{ value: platform, label: platform }]),
+            ...slices.platforms.map((p) => ({ value: p.id, label: p.label })),
+          ]}
+        />
+        <SelectField
+          label="Queue"
+          value={String(queueId)}
+          onValueChange={(v) => set({ queue: v })}
+          options={slices.queues.map((q) => ({ value: String(q.id), label: q.label }))}
+        />
+        <SelectField
+          label="Tier"
+          value={tier}
+          onValueChange={(v) => set({ tier: v })}
+          options={[
+            ...(slices.tiers.includes(tier) ? [] : [{ value: tier, label: tier }]),
+            ...slices.tiers.map((t) => ({ value: t, label: t[0] + t.slice(1).toLowerCase() })),
+          ]}
+        />
         {!isApex && (
-          <Field label="Division">
-            <Select value={division} onChange={(v) => set({ division: v })}>
-              {slices.divisions.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </Select>
-          </Field>
+          <SelectField
+            label="Division"
+            value={division}
+            onValueChange={(v) => set({ division: v })}
+            options={slices.divisions.map((d) => ({ value: d, label: d }))}
+          />
         )}
         {data && (
           <p className="ml-auto text-ink-faint">
@@ -464,31 +463,4 @@ function GoToRank({ onGo }: { onGo: (rank: number) => void }) {
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex items-center gap-1.5">
-      <span className="text-ink-faint">{label}</span>
-      {children}
-    </label>
-  )
-}
 
-function Select({
-  value,
-  onChange,
-  children,
-}: {
-  value: string
-  onChange: (value: string) => void
-  children: React.ReactNode
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="control"
-    >
-      {children}
-    </select>
-  )
-}

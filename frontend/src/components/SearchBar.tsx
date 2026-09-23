@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import RankBadge from './RankBadge'
+import SelectField from './SelectField'
 import { api, PLATFORMS } from '../lib/api'
 import { parseRiotId } from '../lib/format'
 import { useDebounced } from '../lib/useDebounced'
@@ -18,6 +19,8 @@ interface Props {
   /** Overrides the region remembered from the last search. */
   initialPlatform?: string
   autoFocus?: boolean
+  /** Called once a search has navigated: the search dialog closes on it. */
+  onNavigate?: () => void
 }
 
 interface Option {
@@ -61,7 +64,7 @@ function platformLabel(id: string): string {
  * page focuses this field on load, and a list dropping over the page before
  * anyone has touched it would be in the way.
  */
-export default function SearchBar({ size = 'default', initialPlatform, autoFocus = false }: Props) {
+export default function SearchBar({ size = 'default', initialPlatform, autoFocus = false, onNavigate }: Props) {
   const navigate = useNavigate()
   const id = useId()
   const listId = `${id}-list`
@@ -141,6 +144,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   function go(target: string, name: string, tag: string) {
     rememberRegion(target)
     navigate(`/summoner/${target}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`)
+    onNavigate?.()
   }
 
   function pick(option: Option) {
@@ -206,29 +210,23 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
           large ? 'h-14' : 'h-10'
         }`}
       >
-        <label className="sr-only" htmlFor={`${id}-platform`}>
-          Region
-        </label>
-        {/* The divider and ground sit on the wrapper: the select itself has to
-            stay boxless or it draws a second border inside this one. */}
+        {/* The divider and ground sit on the wrapper: the select itself is
+            bare, or it would draw a second border inside this one. */}
         <span className="flex items-stretch border-r border-line bg-raised">
-          <select
-            id={`${id}-platform`}
+          <SelectField
+            ariaLabel="Region"
+            bare
             value={platform}
-            onChange={(e) => {
-              setPlatform(e.target.value)
-              rememberRegion(e.target.value)
+            onValueChange={(v) => {
+              setPlatform(v)
+              rememberRegion(v)
             }}
-            className={`control-bare pl-3 font-display font-600 tracking-wide text-ink-dim hover:text-ink ${
+            className="h-full"
+            triggerClassName={`pl-3 font-display font-600 tracking-wide text-ink-dim hover:text-ink ${
               large ? 'text-sm' : 'text-xs'
             }`}
-          >
-            {PLATFORMS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+          />
         </span>
 
         <label className="sr-only" htmlFor={`${id}-riot-id`}>

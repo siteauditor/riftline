@@ -1,3 +1,4 @@
+import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { ApiError } from '../lib/api'
@@ -37,21 +38,21 @@ export function MatchListSkeleton({ rows = 6 }: { rows?: number }) {
                 profile being loaded for the first time is exactly the case
                 this stands in for. */}
             <div className="space-y-1.5">
-              <div className="skeleton h-3 w-20" />
-              <div className="skeleton h-2.5 w-12" />
-              <div className="skeleton h-2.5 w-16" />
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="h-2.5 w-12" />
+              <Skeleton className="h-2.5 w-16" />
             </div>
 
             {/* Champion, then the two 22px stacks of spells and runes */}
             <div className="flex items-center gap-2">
-              <div className="skeleton size-12 shrink-0" />
+              <Skeleton className="size-12 shrink-0" />
               <div className="flex flex-col gap-0.5">
-                <div className="skeleton size-[22px]" />
-                <div className="skeleton size-[22px]" />
+                <Skeleton className="size-[22px]" />
+                <Skeleton className="size-[22px]" />
               </div>
               <div className="flex flex-col gap-0.5">
-                <div className="skeleton size-[22px] rounded-full" />
-                <div className="skeleton size-[22px] rounded-full" />
+                <Skeleton className="size-[22px] rounded-full" />
+                <Skeleton className="size-[22px] rounded-full" />
               </div>
             </div>
 
@@ -64,23 +65,23 @@ export function MatchListSkeleton({ rows = 6 }: { rows?: number }) {
                   Measured against a freshly loaded row, 118px, which is what a
                   placeholder is standing in front of. */}
               <div className="space-y-1.5">
-                <div className="skeleton h-5 w-24" />
-                <div className="skeleton h-2.5 w-16" />
-                <div className="skeleton h-3.5 w-20" />
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-2.5 w-16" />
+                <Skeleton className="h-3.5 w-20" />
               </div>
               <div className="grid grid-cols-2 gap-x-5 gap-y-1 pt-0.5 sm:grid-cols-1">
-                <div className="skeleton h-2.5 w-20" />
-                <div className="skeleton h-2.5 w-14" />
+                <Skeleton className="h-2.5 w-20" />
+                <Skeleton className="h-2.5 w-14" />
               </div>
               <div className="grid grid-cols-2 gap-x-5 gap-y-1 pt-0.5 sm:grid-cols-1">
-                <div className="skeleton h-2.5 w-16" />
-                <div className="skeleton h-2.5 w-12" />
+                <Skeleton className="h-2.5 w-16" />
+                <Skeleton className="h-2.5 w-12" />
               </div>
               <div className="flex gap-1 pt-0.5">
                 {Array.from({ length: 6 }).map((_, n) => (
                   <div key={n} className="skeleton size-[26px]" />
                 ))}
-                <div className="skeleton size-[26px] rounded-full" />
+                <Skeleton className="size-[26px] rounded-full" />
               </div>
             </div>
 
@@ -89,8 +90,8 @@ export function MatchListSkeleton({ rows = 6 }: { rows?: number }) {
             <div className="hidden grid-cols-2 gap-x-4 gap-y-1 lg:grid">
               {Array.from({ length: 10 }).map((_, n) => (
                 <div key={n} className="flex items-center gap-1.5">
-                  <div className="skeleton size-4 shrink-0" />
-                  <div className="skeleton h-2 w-16" />
+                  <Skeleton className="size-4 shrink-0" />
+                  <Skeleton className="h-2 w-16" />
                 </div>
               ))}
             </div>

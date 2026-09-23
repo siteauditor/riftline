@@ -1,3 +1,5 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+
 import Crest from './Crest'
 import { tierColor, tierLabel } from '../lib/format'
 
@@ -22,10 +24,7 @@ interface Props {
   leaguePoints?: number | null
   /** Apex tiers span thousands of LP, so the number carries the meaning. */
   showLp?: boolean
-  /**
-   * Replaces the default tooltip. A caller that wraps this in its own titled
-   * element gets nothing: the inner title always wins on hover.
-   */
+  /** Replaces the default tooltip. */
   title?: string
 }
 
@@ -62,37 +61,47 @@ export default function RankBadge({
   if (state !== 'ranked' || !tier) {
     const copy = COPY[state === 'ranked' ? 'unranked' : state]
     return (
-      <span
-        title={title ?? copy.title}
-        className={`inline-flex shrink-0 items-center rounded-sm border border-dashed border-line ${pad} font-500 text-ink-faint`}
-      >
-        {copy.label}
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            tabIndex={0}
+            className={`inline-flex shrink-0 items-center rounded-sm border border-dashed border-line ${pad} font-500 text-ink-faint`}
+          >
+            {copy.label}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{title ?? copy.title}</TooltipContent>
+      </Tooltip>
     )
   }
 
   const colour = tierColor(tier)
   return (
-    <span
-      title={
-        title ??
-        (leaguePoints != null
-          ? `${tierLabel(tier, division)}, ${leaguePoints.toLocaleString('en-US')} LP`
-          : tierLabel(tier, division))
-      }
-      className={`tnum inline-flex shrink-0 items-center gap-1 ${pad} font-600`}
-      style={{
-        color: colour,
-        background: `color-mix(in srgb, ${colour} 14%, transparent)`,
-      }}
-    >
-      {/* The pill sets its own title with the LP in it, and an inner title
-          would win on hover, so the crest is told not to set one. */}
-      <Crest tier={tier} division={division} size="pill" title={null} />
-      {tierLabel(tier, division)}
-      {showLp && leaguePoints != null && (
-        <span className="font-500 opacity-70">{leaguePoints.toLocaleString('en-US')} LP</span>
-      )}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          tabIndex={0}
+          className={`tnum inline-flex shrink-0 items-center gap-1 ${pad} font-600`}
+          style={{
+            color: colour,
+            background: `color-mix(in srgb, ${colour} 14%, transparent)`,
+          }}
+        >
+          {/* The pill's tooltip carries the LP, so the crest is told not to
+              set a title of its own. */}
+          <Crest tier={tier} division={division} size="pill" title={null} />
+          {tierLabel(tier, division)}
+          {showLp && leaguePoints != null && (
+            <span className="font-500 opacity-70">{leaguePoints.toLocaleString('en-US')} LP</span>
+          )}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {title ??
+          (leaguePoints != null
+            ? `${tierLabel(tier, division)}, ${leaguePoints.toLocaleString('en-US')} LP`
+            : tierLabel(tier, division))}
+      </TooltipContent>
+    </Tooltip>
   )
 }

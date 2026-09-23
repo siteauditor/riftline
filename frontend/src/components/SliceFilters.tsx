@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import PositionIcon from './PositionIcon'
+import SelectField from './SelectField'
 import { api, POSITIONS } from '../lib/api'
 import { compact } from '../lib/format'
 import { useDebounced } from '../lib/useDebounced'
@@ -38,6 +39,9 @@ const QUEUES = [
   { id: 420, label: 'Solo/Duo' },
   { id: 440, label: 'Flex' },
 ]
+
+// The "no patch" choice needs a word: Radix refuses an empty item value.
+const LATEST = 'latest'
 
 /**
  * The slice every aggregate is keyed by: patch, queue, role, bracket, sample floor.
@@ -95,27 +99,26 @@ export default function SliceFilters({
       )}
 
       {patches.length > 1 && (
-        <Select
+        <SelectField
           label="Patch"
-          value={value.patch ?? ''}
-          onChange={(v) => onChange({ patch: v || null })}
-          options={[{ value: '', label: 'Latest' }, ...patches.map((p) => ({ value: p, label: p }))]}
+          value={value.patch ?? LATEST}
+          onValueChange={(v) => onChange({ patch: v === LATEST ? null : v })}
+          options={[{ value: LATEST, label: 'Latest' }, ...patches.map((p) => ({ value: p, label: p }))]}
         />
       )}
 
-      <Select
+      <SelectField
         label="Queue"
         value={String(value.queueId)}
-        onChange={(v) => onChange({ queueId: Number(v) })}
+        onValueChange={(v) => onChange({ queueId: Number(v) })}
         options={QUEUES.map((q) => ({ value: String(q.id), label: q.label }))}
       />
 
       {!hideBracket && brackets.length > 1 && (
-        <Select
+        <SelectField
           label="Crawled from"
-          title="Which ladder the crawler was seeded from. Not a measured lobby rank."
           value={value.bracket ?? 'ALL'}
-          onChange={(v) => onChange({ bracket: v })}
+          onValueChange={(v) => onChange({ bracket: v })}
           options={brackets.map((b) => ({
             value: b,
             label: b === 'ALL' ? 'Everything' : b.charAt(0) + b.slice(1).toLowerCase(),
@@ -214,37 +217,6 @@ function Chip({
     >
       {children}
     </button>
-  )
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-  title,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: { value: string; label: string }[]
-  title?: string
-}) {
-  return (
-    <label className="flex items-center gap-2 text-ink-dim" title={title}>
-      <span className="text-xs text-ink-faint">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="control"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
   )
 }
 

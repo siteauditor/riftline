@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
+import SelectField from '../components/SelectField'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
@@ -222,20 +223,12 @@ export default function Tierlist() {
                     className="control w-full"
                   />
                 </label>
-                <label className="flex items-center gap-2">
-                  <span className="text-xs text-ink-faint">Sort by</span>
-                  <select
-                    value={sort}
-                    onChange={(e) => setSort(e.target.value as SortKey)}
-                    className="control"
-                  >
-                    {SORTS.map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SelectField
+                  label="Sort by"
+                  value={sort}
+                  onValueChange={(v) => setSort(v as SortKey)}
+                  options={SORTS.map((s) => ({ value: s.key, label: s.label }))}
+                />
                 {query && (
                   <span className="text-xs text-ink-faint">
                     {shown.length} of {rows.length}

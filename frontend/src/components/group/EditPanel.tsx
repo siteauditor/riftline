@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import SelectField from '../SelectField'
+
 import { ApiError, PLATFORMS, api, type Group } from '../../lib/api'
 import { editLink, riotIdsIn } from '../../lib/groups'
 import { lastRegion, rememberRegion } from '../../lib/storage'
@@ -138,18 +140,12 @@ function AddOne({
           className="control min-w-[10rem] flex-[2] text-sm"
           disabled={room <= 0}
         />
-        <select
+        <SelectField
+          ariaLabel="Region"
           value={region}
-          onChange={(e) => onRegion(e.target.value)}
-          aria-label="Region"
-          className="control"
-        >
-          {PLATFORMS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+          onValueChange={onRegion}
+          options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+        />
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}

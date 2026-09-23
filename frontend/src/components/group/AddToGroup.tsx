@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+
 import { api } from '../../lib/api'
 import { useSavedGroups } from '../../lib/groups'
 
 /**
  * Put the player on this profile into one of the groups this browser can
- * edit. A native disclosure, so it opens and closes without script and from
- * the keyboard.
- *
- * The list opens in the page's flow rather than floating: the profile's art
- * header clips what overflows it, and a floating list was cut off at its
- * bottom edge.
+ * edit. A popover: it floats over the page in a portal, so the art header's
+ * clipping, which cut off a list that used to open in the page's flow, no
+ * longer reaches it, and it closes on Escape and on a click outside.
  */
 export default function AddToGroup({
   platform,
@@ -42,11 +42,13 @@ export default function AddToGroup({
   }
 
   return (
-    <details>
-      <summary className="w-fit cursor-pointer list-none rounded-sm border border-line px-2 py-0.5 font-600 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright [&::-webkit-details-marker]:hidden">
-        Add to group
-      </summary>
-      <div className="frame mt-1.5 w-64 max-w-full space-y-2 px-3 py-2.5 text-xs">
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="xs" className="font-600">
+          Add to group
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 space-y-2 rounded-[2px] border-line bg-panel p-3 text-xs">
         {editable.length === 0 ? (
           <p className="leading-relaxed text-ink-dim">
             No group this browser can edit.{' '}
@@ -83,7 +85,7 @@ export default function AddToGroup({
             )}
           </p>
         )}
-      </div>
-    </details>
+      </PopoverContent>
+    </Popover>
   )
 }
