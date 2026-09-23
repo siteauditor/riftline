@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { TooltipProvider } from '@/components/ui/tooltip'
+
 import Draft from './Draft'
 
 /**
@@ -36,9 +38,12 @@ function seededClient(): QueryClient {
 
 function page(url: string, client: QueryClient) {
   const router = createMemoryRouter([{ path: '/draft', element: <Draft /> }], { initialEntries: [url] })
+  // The providers App mounts around every page.
   return (
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <TooltipProvider>
+        <RouterProvider router={router} />
+      </TooltipProvider>
     </QueryClientProvider>
   )
 }

@@ -556,3 +556,95 @@ async def test_a_slow_riot_answer_with_nothing_stored_is_busy(client, monkeypatc
     assert response.status_code == 200, response.text[:300]
     assert response.json()["personalisation"]["status"] == "busy"
     assert response.json()["personalised"] is False
+
+
+# ------------------------------------------------------- what a board may be
+
+
+@pytest.mark.parametrize(
+    ("change", "where"),
+    [
+        ({"position": "SIDELANE"}, ["body", "position"]),
+        ({"allies": [1, 2, 3, 4, 5]}, ["body", "allies"]),
+        ({"enemies": [1, 2, 3, 4, 5, 6]}, ["body", "enemies"]),
+        ({"bans": list(range(1, 12))}, ["body", "bans"]),
+        ({"min_games": 0}, ["body", "min_games"]),
+        ({"min_games": 501}, ["body", "min_games"]),
+        ({"queue_id": 999}, ["body", "queue_id"]),
+        ({"patch": "16.18; drop"}, ["body", "patch"]),
+        ({"allies": [720], "enemies": [720]}, ["body"]),
+        ({"enemies": [720], "enemy_laner": 721}, ["body"]),
+    ],
+)
+async def test_a_board_that_cannot_be_a_draft_is_refused_with_its_place(client, change, where):
+    response = await client.post("/api/draft/suggest", json={"position": POSITION, **change})
+
+    assert response.status_code == 422, response.text[:300]
+    assert response.json()["detail"][0]["loc"] == where
+
+
+async def test_a_repeated_champion_is_counted_once_and_said_so(client):
+    patch = "D26.00"
+    await seed_stat(727, 100, 55, patch=patch)
+    await seed_stat(728, 100, 55, patch=patch)
+
+    response = await client.post(
+        "/api/draft/suggest",
+        json={"position": "bottom", "patch": patch, "min_games": 1, "allies": [728, 728]},
+    )
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert [a["id"] for a in body["allies"]] == [728]
+    assert body["warnings"] == ["allies: repeated champions were counted once"]
+    assert body["position"] == POSITION, "the role is read in any case"
+
+
+async def test_a_champion_nobody_plays_is_refused(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import deps
+
+    patch = "D27.00"
+    await seed_stat(729, 100, 55, patch=patch)
+    monkeypatch.setattr(
+        deps.static_data, "all_champions", lambda: [SimpleNamespace(id=729)]
+    )
+
+    unknown = await client.post(
+        "/api/draft/suggest",
+        json={"position": POSITION, "patch": patch, "min_games": 1, "enemies": [99_999]},
+    )
+    held = await client.post(
+        "/api/draft/suggest",
+        json={"position": POSITION, "patch": patch, "min_games": 1, "enemies": [729]},
+    )
+
+    assert unknown.status_code == 422
+    assert "99999" in unknown.json()["detail"]
+    assert held.status_code == 200, held.text[:300]
+
+
+async def test_a_floor_above_the_corpus_is_an_answer_with_a_way_out(client):
+    """It was a 404 reading "Ingest more matches or lower min_games", which the
+    page showed as "Something went wrong"."""
+    patch = "D28.00"
+    await seed_stat(730, 140, 70, patch=patch)
+    await seed_stat(731, 60, 30, patch=patch)
+
+    response = await client.post(
+        "/api/draft/suggest", json={"position": POSITION, "patch": patch, "min_games": 500}
+    )
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert body["suggestions"] == []
+    assert body["empty_reason"] == "min_games"
+    assert body["most_games"] == 140
+
+
+async def test_a_queue_with_nothing_held_says_so_in_plain_words(client):
+    response = await client.post("/api/draft/suggest", json={"position": POSITION, "queue_id": 440})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Riftline holds no ranked games for this queue yet."

@@ -5,12 +5,14 @@ import {
   boardParams,
   clearBoard,
   DEFAULT_COMFORT,
+  isFull,
   minGamesOptions,
   parseBoard,
   removeFrom,
   requestKey,
   setMinGames,
   toggleLane,
+  unavailable,
 } from './draftBoard'
 
 const board = (query: string) => parseBoard(new URLSearchParams(query))
@@ -46,6 +48,14 @@ describe('parseBoard', () => {
   it('reads the role in any case', () => {
     expect(board('role=top').role).toBe('TOP')
   })
+
+  it('keeps a champion in one place and each side to its size', () => {
+    const b = board('allies=1,2,3,4,5&enemies=1,6&bans=6,7')
+    expect(b.allies).toEqual([1, 2, 3, 4])
+    // 1 is an ally already; 6 is an enemy, so not a ban as well.
+    expect(b.enemies).toEqual([6])
+    expect(b.bans).toEqual([7])
+  })
 })
 
 describe('the actions', () => {
@@ -68,6 +78,14 @@ describe('the actions', () => {
   it('keeps parameters that are not the board, and the default view short', () => {
     const params = boardParams(clearBoard(board('allies=1&enemies=2&lane=2')), new URLSearchParams('utm=x&allies=1'))
     expect(params.toString()).toBe('utm=x')
+  })
+
+  it('does not add a champion who is elsewhere on the board, or to a full side', () => {
+    const b = board('allies=1,2,3,4&enemies=5')
+    expect(addTo('enemies', 1)(b)).toBe(b)
+    expect(addTo('allies', 9)(b)).toBe(b)
+    expect(unavailable(b).get(5)).toBe('on the enemy team')
+    expect(isFull(b, 'allies')).toBe(true)
   })
 
   it('refuses a sample floor that is not a whole number of games', () => {

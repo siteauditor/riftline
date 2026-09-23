@@ -1412,9 +1412,10 @@ export interface components {
         DraftRequest: {
             /**
              * Position
-             * @description The role you are picking for.
+             * @description The role you are picking for, in any case.
+             * @enum {string}
              */
-            position: string;
+            position: "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY";
             /**
              * Allies
              * @description Champion ids already on your team.
@@ -1426,7 +1427,7 @@ export interface components {
             bans?: number[];
             /**
              * Enemy Laner
-             * @description The enemy champion in your lane, when known.
+             * @description The enemy champion in your lane, one of `enemies`.
              */
             enemy_laner?: number | null;
             /** Patch */
@@ -1434,8 +1435,9 @@ export interface components {
             /**
              * Queue Id
              * @default 420
+             * @enum {integer}
              */
-            queue_id?: number;
+            queue_id?: 420 | 440;
             /**
              * Rank Bracket
              * @description Crawl provenance, not a measured rank.
@@ -1486,6 +1488,15 @@ export interface components {
             /** Ban Candidates */
             ban_candidates: components["schemas"]["BanCandidateOut"][];
             model: components["schemas"]["DraftModelOut"];
+            /** Empty Reason */
+            empty_reason: "min_games" | null;
+            /**
+             * Most Games
+             * @default 0
+             */
+            most_games: number;
+            /** Warnings */
+            warnings: string[];
         };
         /**
          * EvidenceOut

@@ -19,7 +19,9 @@ export const COMFORT_LEVELS = [
   { value: 0.4, label: 'Strong' },
 ] as const
 
-export const DEFAULT_ROLE = 'MIDDLE'
+export type Role = DraftRequest['position']
+
+export const DEFAULT_ROLE: Role = 'MIDDLE'
 export const DEFAULT_MIN_GAMES = 20
 export const MAX_MIN_GAMES = 500
 export const DEFAULT_COMFORT = 0.15
@@ -40,7 +42,7 @@ export function minGamesOptions(current: number): { value: string; label: string
 }
 
 export interface Board {
-  role: string
+  role: Role
   allies: number[]
   enemies: number[]
   bans: number[]
@@ -51,6 +53,15 @@ export interface Board {
 }
 
 export type Side = 'allies' | 'enemies' | 'bans'
+
+/** Four others on your side, five on theirs, ten bans: the API refuses more. */
+export const CAPS: Record<Side, number> = { allies: 4, enemies: 5, bans: 10 }
+
+const WHERE: Record<Side, string> = {
+  allies: 'on your team',
+  enemies: 'on the enemy team',
+  bans: 'banned',
+}
 
 /** Champion ids from a comma list: whole, positive, each once, in order. */
 function ids(value: string | null): number[] {
@@ -64,17 +75,28 @@ function ids(value: string | null): number[] {
 
 export function parseBoard(search: URLSearchParams): Board {
   const role = (search.get('role') ?? '').toUpperCase()
-  const enemies = ids(search.get('enemies'))
+  // A champion is in one place: the first of allies, enemies, bans keeps it,
+  // and each side keeps as many as a draft has room for. A hand-edited or old
+  // link is read as the draft it could have been, not refused.
+  const taken = new Set<number>()
+  const side = (key: Side) => {
+    const kept = ids(search.get(key)).filter((id) => !taken.has(id)).slice(0, CAPS[key])
+    kept.forEach((id) => taken.add(id))
+    return kept
+  }
+  const allies = side('allies')
+  const enemies = side('enemies')
+  const bans = side('bans')
   const lane = Number(search.get('lane'))
   const min = Number(search.get('min'))
   // `has` first: Number(null) is 0, which is the Off level, so a link without a
   // comfort parameter used to open with mastery off instead of on Light.
   const comfort = search.has('comfort') ? Number(search.get('comfort')) : DEFAULT_COMFORT
   return {
-    role: POSITIONS.some((p) => p.id === role) ? role : DEFAULT_ROLE,
-    allies: ids(search.get('allies')),
+    role: POSITIONS.find((p) => p.id === role)?.id ?? DEFAULT_ROLE,
+    allies,
     enemies,
-    bans: ids(search.get('bans')),
+    bans,
     lane: enemies.includes(lane) ? lane : null,
     min: Number.isInteger(min) && min >= 1 ? Math.min(min, MAX_MIN_GAMES) : DEFAULT_MIN_GAMES,
     comfort: COMFORT_LEVELS.some((c) => c.value === comfort) ? comfort : DEFAULT_COMFORT,
@@ -105,13 +127,26 @@ export function boardParams(board: Board, base: URLSearchParams): URLSearchParam
 // --- the actions, each one transform -----------------------------------------
 
 export const setRole =
-  (role: string) =>
+  (role: Role) =>
   (board: Board): Board => ({ ...board, role })
+
+/** Where a champion already is on the board, and so why it cannot be added. */
+export function unavailable(board: Board): Map<number, string> {
+  const out = new Map<number, string>()
+  for (const side of ['allies', 'enemies', 'bans'] as const) {
+    for (const id of board[side]) out.set(id, WHERE[side])
+  }
+  return out
+}
+
+export const isFull = (board: Board, side: Side) => board[side].length >= CAPS[side]
 
 export const addTo =
   (side: Side, id: number) =>
   (board: Board): Board =>
-    board[side].includes(id) ? board : { ...board, [side]: [...board[side], id] }
+    unavailable(board).has(id) || isFull(board, side)
+      ? board
+      : { ...board, [side]: [...board[side], id] }
 
 export const removeFrom =
   (side: Side, id: number) =>

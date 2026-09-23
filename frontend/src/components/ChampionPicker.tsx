@@ -1,132 +1,141 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { AnchoredList } from '@/components/ui/anchored-list'
 
-import { api, type ChampionStatic } from '../lib/api'
+import type { ChampionStatic } from '../lib/api'
+import { searchChampions } from '../lib/championSearch'
+import { queries } from '../lib/queries'
+import { useCombobox } from '../lib/useCombobox'
 
 interface Props {
-  value: number | null
-  onChange: (id: number | null) => void
   label: string
-  placeholder?: string
+  placeholder: string
+  onPick: (id: number) => void
+  /** Champions already somewhere on the board, with where. Shown, not offered. */
+  unavailable: ReadonlyMap<number, string>
+  /** After the label, e.g. "2/4". */
+  count?: string
+  /** No room left on this side: the field is disabled and says so. */
+  full?: boolean
+  /** The field's id, so the board can put focus back on it. */
+  inputId: string
 }
 
 /**
- * Searchable champion select.
+ * Add a champion by typing, in champion select, fast.
  *
- * Typing is the fast path -- 173 champions is far too many to scan visually --
- * so the field filters as you type and Enter takes the first match.
+ * A real combobox: the arrows move through the matches, Enter takes the
+ * highlighted one or, with nothing highlighted, the best match for what is
+ * typed (never the first champion of an empty list, which added Aatrox), and
+ * Escape closes. A champion already on the board stays in the list, greyed,
+ * with where it is, so the list does not seem to have lost them. The list opens
+ * on typing, a click or the down arrow, not on focus: tabbing through the board
+ * dropped a list over the next field every time.
  */
-export default function ChampionPicker({ value, onChange, label, placeholder }: Props) {
+export default function ChampionPicker({ label, placeholder, onPick, unavailable, count, full, inputId }: Props) {
   const [query, setQuery] = useState('')
-  const [open, setOpen] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = useRef<HTMLInputElement>(null)
+  const { data } = useQuery({ ...queries.champions(), staleTime: 6 * 60 * 60 * 1000 })
 
-  const { data } = useQuery({
-    queryKey: ['champions'],
-    queryFn: api.champions,
-    staleTime: 6 * 60 * 60 * 1000,
-  })
+  const options = searchChampions(data?.champions ?? [], query).map((champion) => ({
+    key: String(champion.id),
+    champion,
+    disabled: unavailable.has(champion.id),
+  }))
+  const combo = useCombobox()
+  const list = combo.bind(options, (option) => pick(option.champion))
+  const typed = query.trim() !== ''
+  const shown = combo.open && !full && (options.length > 0 || typed)
 
-  // Depend on `data?.champions` directly, not on a `?? []` fallback: the
-  // fallback allocates a new array every render and defeats the memo.
-  const champions = data?.champions
-  const selected = champions?.find((c) => c.id === value) ?? null
-
-  const matches = useMemo(() => {
-    const list: ChampionStatic[] = champions ?? []
-    const q = query.trim().toLowerCase()
-    if (!q) return list.slice(0, 40)
-    return list.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40)
-  }, [champions, query])
-
-  function choose(id: number | null) {
-    onChange(id)
+  function pick(champion: ChampionStatic) {
+    onPick(champion.id)
     setQuery('')
-    setOpen(false)
+    combo.close()
   }
 
-  const showList = open && !selected && matches.length > 0
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (list.onKeyDown(event)) return
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    const target =
+      list.active && !list.active.disabled
+        ? list.active
+        : typed
+          ? options.find((o) => !o.disabled)
+          : undefined
+    if (target) pick(target.champion)
+  }
 
   return (
     <div>
-      <span className="mb-1 block text-xs text-ink-faint">{label}</span>
-
-      {selected ? (
-        <div className="flex h-10 items-center gap-2 frame px-2">
-          {selected.icon_url && (
-            <img src={selected.icon_url} alt="" className="size-7 rounded-sm" loading="lazy" decoding="async" />
-          )}
-          <span className="flex-1 truncate text-sm text-ink">{selected.name}</span>
-          <button
-            onClick={() => choose(null)}
-            aria-label={`Clear ${label}`}
-            className="rounded-sm px-2 text-sm text-ink-faint hover:text-loss"
-          >
-            Clear
-          </button>
-        </div>
-      ) : (
-        // The list is a popover anchored to the field and portalled to the
-        // body, as the search bar's is: drawn in place it sat at 94% over
-        // the next field, whose label and placeholder read through it, and
-        // any container that hid its overflow would have cut it off.
-        <Popover
-          open={showList}
-          onOpenChange={(next) => {
-            if (!next) setOpen(false)
-          }}
-        >
-          <PopoverAnchor asChild>
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setOpen(true)
-              }}
-              onFocus={() => setOpen(true)}
-              onBlur={() => setTimeout(() => setOpen(false), 120)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && matches[0]) choose(matches[0].id)
-                if (e.key === 'Escape') setOpen(false)
-              }}
-              placeholder={placeholder ?? 'Search a champion'}
-              className="control h-10 w-full px-3 text-sm placeholder:text-ink-faint"
-            />
-          </PopoverAnchor>
-          <PopoverContent
-            align="start"
-            sideOffset={4}
-            // Options for the field, which keeps focus: not a dialog.
-            role="presentation"
-            onOpenAutoFocus={(e) => e.preventDefault()}
-            onCloseAutoFocus={(e) => e.preventDefault()}
-            onInteractOutside={(e) => {
-              if (e.target === inputRef.current) e.preventDefault()
+      <label htmlFor={inputId} className="mb-1 flex items-baseline justify-between text-xs text-ink-faint">
+        <span>{label}</span>
+        {count && <span className="tnum">{count}</span>}
+      </label>
+      <AnchoredList
+        open={shown}
+        onDismiss={combo.close}
+        anchorRef={fieldRef}
+        className="max-h-[min(16rem,var(--radix-popover-content-available-height))] overflow-y-auto"
+        anchor={
+          <input
+            ref={fieldRef}
+            id={inputId}
+            value={query}
+            disabled={full}
+            {...list.inputProps(shown)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              combo.setOpen(true)
+              combo.setActiveKey(null)
             }}
-            className="max-h-[min(16rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-y-auto rounded-lg border-line bg-panel p-0 py-1 text-ink shadow-[0_18px_44px_-12px_rgb(0_0_0/0.85)]"
-          >
-            <ul>
-              {matches.map((c) => (
-                <li key={c.id}>
-                  <button
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => choose(c.id)}
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-ink-dim hover:bg-raised hover:text-ink"
-                  >
-                    {c.icon_url && (
-                      <img src={c.icon_url} alt="" className="size-6 rounded-sm" loading="lazy" decoding="async" />
-                    )}
-                    {c.name}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </PopoverContent>
-        </Popover>
-      )}
+            onMouseDown={() => combo.setOpen(true)}
+            onBlur={combo.close}
+            onKeyDown={onKeyDown}
+            placeholder={full ? 'Full' : placeholder}
+            spellCheck={false}
+            autoComplete="off"
+            className="control h-10 w-full px-3 text-sm placeholder:text-ink-faint disabled:cursor-not-allowed disabled:opacity-60"
+          />
+        }
+      >
+        <ul id={combo.listId} role="listbox" aria-label={label} className="py-1">
+          {options.map((option, i) => {
+            const where = unavailable.get(option.champion.id)
+            return (
+              <li
+                key={option.key}
+                {...list.optionProps(option, i)}
+                className={`flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm ${
+                  option.disabled
+                    ? 'cursor-default text-ink-faint'
+                    : option.key === combo.activeKey
+                      ? 'bg-raised text-ink'
+                      : 'text-ink-dim'
+                }`}
+              >
+                {option.champion.icon_url ? (
+                  <img
+                    src={option.champion.icon_url}
+                    alt=""
+                    className={`size-6 rounded-sm ${option.disabled ? 'opacity-40' : ''}`}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <span aria-hidden className="size-6 rounded-sm bg-raised" />
+                )}
+                <span className="min-w-0 flex-1 truncate">{option.champion.name}</span>
+                {where && <span className="shrink-0 text-[11px]">{where}</span>}
+              </li>
+            )
+          })}
+        </ul>
+        {typed && options.length === 0 && (
+          <p className="px-3 py-2 text-xs text-ink-faint">No champion matches “{query.trim()}”.</p>
+        )}
+      </AnchoredList>
     </div>
   )
 }

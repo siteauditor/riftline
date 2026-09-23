@@ -189,12 +189,29 @@ test('the draft picker lists champions over the fields below it and adds one', a
   const list = page.locator('[data-slot=popover-content]')
   await expect(list).toBeVisible()
   expect(await opaque(list)).toBe(true)
-  const first = list.getByRole('button').first()
+  const first = list.getByRole('option').first()
   await expect.poll(() => onTop(first)).toBe(true)
   const name = (await first.textContent())!.trim()
   await first.click()
   await expect(list).toBeHidden()
-  await expect(page.getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
+  await expect(page.getByRole('button', { name: `Remove ${name}` })).toBeVisible()
+})
+
+test('the draft picker works from the keyboard and keeps a champion in one place', async ({ page }) => {
+  await open(page, '/draft')
+  const ally = page.getByRole('combobox', { name: 'Your team' })
+  const empty = page.getByText('No matches ingested yet')
+  await expect(ally.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The draft board needs a corpus of matches.')
+  // "kaisa" found nothing before names were folded (2026-09-24).
+  await ally.fill('kaisa')
+  await ally.press('ArrowDown')
+  await ally.press('Enter')
+  await expect(page.getByRole('button', { name: "Remove Kai'Sa" })).toBeVisible()
+  const enemy = page.getByRole('combobox', { name: 'Enemy team' })
+  await enemy.fill('kai')
+  const enemyList = page.getByRole('listbox', { name: 'Enemy team' })
+  await expect(enemyList.getByRole('option', { name: /Kai'Sa/ })).toHaveAttribute('aria-disabled', 'true')
 })
 
 test('a link with a query string hydrates the page it was prerendered as', async ({ page }) => {

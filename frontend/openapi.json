@@ -3965,14 +3965,22 @@
     "properties": {
      "position": {
       "type": "string",
+      "enum": [
+       "TOP",
+       "JUNGLE",
+       "MIDDLE",
+       "BOTTOM",
+       "UTILITY"
+      ],
       "title": "Position",
-      "description": "The role you are picking for."
+      "description": "The role you are picking for, in any case."
      },
      "allies": {
       "items": {
        "type": "integer"
       },
       "type": "array",
+      "maxItems": 4,
       "title": "Allies",
       "description": "Champion ids already on your team."
      },
@@ -3981,6 +3989,7 @@
        "type": "integer"
       },
       "type": "array",
+      "maxItems": 5,
       "title": "Enemies"
      },
      "bans": {
@@ -3988,6 +3997,7 @@
        "type": "integer"
       },
       "type": "array",
+      "maxItems": 10,
       "title": "Bans"
      },
      "enemy_laner": {
@@ -4000,12 +4010,13 @@
        }
       ],
       "title": "Enemy Laner",
-      "description": "The enemy champion in your lane, when known."
+      "description": "The enemy champion in your lane, one of `enemies`."
      },
      "patch": {
       "anyOf": [
        {
-        "type": "string"
+        "type": "string",
+        "pattern": "^[A-Za-z0-9.]{1,12}$"
        },
        {
         "type": "null"
@@ -4015,6 +4026,10 @@
      },
      "queue_id": {
       "type": "integer",
+      "enum": [
+       420,
+       440
+      ],
       "title": "Queue Id",
       "default": 420
      },
@@ -4026,6 +4041,8 @@
      },
      "min_games": {
       "type": "integer",
+      "maximum": 500.0,
+      "minimum": 1.0,
       "title": "Min Games",
       "default": 20
      },
@@ -4139,6 +4156,30 @@
      },
      "model": {
       "$ref": "#/components/schemas/DraftModelOut"
+     },
+     "empty_reason": {
+      "anyOf": [
+       {
+        "type": "string",
+        "const": "min_games"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empty Reason"
+     },
+     "most_games": {
+      "type": "integer",
+      "title": "Most Games",
+      "default": 0
+     },
+     "warnings": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Warnings"
      }
     },
     "type": "object",

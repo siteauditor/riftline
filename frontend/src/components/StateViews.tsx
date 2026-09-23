@@ -197,11 +197,21 @@ export function ErrorView({
   )
 }
 
-export function EmptyState({ title, body }: { title: string; body: string }) {
+export function EmptyState({
+  title,
+  body,
+  action,
+}: {
+  title: string
+  body: string
+  /** The way out of the empty state, when there is one. */
+  action?: ReactNode
+}) {
   return (
     <div className="rounded-sm border border-dashed border-line px-5 py-10 text-center">
       <p className="display text-lg font-600 text-ink">{title}</p>
       <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed text-ink-dim">{body}</p>
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   )
 }
