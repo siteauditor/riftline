@@ -25,9 +25,15 @@ function TooltipTrigger({ ...props }: React.ComponentProps<typeof TooltipPrimiti
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
+// Radix keeps a floating box on screen with no margin, so near the edge of a
+// phone a tooltip sat flush against the glass with its corner cut off (the
+// home page's score hints at 390px, 2026-09-23). The page's own gutter is 16px.
+export const EDGE_MARGIN = 8
+
 function TooltipContent({
   className,
   sideOffset = 4,
+  collisionPadding = EDGE_MARGIN,
   children,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Content>) {
@@ -36,6 +42,7 @@ function TooltipContent({
       <TooltipPrimitive.Content
         data-slot="tooltip-content"
         sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         className={cn(
           'z-50 w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin) rounded-md bg-ink px-2.5 py-1.5 text-xs leading-snug text-balance text-deep shadow-[0_8px_24px_-8px_rgb(0_0_0/0.7)]',
           'animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',

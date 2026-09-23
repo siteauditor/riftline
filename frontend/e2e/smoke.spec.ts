@@ -121,6 +121,15 @@ function onTop(locator: Locator): Promise<boolean> {
   })
 }
 
+/**
+ * Whether the element's ground has no transparency. A list over a page is
+ * read against its own ground only: at 94% the fields under the lists showed
+ * through them.
+ */
+function opaque(locator: Locator): Promise<boolean> {
+  return locator.evaluate((el) => !/\/|rgba/.test(getComputedStyle(el).backgroundColor))
+}
+
 test('the search list is drawn whole, over the section below the hero', async ({ page }) => {
   await remember(page)
   await open(page, '/')
@@ -128,6 +137,7 @@ test('the search list is drawn whole, over the section below the hero', async ({
   await riotId.click()
   const options = page.getByRole('listbox').getByRole('option')
   await expect(options).toHaveCount(RECENT.length)
+  expect(await opaque(page.locator('[data-slot=popover-content]'))).toBe(true)
   for (const option of await options.all()) {
     await expect.poll(() => onTop(option)).toBe(true)
   }
@@ -164,6 +174,20 @@ test('the search dialog shows its list above the dialog and picks from it', asyn
   await last.click()
   await expect(page).toHaveURL(/\/summoner\/euw1\/Caps\/EUW$/)
   await expect(dialog).toBeHidden()
+})
+
+test('the draft picker lists champions over the fields below it and adds one', async ({ page }) => {
+  await open(page, '/draft')
+  await page.getByPlaceholder('Add an ally').click()
+  const list = page.locator('[data-slot=popover-content]')
+  await expect(list).toBeVisible()
+  expect(await opaque(list)).toBe(true)
+  const first = list.getByRole('button').first()
+  await expect.poll(() => onTop(first)).toBe(true)
+  const name = (await first.textContent())!.trim()
+  await first.click()
+  await expect(list).toBeHidden()
+  await expect(page.getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
 })
 
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {

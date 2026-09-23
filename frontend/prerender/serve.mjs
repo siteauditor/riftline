@@ -58,7 +58,20 @@ http
   .createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local')
     if (url.pathname.startsWith('/api/')) {
-      const upstream = await fetch(new URL(url.pathname + url.search, apiBase), { headers: { accept: 'application/json' } })
+      // The method and body go through as sent: the draft board and the
+      // group editor POST, and forwarding everything as a GET answered them
+      // 405 Method Not Allowed (seen 2026-09-23).
+      const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
+      const chunks = []
+      if (hasBody) for await (const chunk of req) chunks.push(chunk)
+      const upstream = await fetch(new URL(url.pathname + url.search, apiBase), {
+        method: req.method,
+        headers: {
+          accept: 'application/json',
+          ...(req.headers['content-type'] ? { 'content-type': req.headers['content-type'] } : {}),
+        },
+        body: hasBody ? Buffer.concat(chunks) : undefined,
+      })
       res.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json' })
       res.end(Buffer.from(await upstream.arrayBuffer()))
       return

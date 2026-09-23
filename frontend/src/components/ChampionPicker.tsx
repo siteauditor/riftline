@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 
 import { api, type ChampionStatic } from '../lib/api'
 
@@ -19,6 +21,7 @@ interface Props {
 export default function ChampionPicker({ value, onChange, label, placeholder }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const { data } = useQuery({
     queryKey: ['champions'],
@@ -44,8 +47,10 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
     setOpen(false)
   }
 
+  const showList = open && !selected && matches.length > 0
+
   return (
-    <div className="relative">
+    <div>
       <span className="mb-1 block text-xs text-ink-faint">{label}</span>
 
       {selected ? (
@@ -63,40 +68,64 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
           </button>
         </div>
       ) : (
-        <input
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setOpen(true)
+        // The list is a popover anchored to the field and portalled to the
+        // body, as the search bar's is: drawn in place it sat at 94% over
+        // the next field, whose label and placeholder read through it, and
+        // any container that hid its overflow would have cut it off.
+        <Popover
+          open={showList}
+          onOpenChange={(next) => {
+            if (!next) setOpen(false)
           }}
-          onFocus={() => setOpen(true)}
-          onBlur={() => setTimeout(() => setOpen(false), 120)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && matches[0]) choose(matches[0].id)
-            if (e.key === 'Escape') setOpen(false)
-          }}
-          placeholder={placeholder ?? 'Search a champion'}
-          className="control h-10 w-full px-3 text-sm placeholder:text-ink-faint"
-        />
-      )}
-
-      {open && !selected && matches.length > 0 && (
-        <ul className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto frame py-1 shadow-xl">
-          {matches.map((c) => (
-            <li key={c.id}>
-              <button
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => choose(c.id)}
-                className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-ink-dim hover:bg-raised hover:text-ink"
-              >
-                {c.icon_url && (
-                  <img src={c.icon_url} alt="" className="size-6 rounded-sm" loading="lazy" decoding="async" />
-                )}
-                {c.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+        >
+          <PopoverAnchor asChild>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setOpen(true)
+              }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 120)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && matches[0]) choose(matches[0].id)
+                if (e.key === 'Escape') setOpen(false)
+              }}
+              placeholder={placeholder ?? 'Search a champion'}
+              className="control h-10 w-full px-3 text-sm placeholder:text-ink-faint"
+            />
+          </PopoverAnchor>
+          <PopoverContent
+            align="start"
+            sideOffset={4}
+            // Options for the field, which keeps focus: not a dialog.
+            role="presentation"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              if (e.target === inputRef.current) e.preventDefault()
+            }}
+            className="max-h-[min(16rem,var(--radix-popover-content-available-height))] w-(--radix-popover-trigger-width) overflow-y-auto rounded-lg border-line bg-panel p-0 py-1 text-ink shadow-[0_18px_44px_-12px_rgb(0_0_0/0.85)]"
+          >
+            <ul>
+              {matches.map((c) => (
+                <li key={c.id}>
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => choose(c.id)}
+                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-ink-dim hover:bg-raised hover:text-ink"
+                  >
+                    {c.icon_url && (
+                      <img src={c.icon_url} alt="" className="size-6 rounded-sm" loading="lazy" decoding="async" />
+                    )}
+                    {c.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
       )}
     </div>
   )
