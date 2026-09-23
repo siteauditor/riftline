@@ -3895,6 +3895,75 @@
     ],
     "title": "CvPhaseOut"
    },
+   "DamageMixOut": {
+    "properties": {
+     "shares": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DamageShareOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "measured": {
+      "type": "integer",
+      "title": "Measured",
+      "default": 0
+     },
+     "missing": {
+      "items": {
+       "$ref": "#/components/schemas/ChampionRef"
+      },
+      "type": "array",
+      "title": "Missing"
+     },
+     "leaning": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "physical",
+         "magic",
+         "true"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Leaning"
+     }
+    },
+    "type": "object",
+    "title": "DamageMixOut",
+    "description": "One side's damage, from each of its champions' usual games.\n\nSummed over the champions' average damage, so each counts by how much it\ndeals. Shown, not scored."
+   },
+   "DamageShareOut": {
+    "properties": {
+     "physical": {
+      "type": "number",
+      "title": "Physical"
+     },
+     "magic": {
+      "type": "number",
+      "title": "Magic"
+     },
+     "true": {
+      "type": "number",
+      "title": "True"
+     }
+    },
+    "type": "object",
+    "required": [
+     "physical",
+     "magic",
+     "true"
+    ],
+    "title": "DamageShareOut",
+    "description": "Fractions of damage to champions by type, summing to 1."
+   },
    "DeathOut": {
     "properties": {
      "ms": {
@@ -4270,6 +4339,9 @@
        }
       ]
      },
+     "team_damage": {
+      "$ref": "#/components/schemas/TeamDamageOut"
+     },
      "bans_read_the_draft": {
       "type": "boolean",
       "title": "Bans Read The Draft",
@@ -4314,6 +4386,7 @@
     "required": [
      "patch",
      "position",
+     "team_damage",
      "model"
     ],
     "title": "DraftResponse"
@@ -10813,6 +10886,50 @@
     ],
     "title": "SuggestResponse"
    },
+   "SuggestionDamageOut": {
+    "properties": {
+     "own": {
+      "$ref": "#/components/schemas/DamageShareOut"
+     },
+     "games": {
+      "type": "integer",
+      "title": "Games"
+     },
+     "team_after": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DamageShareOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "balances": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "physical",
+         "magic",
+         "true"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Balances"
+     }
+    },
+    "type": "object",
+    "required": [
+     "own",
+     "games"
+    ],
+    "title": "SuggestionDamageOut",
+    "description": "A pick's own damage in the role, and your team's mix with it added."
+   },
    "SuggestionOut": {
     "properties": {
      "champion": {
@@ -10924,6 +11041,16 @@
        }
       ]
      },
+     "damage": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/SuggestionDamageOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "score": {
       "type": "number",
       "title": "Score",
@@ -11012,6 +11139,49 @@
      "converted"
     ],
     "title": "TakedownOut"
+   },
+   "TeamDamageOut": {
+    "properties": {
+     "available": {
+      "type": "boolean",
+      "title": "Available"
+     },
+     "allies": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DamageMixOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "enemies": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/DamageMixOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "min_games": {
+      "type": "integer",
+      "title": "Min Games"
+     },
+     "one_sided_share": {
+      "type": "number",
+      "title": "One Sided Share"
+     }
+    },
+    "type": "object",
+    "required": [
+     "available",
+     "min_games",
+     "one_sided_share"
+    ],
+    "title": "TeamDamageOut"
    },
    "TeamObjectives": {
     "properties": {

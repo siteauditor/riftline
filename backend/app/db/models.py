@@ -377,6 +377,11 @@ class MatchParticipant(Base):
     wards_placed: Mapped[int | None] = mapped_column(Integer)
     wards_killed: Mapped[int | None] = mapped_column(Integer)
     control_wards: Mapped[int | None] = mapped_column(Integer)
+    # Damage to champions by type, for the draft's team damage mix. Null until
+    # lifted from `matches.raw`: the score stage's backfill fills old rows.
+    physical_damage_to_champions: Mapped[int | None] = mapped_column(Integer)
+    magic_damage_to_champions: Mapped[int | None] = mapped_column(Integer)
+    true_damage_to_champions: Mapped[int | None] = mapped_column(Integer)
 
     # --- the Riftline score ------------------------------------------------
     # Ours, not Riot's: six role-relative percentiles over our own corpus,

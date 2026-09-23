@@ -512,6 +512,27 @@ async def cmd_draft_priors(args) -> int:
                 f"    time split at the strength in use: slope {scope.split_slope:.2f} over "
                 f"{scope.split_pairs:,} pairs (1 is right; above 1 the prior is too strong)"
             )
+    if report.damage is not None:
+        from app.services.aggregate import wilson_lower_bound, wilson_upper_bound
+
+        mix = report.damage
+        print(
+            f"  damage mix, from the champions' usual damage: {mix.teams:,} teams with all five "
+            f"measured, {mix.unmeasured:,} left out"
+        )
+        for b in mix.buckets:
+            if not b.teams:
+                continue
+            if b.high is None:
+                span = f"{b.low:.0%} and up"
+            elif b.low == 0:
+                span = f"under {b.high:.0%}"
+            else:
+                span = f"{b.low:.0%} to {b.high:.0%}"
+            print(
+                f"    main type {span}: {b.teams:,} teams won {b.wins / b.teams:.1%} "
+                f"({wilson_lower_bound(b.wins, b.teams):.1%} to {wilson_upper_bound(b.wins, b.teams):.1%})"
+            )
     return 0
 
 

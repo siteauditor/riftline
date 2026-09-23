@@ -301,6 +301,12 @@ export type DraftPersonalisation = S['PersonalisationOut']
 
 export type DraftRequest = S['DraftRequest']
 
+/** One side's damage by type, from its champions' usual games. */
+export type DamageMix = S['DamageMixOut']
+
+/** Fractions of damage to champions by type, summing to 1. */
+export type DamageShares = S['DamageShareOut']
+
 // --- groups -------------------------------------------------------------------
 
 export type GroupQueue = S['GroupQueueOut']

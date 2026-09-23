@@ -9,6 +9,7 @@ import { EmptyState } from '../StateViews'
 import WinRateRange from '../WinRateRange'
 import type { DraftEvidence, DraftResponse, DraftSuggestion } from '../../lib/api'
 import { COMFORT_LEVELS, MIN_GAMES_PRESETS } from '../../lib/draftBoard'
+import { DAMAGE_TEXT, mainType } from '../../lib/damage'
 import { compact, pct, positionLabel } from '../../lib/format'
 
 /**
@@ -261,6 +262,25 @@ function laneLines(s: DraftSuggestion, data: DraftResponse): string[] {
   return lines
 }
 
+/**
+ * A pick that pulls a one-sided team back toward even, said with the figures:
+ * the team's share of its main type now, and with this pick. Only when the API
+ * marks it: your side leans one way and this pick deals mostly another.
+ */
+function DamageNote({ s, data }: { s: DraftSuggestion; data: DraftResponse }) {
+  const damage = s.damage
+  const allies = data.team_damage.allies?.shares
+  if (!damage?.balances || !damage.team_after || !allies) return null
+  const kind = mainType(damage.own)
+  const leaning = damage.balances
+  return (
+    <>
+      <span className={DAMAGE_TEXT[kind]}>brings {kind} damage</span>: your team is {pct(allies[leaning], 0)}{' '}
+      {leaning}, {pct(damage.team_after[leaning], 0)} with {s.champion.name}
+    </>
+  )
+}
+
 function SuggestionRow({
   suggestion: s,
   place,
@@ -287,6 +307,7 @@ function SuggestionRow({
       : null
   const duoRole = data.position === 'BOTTOM' ? 'support' : 'ADC'
   const lines = [...laneLines(s, data), ...s.reasons]
+  const balances = Boolean(s.damage?.balances && data.team_damage.allies?.shares)
 
   return (
     <li className="border-b border-line-soft px-1 py-2.5">
@@ -333,11 +354,16 @@ function SuggestionRow({
               </button>
             )}
           </div>
-          {lines.length > 0 && (
+          {(lines.length > 0 || balances) && (
             <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
               {lines.map((line) => (
                 <li key={line}>{line}</li>
               ))}
+              {balances && (
+                <li>
+                  <DamageNote s={s} data={data} />
+                </li>
+              )}
             </ul>
           )}
           {others.length > 0 && (
@@ -454,6 +480,13 @@ function HowScored({ data, comfort }: { data: DraftResponse; comfort: number }) 
         Records against the other enemies and beside your allies are listed but not scored: measured
         on these games, they repeat from one patch to the next no more than chance does. They will
         count once they do.
+      </p>
+      <p className="mt-2">
+        The damage bar under each team adds up each champion’s usual damage by type, from{' '}
+        <span className="tnum text-ink">{data.team_damage.min_games}</span> games (in its role when it
+        has them there), and calls a side one-sided at{' '}
+        <span className="tnum text-ink">{pct(data.team_damage.one_sided_share, 0)}</span> of one type.
+        It is shown, not scored: too few one-sided teams have been measured to say what it costs.
       </p>
       <p className="mt-2">
         Mastery is a preference, not evidence: a fully mastered champion gains up to{' '}

@@ -52,7 +52,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -245,7 +245,26 @@ def lifted_fields(participant: dict) -> dict[str, int]:
         "wards_placed": _int(participant.get("wardsPlaced")),
         "wards_killed": _int(participant.get("wardsKilled")),
         "control_wards": _int(ch.get("controlWardsPlaced")),
+        # For the draft's team damage mix.
+        "physical_damage_to_champions": _int(participant.get("physicalDamageDealtToChampions")),
+        "magic_damage_to_champions": _int(participant.get("magicDamageDealtToChampions")),
+        "true_damage_to_champions": _int(participant.get("trueDamageDealtToChampions")),
     }
+
+
+def _unlifted():
+    """A participant row still missing a lifted field.
+
+    `time_dead` was the whole cursor until the damage types were added, and
+    every stored row already had it, so a newer field would never reach the
+    rows lifted before it existed. Any field still null brings the row back
+    once; a row whose participant is absent from the payload stays null and is
+    kept out of the rest of the run by `lift_fields`' attempted set.
+    """
+    return or_(
+        MatchParticipant.time_dead.is_(None),
+        MatchParticipant.physical_damage_to_champions.is_(None),
+    )
 
 
 # ------------------------------------------------------------- the components
@@ -455,9 +474,7 @@ class ScoreService:
     # ------------------------------------------------------------- lifting
 
     async def lift_remaining(self) -> int:
-        stmt = select(func.count(MatchParticipant.id)).where(
-            MatchParticipant.time_dead.is_(None)
-        )
+        stmt = select(func.count(MatchParticipant.id)).where(_unlifted())
         return (await self.session.execute(stmt)).scalar() or 0
 
     async def lift_fields(self, *, batch: int = 200) -> int:
@@ -475,7 +492,7 @@ class ScoreService:
         while True:
             stmt = (
                 select(MatchParticipant.match_id)
-                .where(MatchParticipant.time_dead.is_(None))
+                .where(_unlifted())
                 .distinct()
                 .limit(batch)
             )

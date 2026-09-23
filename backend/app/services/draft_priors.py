@@ -17,6 +17,11 @@ nothing calls Riot. Run it as `python -m scripts.ingest draftpriors`.
    against the newer patch's deviation, as a regression slope through zero.
    Near 1 the strength is right; above 1 the prior is too strong (records are
    under-counted), below 1 too weak.
+
+It also reports how teams fared by how one-sided their damage was, read from
+their champions' usual profiles (`damage`), which is what a draft knows. The
+draft shows the mix and does not score it; this is the measurement that would
+have to say otherwise first.
 """
 
 from __future__ import annotations
@@ -27,14 +32,19 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ChampionStat, MatchupStat, SynergyStat
+from app.db.models import ChampionStat, Match, MatchParticipant, MatchupStat, SynergyStat
 from app.services.aggregate import ALL_BRACKETS, aggregated_slices, poolable_patches
+from app.services.damage import load_profiles, team_mix
 from app.services.evidence import ALLY_STRENGTH, LANE_STRENGTH, TEAM_STRENGTH
 
 # The champion's own record needs this many games to be a reference at all.
 MIN_OWN_GAMES = 20
 
 SCOPES = (("lane", LANE_STRENGTH), ("enemy team", TEAM_STRENGTH), ("ally", ALLY_STRENGTH))
+
+# Where the damage report cuts teams by the share of their main damage type.
+# The draft calls a side one-sided at 70%.
+MIX_EDGES = (0.6, 0.7, 0.8)
 
 
 @dataclass(slots=True)
@@ -62,11 +72,29 @@ class ScopeReport:
 
 
 @dataclass(slots=True)
+class MixBucket:
+    # The main type's share of the team's damage, from `low` up to `high`.
+    low: float
+    high: float | None
+    teams: int
+    wins: int
+
+
+@dataclass(slots=True)
+class DamageMixReport:
+    # Teams whose five champions all had a profile, and those left out.
+    teams: int
+    unmeasured: int
+    buckets: list[MixBucket]
+
+
+@dataclass(slots=True)
 class PriorsReport:
     queue_id: int
     newer: str | None
     older: str | None
     scopes: list[ScopeReport]
+    damage: DamageMixReport | None = None
 
 
 def _strength(r: float, noise: float) -> float | None:
@@ -148,6 +176,46 @@ def _repeatability(pairs: list[tuple[float, float, int, int]], min_games: int) -
     )
 
 
+async def _damage_mix(session: AsyncSession, queue_id: int, patches: tuple[str, ...]) -> DamageMixReport:
+    """How teams fared by how one-sided their champions' usual damage was."""
+    profiles = await load_profiles(session, patches)
+    rows = await session.execute(
+        select(
+            MatchParticipant.match_id,
+            MatchParticipant.team_id,
+            MatchParticipant.champion_id,
+            MatchParticipant.team_position,
+            MatchParticipant.win,
+        )
+        .join(Match, Match.match_id == MatchParticipant.match_id)
+        .where(
+            Match.queue_id == queue_id,
+            Match.patch.in_(list(patches)),
+            Match.is_remake.is_(False),
+        )
+    )
+    teams: dict[tuple[str, int], list[tuple[int, str | None, bool]]] = {}
+    for match_id, team_id, champion, position, win in rows.all():
+        teams.setdefault((match_id, team_id), []).append((champion, position or None, bool(win)))
+
+    edges = (0.0, *MIX_EDGES)
+    buckets = [MixBucket(low, high, 0, 0) for low, high in zip(edges, (*MIX_EDGES, None), strict=True)]
+    measured = unmeasured = 0
+    for players in teams.values():
+        if len(players) != 5:
+            continue
+        mix = team_mix(profiles, [(champion, position) for champion, position, _ in players])
+        if mix.missing or mix.shares is None:
+            unmeasured += 1
+            continue
+        measured += 1
+        _, share = mix.shares.dominant
+        bucket = next(b for b in reversed(buckets) if share >= b.low)
+        bucket.teams += 1
+        bucket.wins += int(players[0][2])
+    return DamageMixReport(teams=measured, unmeasured=unmeasured, buckets=buckets)
+
+
 async def measure(session: AsyncSession, queue_id: int = 420) -> PriorsReport:
     held = [s["patch"] for s in await aggregated_slices(session) if s["queue_id"] == queue_id]
     if not held:
@@ -208,4 +276,4 @@ async def measure(session: AsyncSession, queue_id: int = 420) -> PriorsReport:
                 split_slope=split_num / split_den if split_den else None,
             )
         )
-    return PriorsReport(queue_id, newer, older, scopes)
+    return PriorsReport(queue_id, newer, older, scopes, await _damage_mix(session, queue_id, pool))

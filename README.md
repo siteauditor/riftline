@@ -289,7 +289,10 @@ called favoured or unfavoured only when that posterior is 90% on one side.
 The strengths are measured, not chosen, and `python -m scripts.ingest draftpriors`
 measures them again. On 2026-09-24 a lane record's deviation from the champion's own
 rate repeated from 16.17 to 16.18 (r = +0.23 over 112 pairs with five or more games,
-which puts the prior between 10 and 146 games; 100 is used). Records against the other
+which puts the prior between 10 and 146 games; 100 is used). A time split agrees on the
+direction and asks for more: read at 100 games, the 16.17 records predict 16.18's with a
+slope of 1.85, which points to a strength nearer 50. 100 stays, as the careful end, until
+a larger corpus narrows it. Records against the other
 enemies and beside allies did not repeat at all (every interval spanning zero), so they
 are returned and shown with their samples but do not move the list. The old reading
 measured records against the champion's Wilson lower bound and gave a 2-0 lane record
@@ -301,6 +304,17 @@ three times in four. Lane records pool the patch before when it is close
 The Riot ID that weighs mastery costs nothing until it is committed, a 404 is
 remembered for ten minutes, and the lookup has a two-second budget after which the
 stored mastery is used; the response says which of those happened.
+
+**The team damage mix is shown, not scored.** Each champion's damage to champions by
+type is lifted from the stored payloads, so it costs no Riot call, and ten games make a
+profile: two separate ten-game samples of the same champion in the same role differ by
+1.2 points of physical share at the median. A profile is read in the champion's role
+when it has the games there, because a few champions change type with the role (Twisted
+Fate dealt 12% physical damage in mid and 56% in bot). A side is its champions' average
+damage summed, so a support counts less than a carry, and it is called one-sided at 70%
+of one type, which 3.7% of real teams reach. On 2026-09-24 the 89 teams whose champions
+usually dealt 70 to 80% of one type won 39.3% (a range of 29.8% to 49.7%): a hint, too
+thin to score, which `draftpriors` reports again as the corpus grows.
 
 ---
 

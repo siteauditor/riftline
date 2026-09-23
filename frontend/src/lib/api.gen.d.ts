@@ -1381,6 +1381,37 @@ export interface components {
             /** Log Loss */
             log_loss: number;
         };
+        /**
+         * DamageMixOut
+         * @description One side's damage, from each of its champions' usual games.
+         *
+         *     Summed over the champions' average damage, so each counts by how much it
+         *     deals. Shown, not scored.
+         */
+        DamageMixOut: {
+            shares: components["schemas"]["DamageShareOut"] | null;
+            /**
+             * Measured
+             * @default 0
+             */
+            measured: number;
+            /** Missing */
+            missing: components["schemas"]["ChampionRef"][];
+            /** Leaning */
+            leaning: ("physical" | "magic" | "true") | null;
+        };
+        /**
+         * DamageShareOut
+         * @description Fractions of damage to champions by type, summing to 1.
+         */
+        DamageShareOut: {
+            /** Physical */
+            physical: number;
+            /** Magic */
+            magic: number;
+            /** True */
+            true: number;
+        };
         /** DeathOut */
         DeathOut: {
             /** Ms */
@@ -1526,6 +1557,7 @@ export interface components {
             ally_roles: components["schemas"]["RoleGuessOut"][];
             role_clash: components["schemas"]["RoleClashOut"] | null;
             lobby_ranks: components["schemas"]["LobbyRanksOut"] | null;
+            team_damage: components["schemas"]["TeamDamageOut"];
             /**
              * Bans Read The Draft
              * @default false
@@ -4198,6 +4230,18 @@ export interface components {
             /** Players */
             players: components["schemas"]["PlayerSuggestion"][];
         };
+        /**
+         * SuggestionDamageOut
+         * @description A pick's own damage in the role, and your team's mix with it added.
+         */
+        SuggestionDamageOut: {
+            own: components["schemas"]["DamageShareOut"];
+            /** Games */
+            games: number;
+            team_after: components["schemas"]["DamageShareOut"] | null;
+            /** Balances */
+            balances: ("physical" | "magic" | "true") | null;
+        };
         /** SuggestionOut */
         SuggestionOut: {
             champion: components["schemas"]["ChampionRef"];
@@ -4251,6 +4295,7 @@ export interface components {
             /** Blind Risks */
             blind_risks: components["schemas"]["EvidenceOut"][];
             laning: components["schemas"]["LaningOut"] | null;
+            damage: components["schemas"]["SuggestionDamageOut"] | null;
             /**
              * Score
              * @default 0
@@ -4285,6 +4330,17 @@ export interface components {
             converted: boolean;
             /** Gain */
             gain: number | null;
+        };
+        /** TeamDamageOut */
+        TeamDamageOut: {
+            /** Available */
+            available: boolean;
+            allies: components["schemas"]["DamageMixOut"] | null;
+            enemies: components["schemas"]["DamageMixOut"] | null;
+            /** Min Games */
+            min_games: number;
+            /** One Sided Share */
+            one_sided_share: number;
         };
         /**
          * TeamObjectives

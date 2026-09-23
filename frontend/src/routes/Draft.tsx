@@ -10,6 +10,7 @@ import PositionIcon from '../components/PositionIcon'
 import { Results, SuggestionSkeleton } from '../components/draft/Results'
 import RiotIdField from '../components/draft/RiotIdField'
 import Slot from '../components/draft/Slot'
+import TeamMix from '../components/draft/TeamMix'
 import { useDraftBoard } from '../components/draft/useDraftBoard'
 import { EmptyState, ErrorView } from '../components/StateViews'
 import { api, POSITIONS, type DraftRequest, type DraftResponse } from '../lib/api'
@@ -182,6 +183,9 @@ export default function Draft() {
                   {pct(read.role_clash.share, 0)} of games. Is your role right?
                 </p>
               )}
+              {/* Only for a side on the board: the last answer can still hold
+                  a side the board has just cleared. */}
+              {board.allies.length > 0 && <TeamMix damage={read?.team_damage} side="allies" />}
             </div>
 
             <div>
@@ -205,6 +209,7 @@ export default function Draft() {
                   onUnknown={(unknown) => update(setLaneUnknown(unknown))}
                 />
               )}
+              {board.enemies.length > 0 && <TeamMix damage={read?.team_damage} side="enemies" />}
             </div>
 
             <Slot

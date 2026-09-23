@@ -252,6 +252,17 @@ test('removing the lane opponent takes them off the board, not only the mark', a
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test('a side leaning one damage type says so, and the picks that even it out say how much', async ({ page }) => {
+  // Darius, Lee Sin and Jinx: a side that deals mostly physical damage.
+  const errors = await open(page, '/draft?role=MIDDLE&allies=122,64,222')
+  const leaning = page.getByText(/Mostly physical: picks that deal mostly magic are marked/)
+  const empty = page.getByText('No matches ingested yet')
+  await expect(leaning.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The draft board needs a corpus of matches.')
+  await expect(page.getByText(/brings magic damage/).first()).toBeVisible()
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
 test('a champion checked by hand is pinned above the list with its place', async ({ page }) => {
   await open(page, '/draft')
   const check = page.getByRole('combobox', { name: 'Check a champion' })

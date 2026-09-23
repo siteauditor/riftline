@@ -17,6 +17,7 @@ from app.api.schemas import ChampionRef, LobbyRanksOut, lobby_ranks_out
 from app.db.models import ChampionMastery, ChampionStat
 from app.riot.errors import RiotApiError
 from app.riot.routing import UnknownPlatform, resolve_platform
+from app.services import damage
 from app.services.aggregate import (
     ALL_BRACKETS,
     aggregated_slices,
@@ -27,9 +28,11 @@ from app.services.aggregate import (
 from app.services.draft import (
     COMFORT_MAX_BONUS,
     CONTEXT_LIFT_CAP,
+    BoardRead,
     DraftAdvisor,
     DraftContext,
     Evidence,
+    RoleGuess,
 )
 from app.services.evidence import ALLY_STRENGTH, LANE_STRENGTH, TEAM_STRENGTH
 from app.services.players import PlayerNotFound, PlayerService
@@ -179,6 +182,55 @@ class EvidenceOut(BaseModel):
     credible_lift: float = 0.0
 
 
+# The service's vocabulary, so the schema and the service cannot drift apart.
+DamageType = damage.DamageType
+
+
+class DamageShareOut(BaseModel):
+    """Fractions of damage to champions by type, summing to 1."""
+
+    physical: float
+    magic: float
+    true: float
+
+
+class DamageMixOut(BaseModel):
+    """One side's damage, from each of its champions' usual games.
+
+    Summed over the champions' average damage, so each counts by how much it
+    deals. Shown, not scored.
+    """
+
+    # Null when none of the side's champions has the games for a profile.
+    shares: DamageShareOut | None = None
+    measured: int = 0
+    # Champions with too few games for a profile, left out of the shares.
+    missing: list[ChampionRef] = Field(default_factory=list)
+    # The type holding `one_sided_share` or more, once two champions are measured.
+    leaning: DamageType | None = None
+
+
+class TeamDamageOut(BaseModel):
+    # False until stored games carry damage by type: the score stage lifts them
+    # from the stored payloads after the deploy that added the columns.
+    available: bool
+    allies: DamageMixOut | None = None
+    enemies: DamageMixOut | None = None
+    # Games a champion needs for a profile, and the share that makes a side one-sided.
+    min_games: int
+    one_sided_share: float
+
+
+class SuggestionDamageOut(BaseModel):
+    """A pick's own damage in the role, and your team's mix with it added."""
+
+    own: DamageShareOut
+    games: int
+    team_after: DamageShareOut | None = None
+    # The type your team leans to, set when this pick deals mostly another.
+    balances: DamageType | None = None
+
+
 class SuggestionOut(BaseModel):
     champion: ChampionRef
     games: int
@@ -206,6 +258,7 @@ class SuggestionOut(BaseModel):
     # that opponent is picked in the role.
     blind_risks: list[EvidenceOut] = Field(default_factory=list)
     laning: LaningOut | None = None
+    damage: SuggestionDamageOut | None = None
     # Kept for one release, for pages loaded before this model.
     score: float = 0.0
     base_win_rate: float = 0.0
@@ -292,6 +345,8 @@ class DraftResponse(BaseModel):
     role_clash: RoleClashOut | None = None
     # Who the games behind the numbers were: the lobbies' measured median rank.
     lobby_ranks: LobbyRanksOut | None = None
+    # Each side's damage by type, and what the board's picks would make of yours.
+    team_damage: TeamDamageOut
     # Who to deny. False when no ally is locked in yet: then these are simply
     # the patch's strongest picks, which the page has to say rather than imply
     # it read the draft.
@@ -373,6 +428,38 @@ async def _cached_lobby_ranks(
     value = lobby_ranks_out(mix) if mix.total else None
     _lobby_ranks[key] = (now, value)
     return value
+
+
+def _damage_members(
+    champions: list[int], board_roles: list[RoleGuess], certain: dict[int, str]
+) -> list[tuple[int, str | None]]:
+    """Each champion with the role its profile is read in, or None for all its roles.
+
+    The role is the board's guess when that is likely enough; a marked lane
+    opponent is in your role whatever the guess says.
+    """
+    guessed = {
+        r.champion_id: r.position if r.probability >= damage.ROLE_SURE else None for r in board_roles
+    }
+    return [(c, certain.get(c, guessed.get(c))) for c in dict.fromkeys(champions)]
+
+
+async def _damage_read(
+    db: AsyncSession,
+    ctx: DraftContext,
+    board: BoardRead,
+    pool: tuple[str, ...],
+    picks: list[int],
+) -> damage.DraftDamage:
+    profiles = await damage.load_profiles(db, pool)
+    certain = {ctx.enemy_laner: ctx.position} if ctx.enemy_laner is not None else {}
+    return damage.read_draft(
+        profiles,
+        ctx.position,
+        allies=_damage_members(ctx.allies, board.ally_roles, {}),
+        enemies=_damage_members(ctx.enemies, board.enemy_roles, certain),
+        picks=picks,
+    )
 
 
 def _plausible_riot_id(name: str, tag: str) -> bool:
@@ -498,7 +585,11 @@ async def suggest(
 
     advisor = DraftAdvisor(db)
     board = await advisor.read_board(ctx)
+    pool = await advisor.pool(ctx)
     suggestions, pinned = await advisor.suggest_and_check(ctx, board=board, include=body.include)
+    damage_read = await _damage_read(
+        db, ctx, board, pool, [s.champion_id for s in (*suggestions, *pinned)]
+    )
     bans = await advisor.ban_candidates(ctx)
     # An empty list is an answer, not an error: the floor is set above what the
     # corpus holds for this role, and the page says so and offers a lower one.
@@ -528,6 +619,32 @@ async def suggest(
             timeline_games=e.timeline_games,
             weight=e.weight,
             credible_lift=e.lift if e.scored else 0.0,
+        )
+
+    def shares(value: damage.Shares | None) -> DamageShareOut | None:
+        if value is None:
+            return None
+        return DamageShareOut(physical=value.physical, magic=value.magic, true=value.true)
+
+    def mix(value: damage.TeamMix | None) -> DamageMixOut | None:
+        if value is None:
+            return None
+        return DamageMixOut(
+            shares=shares(value.shares),
+            measured=len(value.measured),
+            missing=[champion(c) for c in value.missing],
+            leaning=value.leaning,
+        )
+
+    def pick_damage(champion_id: int) -> SuggestionDamageOut | None:
+        read = damage_read.picks.get(champion_id)
+        if read is None:
+            return None
+        return SuggestionDamageOut(
+            own=shares(read.own),
+            games=read.games,
+            team_after=shares(read.team_after),
+            balances=read.balances,
         )
 
     def suggestion(s) -> SuggestionOut:
@@ -561,6 +678,7 @@ async def suggest(
                 if s.laning
                 else None
             ),
+            damage=pick_damage(s.champion_id),
             score=s.rank_score,
             base_win_rate=s.base_low,
             adjusted_win_rate=s.expected,
@@ -570,7 +688,7 @@ async def suggest(
 
     return DraftResponse(
         patch=patch,
-        patches=list(await advisor.pool(ctx)),
+        patches=list(pool),
         position=position,
         enemy_laner=champion(body.enemy_laner) if body.enemy_laner else None,
         allies=[champion(c) for c in dict.fromkeys(body.allies)],
@@ -604,6 +722,13 @@ async def suggest(
             else None
         ),
         lobby_ranks=await _cached_lobby_ranks(db, patch, body.queue_id, bracket),
+        team_damage=TeamDamageOut(
+            available=damage_read.available,
+            allies=mix(damage_read.allies),
+            enemies=mix(damage_read.enemies),
+            min_games=damage.MIN_PROFILE_GAMES,
+            one_sided_share=damage.ONE_SIDED_SHARE,
+        ),
         # The ban list never reorders on the board's records (team scope, not
         # scored); the records against your allies ride along for the page.
         bans_read_the_draft=False,

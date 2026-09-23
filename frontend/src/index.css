@@ -106,6 +106,17 @@
   --color-loss-deep: #2e1418;
 
   /*
+   * Damage types, in the game's own convention: orange for physical, blue for
+   * magic, white for true, which players read at a glance from the client. The
+   * blue is pushed toward periwinkle, away from the blue side's #4fa8ff, so the
+   * draft's damage bar under a team never reads as a win rate. All three clear
+   * 7:1 on the ground.
+   */
+  --color-physical: #f39a4a;
+  --color-magic: #8e9cff;
+  --color-true: #e6ebf2;
+
+  /*
    * The ladder. Players read these colours faster than they read the words, so
    * they are load-bearing, not badge decoration. Raised off the originals where
    * contrast failed: iron and bronze both sat near 2.9:1 on their own tinted
