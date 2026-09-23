@@ -60,13 +60,15 @@ export default function LaningPanel({ laning, championName }: Props) {
           <span className="text-ink-faint">opponent</span>
         </div>
 
-        <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-raised">
-          <div
-            className="bg-win"
-            style={{ width: `${score * 100}%` }}
-            aria-label={`${championName} takes ${pct(score)} of the lane`}
-          />
-          <div className="flex-1 bg-loss/60" aria-hidden />
+        {/* One picture with one name: a label on the bar's inner part was
+            read by nothing, since a plain div has no role to carry it. */}
+        <div
+          role="img"
+          aria-label={`${championName} takes ${pct(score)} of the lane's gold, experience and CS at 14 minutes`}
+          className="mt-2 flex h-2 overflow-hidden rounded-full bg-raised"
+        >
+          <div className="bg-win" style={{ width: `${score * 100}%` }} />
+          <div className="flex-1 bg-loss/60" />
         </div>
 
         {/* Stacked label over value, matching the average cells above the

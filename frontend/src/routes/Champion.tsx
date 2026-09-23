@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
@@ -38,6 +38,7 @@ import CountUp from '../components/CountUp'
 import Hint from '../components/Hint'
 import LobbyRanks from '../components/LobbyRanks'
 import NotFound from './NotFound'
+import { Button } from '@/components/ui/button'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
 const MIN_GAMES = CHAMPION_MIN_GAMES
@@ -153,6 +154,25 @@ export default function Champion() {
   // played in, which is served the main role with a notice.
   const rolePage = Boolean(pathPosition && d && !d.requested_position && d.positions[0]?.position !== d.position)
 
+  const basis: ReactNode = (
+    <>
+      {d?.lobby_ranks && <LobbyRanks lobby={d.lobby_ranks} />}
+      {o && (
+        <dl className="mt-5 grid grid-cols-3 gap-y-4 border-y border-line-soft py-3 sm:grid-cols-6">
+          <Cell label="KDA" value={o.avg_kda.toFixed(2)} />
+          <Cell
+            label="K / D / A"
+            value={`${o.avg_kills.toFixed(1)} / ${o.avg_deaths.toFixed(1)} / ${o.avg_assists.toFixed(1)}`}
+          />
+          <Cell label="CS per min" value={o.avg_cs_per_min.toFixed(1)} />
+          <Cell label="Gold" value={compact(Math.round(o.avg_gold))} />
+          <Cell label="Damage" value={compact(Math.round(o.avg_damage))} />
+          <Cell label="Vision" value={o.avg_vision.toFixed(0)} />
+        </dl>
+      )}
+    </>
+  )
+
   return (
     <div>
       <Head {...heads.champion(info, d?.patch, d?.position, d?.overview.games, rolePage)} />
@@ -176,7 +196,9 @@ export default function Champion() {
         )}
         <div className="art-scrim absolute inset-0 -z-10" />
 
-        <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-4 pb-6 pt-20 sm:pt-32 lg:flex-row lg:items-end">
+        {/* Less art above the name on a phone, where 80 px of it helped push
+            the tabs past the first screen. */}
+        <div className="mx-auto flex max-w-[1280px] flex-col gap-6 px-4 pb-6 pt-12 sm:pt-32 lg:flex-row lg:items-end">
           <div className="min-w-0">
             {d && (
               <p className="eyebrow">
@@ -232,15 +254,7 @@ export default function Champion() {
         {/* What the numbers say, in sentences, from the numbers themselves:
             for the reader who does not know the game, and for anything that
             reads the page without clicking a tab. */}
-        {d && (
-          <section aria-label={`${info.name} in brief`} className="max-w-prose space-y-2 text-sm leading-relaxed text-ink-dim">
-            {championSummary(d).map((sentence, i) => (
-              <p key={i} className={i === 0 ? 'text-ink' : undefined}>
-                {sentence}
-              </p>
-            ))}
-          </section>
-        )}
+        {d && <Brief sentences={championSummary(d)} name={info.name} />}
 
         {/* Slice controls. Shown on a patch with no numbers too, because the
             way out of that page is to pick another patch. */}
@@ -277,27 +291,25 @@ export default function Champion() {
           />
         </div>
 
-        {d?.lobby_ranks && <LobbyRanks lobby={d.lobby_ranks} />}
-
-        {/* Averages */}
-        {o && (
-          <dl className="mt-5 grid grid-cols-3 gap-y-4 border-y border-line-soft py-3 sm:grid-cols-6">
-            <Cell label="KDA" value={o.avg_kda.toFixed(2)} />
-            <Cell
-              label="K / D / A"
-              value={`${o.avg_kills.toFixed(1)} / ${o.avg_deaths.toFixed(1)} / ${o.avg_assists.toFixed(1)}`}
-            />
-            <Cell label="CS per min" value={o.avg_cs_per_min.toFixed(1)} />
-            <Cell label="Gold" value={compact(Math.round(o.avg_gold))} />
-            <Cell label="Damage" value={compact(Math.round(o.avg_damage))} />
-            <Cell label="Vision" value={o.avg_vision.toFixed(0)} />
-          </dl>
-        )}
+        {/* Who the games were and the typical game: above the tabs from sm,
+            under them on a phone, where the tabs sat 1,081 px down an 839 px
+            screen with these above them (Pixel 7, 2026-09-24). Drawn in both
+            places rather than moved with CSS order, so the reading and focus
+            order is the order on screen at every width. */}
+        <div className="hidden sm:block">{basis}</div>
 
         <ChampionTabs active={tab} onChange={selectTab} />
 
+        <div className="sm:hidden">{basis}</div>
+
         {/* Keyed on the tab, so each section fades in as it replaces the last. */}
-        <div key={tab} id="champion-tabpanel" role="tabpanel" className="mt-5 animate-in fade-in-0 duration-200">
+        <div
+          key={tab}
+          id="champion-tabpanel"
+          role="tabpanel"
+          aria-labelledby={`champion-tab-${tab}`}
+          className="mt-5 animate-in fade-in-0 duration-200"
+        >
           {NUMBER_TABS.has(tab) && !d ? (
             query.isLoading ? (
               <TableSkeleton rows={6} />
@@ -529,6 +541,39 @@ function Cell({ label, value }: { label: string; value: string }) {
       <dt className="text-[11px] text-ink-faint">{label}</dt>
       <dd className="tnum display mt-0.5 text-lg font-600 text-ink">{value}</dd>
     </div>
+  )
+}
+
+/**
+ * The page's numbers in sentences. A phone shows the first until asked for the
+ * rest: the whole of it stood 244 px tall between the name and the tabs.
+ */
+function Brief({ sentences, name }: { sentences: string[]; name: string }) {
+  const [open, setOpen] = useState(false)
+  const [lead, ...rest] = sentences
+  return (
+    <section aria-label={`${name} in brief`} className="max-w-prose space-y-2 text-sm leading-relaxed text-ink-dim">
+      <p className="text-ink">{lead}</p>
+      {rest.length > 0 && (
+        <>
+          <div id="champion-brief-rest" className={`space-y-2 ${open ? '' : 'hidden sm:block'}`}>
+            {rest.map((sentence, i) => (
+              <p key={i}>{sentence}</p>
+            ))}
+          </div>
+          <Button
+            variant="link"
+            size="xs"
+            aria-expanded={open}
+            aria-controls="champion-brief-rest"
+            onClick={() => setOpen(!open)}
+            className="h-auto px-0 text-ink-dim sm:hidden"
+          >
+            {open ? 'Show less' : 'Read the rest'}
+          </Button>
+        </>
+      )}
+    </section>
   )
 }
 

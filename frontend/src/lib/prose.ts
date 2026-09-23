@@ -30,12 +30,12 @@ export function championSummary(d: ChampionDetail): string[] {
       ? ` ${name} is played ${role} in ${pct(main.share)} of games, ${others.join(' and ')}.`
       : ''
 
+  // The first sentence stands alone: a phone shows only it until asked.
   out.push(
     `On patch ${d.patch}, ${name} won ${pct(o.win_rate, 1)} of ${n(o.games)} ${queue} games as ${role} ` +
-      `in the games Riftline holds, a rate the sample supports down to ${pct(o.confidence_win_rate, 1)}. ` +
-      `${name} was picked in ${pct(o.pick_rate, 1)} of games and banned in ${pct(o.ban_rate, 1)}.` +
-      roles,
+      `in the games Riftline holds, a rate the sample supports down to ${pct(o.confidence_win_rate, 1)}.`,
   )
+  out.push(`${name} was picked in ${pct(o.pick_rate, 1)} of games and banned in ${pct(o.ban_rate, 1)}.${roles}`)
 
   if (o.tier) {
     out.push(

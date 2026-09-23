@@ -1,4 +1,5 @@
 import type { ChampionBaseStat, ChampionProfile } from '../../lib/api'
+import Hint from '../Hint'
 
 /**
  * Who the champion is: the story, Riot's own ratings, the base stats, and the
@@ -81,15 +82,17 @@ export default function StoryPanel({ profile }: { profile: ChampionProfile }) {
                     <td className="tnum py-1.5 text-right text-ink">
                       {s.level18 === null ? (
                         s.growth_published === false ? (
-                          <span
-                            className="text-ink-faint"
-                            title="Riot's data files list this growth as zero for every champion this patch, which cannot be right, so the level 18 figure is left out rather than printed equal to level 1."
-                          >
-                            not published
-                          </span>
+                          <Hint text="Riot's data files list this growth as zero for every champion this patch, which cannot be right, so the level 18 figure is left out rather than printed equal to level 1.">
+                            <span
+                              tabIndex={0}
+                              className="cursor-help text-ink-faint underline decoration-line decoration-dotted underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                            >
+                              not published
+                            </span>
+                          </Hint>
                         ) : (
-                          <span className="text-ink-faint" title="Does not grow with level">
-                            same
+                          <span className="text-ink-faint">
+                            same<span className="sr-only">: does not grow with level</span>
                           </span>
                         )
                       ) : (

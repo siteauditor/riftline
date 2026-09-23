@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { Chip, ChipGroup, ChipLink } from '@/components/ui/chips'
@@ -7,7 +7,7 @@ import PositionIcon from './PositionIcon'
 import SelectField from './SelectField'
 import { api, POSITIONS } from '../lib/api'
 import { compact } from '../lib/format'
-import { useDebounced } from '../lib/useDebounced'
+import { minGamesOptions } from '../lib/minGames'
 
 export interface SliceValue {
   patch: string | null
@@ -140,76 +140,23 @@ export default function SliceFilters({
         />
       )}
 
+      {/* The draft's presets rather than a number box. The box held what was
+          typed and set the floor once typing paused, which was a request per
+          pause and a floor nobody else offers (a link with min_games=7 still
+          works: its own number joins the list). */}
       {!hideMinGames && (
-        <MinGames value={value.minGames} onChange={(minGames) => onChange({ minGames })} />
+        <SelectField
+          label="Min games"
+          value={String(value.minGames)}
+          onValueChange={(v) => onChange({ minGames: Number(v) })}
+          options={minGamesOptions(value.minGames)}
+        />
       )}
 
       {summary && <span className="ml-auto text-xs text-ink-faint">{summary}</span>}
     </div>
   )
 }
-
-/**
- * The sample floor, typed.
- *
- * It was bound straight to the slice and clamped on every keystroke, so
- * clearing the box snapped it to 1 and typing 50 then read 150 (reproduced on
- * the live tier list), and each digit was a request. The box now holds what is
- * typed, empty included, and the floor changes on Enter, on leaving the box, or
- * once typing pauses.
- */
-function MinGames({ value, onChange }: { value: number; onChange: (value: number) => void }) {
-  const [draft, setDraft] = useState(String(value))
-  const settled = useDebounced(draft, 500)
-  // Read by the settle below, which must run when the draft settles and not
-  // again when the floor it just set comes back as a new `value`.
-  const current = useRef({ value, onChange })
-
-  useEffect(() => {
-    current.current = { value, onChange }
-  })
-
-  // Follow a change from outside: the back button, or a link with its own floor.
-  const [followed, setFollowed] = useState(value)
-  if (followed !== value) {
-    setFollowed(value)
-    setDraft(String(value))
-  }
-
-  const commit = (text: string, restore: boolean) => {
-    const n = Math.floor(Number(text))
-    if (text.trim() !== '' && Number.isFinite(n) && n >= 1) {
-      if (n !== current.current.value) current.current.onChange(n)
-    } else if (restore) {
-      setDraft(String(current.current.value))
-    }
-  }
-
-  useEffect(() => {
-    const n = Math.floor(Number(settled))
-    const { value: floor, onChange: set } = current.current
-    if (settled.trim() !== '' && Number.isFinite(n) && n >= 1 && n !== floor) set(n)
-  }, [settled])
-
-  return (
-    <label className="flex items-center gap-2 text-ink-dim">
-      <span className="text-xs text-ink-faint">Min games</span>
-      <input
-        type="number"
-        inputMode="numeric"
-        min={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => commit(draft, true)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit(draft, true)
-        }}
-        className="control tnum w-16"
-      />
-    </label>
-  )
-}
-
 
 /** Shared right-hand summary so both pages phrase the sample the same way. */
 export function SliceSummary({

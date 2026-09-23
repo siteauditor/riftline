@@ -14,10 +14,12 @@ interface Props {
 }
 
 /**
- * The build path, items, boots and summoner spells.
+ * The build path, the items most often finished, the finished builds, boots
+ * and summoner spells.
  *
- * When a slice's games have timelines, the path is the first three items in
- * the order they were bought. Without them Riot's match data holds only the
+ * With timelines, the path is the first three completed items in the order
+ * they were bought, and each item is set against the others the champion
+ * bought in the same slot. Without them Riot's match data holds only the
  * final inventory, with items wherever they were left, so the panel says the
  * lists are what games ended with rather than inventing an order.
  */

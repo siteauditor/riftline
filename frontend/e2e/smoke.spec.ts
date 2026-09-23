@@ -371,6 +371,30 @@ test('the tier list is one list, with its header art already in the served page'
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test.describe('on a phone', () => {
+  // A Pixel 7's screen. The tabs sat 1,081 px down it and the header showed
+  // 249 px of its 502 px of links (2026-09-24).
+  test.use({ viewport: { width: 412, height: 839 } })
+
+  test('a champion page shows its tabs on the first screen', async ({ page }) => {
+    const errors = await open(page, '/champions/ahri')
+    const box = await page.getByRole('tablist', { name: 'Champion sections' }).boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.y + box!.height).toBeLessThanOrEqual(839)
+    expect(hydrationErrors(errors)).toEqual([])
+  })
+
+  test("the header's pages are one menu, named after the page on screen", async ({ page }) => {
+    const errors = await open(page, '/tierlist')
+    const header = page.getByRole('banner')
+    await header.getByRole('button', { name: /now on Tier list/ }).click()
+    await page.getByRole('menuitem', { name: 'Champions' }).click()
+    await expect(page).toHaveURL(/\/champions$/)
+    await expect(header.getByRole('button', { name: /now on Champions/ })).toBeVisible()
+    expect(hydrationErrors(errors)).toEqual([])
+  })
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

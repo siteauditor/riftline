@@ -135,7 +135,7 @@ function AbilityRow({
 
   return (
     <li className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-4 gap-y-2 border-b border-line-soft py-4 sm:grid-cols-[3rem_minmax(0,1fr)_12rem]">
-      <AbilityIcon ability={ability} size={48} />
+      <AbilityIcon ability={ability} size={48} decorative />
       <div className="min-w-0">
         <h3 className="display text-lg font-700 leading-tight text-ink">{ability.name}</h3>
         {meta.length > 0 && (
@@ -166,17 +166,36 @@ function AbilityRow({
   )
 }
 
-/** The icon with its key in the corner, or the bare key when there is no icon. */
-function AbilityIcon({ ability, size }: { ability: ChampionAbility | undefined; size: number }) {
+/**
+ * The icon with its key in the corner, or the bare key when there is no icon.
+ * Named in its alt text ("Q: Orb of Deception") where it stands alone, as in
+ * a skill order; `decorative` beside the ability's own heading, which already
+ * says it. It was a hover title, which neither a keyboard nor a phone reaches.
+ */
+function AbilityIcon({
+  ability,
+  size,
+  decorative = false,
+}: {
+  ability: ChampionAbility | undefined
+  size: number
+  decorative?: boolean
+}) {
   const key = ability?.slot ?? '?'
+  const label = ability ? `${key === 'P' ? 'Passive' : key}: ${ability.name}` : ''
   return (
     <span
       className="relative grid shrink-0 place-items-center bg-raised ring-1 ring-line"
       style={{ width: size, height: size }}
-      title={ability ? `${key}: ${ability.name}` : undefined}
     >
       {ability?.icon_url ? (
-        <img src={ability.icon_url} alt="" loading="lazy" className="size-full object-cover" />
+        <img
+          src={ability.icon_url}
+          alt={decorative ? '' : label}
+          loading="lazy"
+          decoding="async"
+          className="size-full object-cover"
+        />
       ) : (
         <span className="font-display text-xs font-700 text-ink">{key}</span>
       )}
@@ -209,10 +228,8 @@ function SkillRow({
               {found ? (
                 <AbilityIcon ability={found} size={arrows ? 32 : 24} />
               ) : (
-                <span
-                  className="grid size-6 place-items-center bg-raised font-display text-xs font-700 text-ink"
-                  title={`Ability ${SLOT_KEY[slot - 1] ?? slot}`}
-                >
+                <span className="grid size-6 place-items-center bg-raised font-display text-xs font-700 text-ink">
+                  <span className="sr-only">Ability </span>
                   {SLOT_KEY[slot - 1] ?? slot}
                 </span>
               )}

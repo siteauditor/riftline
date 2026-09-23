@@ -52,7 +52,7 @@ export default function PlayersPanel({ board, championName }: { board: ChampionP
             <tr className="border-b border-line text-xs text-ink-faint">
               <th className="w-8 py-1.5 text-left font-500">#</th>
               <th className="py-1.5 text-left font-500">Player</th>
-              <th className="py-1.5 text-right font-500" title="Ordered by this">
+              <th className="py-1.5 text-right font-500" aria-sort="descending">
                 Score
               </th>
               <th className="py-1.5 text-right font-500">Record</th>

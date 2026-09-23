@@ -1,17 +1,28 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { SearchIcon } from 'lucide-react'
+import { ChevronDownIcon, SearchIcon } from 'lucide-react'
 import { Toaster } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
 import SearchBar from './components/SearchBar'
 import { api } from './lib/api'
 
 export const PRODUCT_NAME = 'Riftline'
+
+/** The header's pages, in the row on a wide screen and in the menu on a narrow one. */
+const NAV = [
+  { to: '/tierlist', label: 'Tier list' },
+  { to: '/champions', label: 'Champions' },
+  { to: '/draft', label: 'Draft' },
+  { to: '/items', label: 'Items' },
+  { to: '/leaderboards', label: 'Leaderboards' },
+  { to: '/groups', label: 'Groups' },
+]
 
 /**
  * App shell.
@@ -56,10 +67,11 @@ export default function App() {
     <TooltipProvider>
     <div className="flex min-h-screen flex-col">
       <header className="site-header glass sticky top-0 z-40 border-b border-white/[0.06]">
-        {/* `min-w-0` and a scrollable nav: nothing in this row could shrink,
-            so adding a third link pushed the whole document into horizontal
-            scroll below about 390px, and the sticky background stopped at the
-            viewport edge leaving an unpainted strip. */}
+        {/* Below lg the pages are one menu (SiteMenu): the row does not fit
+            beside the search. `min-w-0` and the nav's own scroll stay as a
+            guard, because a row that could not shrink once pushed the whole
+            document into horizontal scroll and left the sticky background
+            short of the viewport edge. */}
         <div className="mx-auto flex h-14 max-w-[1280px] items-center gap-3 px-4 sm:gap-6">
           <Link
             to="/"
@@ -70,15 +82,12 @@ export default function App() {
             <span className="text-accent">.</span>
           </Link>
 
-          <nav className="-mx-1 -my-1 flex min-w-0 flex-shrink items-center gap-1 overflow-x-auto px-1 py-1 text-sm">
-            {[
-              { to: '/tierlist', label: 'Tier list' },
-              { to: '/champions', label: 'Champions' },
-              { to: '/draft', label: 'Draft' },
-              { to: '/items', label: 'Items' },
-              { to: '/leaderboards', label: 'Leaderboards' },
-              { to: '/groups', label: 'Groups' },
-            ].map((item) => (
+          <SiteMenu pathname={location.pathname} />
+          <nav
+            aria-label="Pages"
+            className="-mx-1 -my-1 hidden min-w-0 flex-shrink items-center gap-1 overflow-x-auto px-1 py-1 text-sm lg:flex"
+          >
+            {NAV.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -114,8 +123,10 @@ export default function App() {
           )}
 
           <div className="ml-auto flex items-center gap-4 text-xs text-ink-faint">
+            {/* Not from lg to xl: there the page row and the search need its
+                room, and at 1024 px the row showed 443 px of its 502. */}
             {health?.static_data_version && (
-              <span className="eyebrow hidden sm:inline">
+              <span className="eyebrow hidden sm:inline lg:hidden xl:inline">
                 Patch {health.static_data_version}
               </span>
             )}
@@ -182,5 +193,52 @@ export default function App() {
       </footer>
     </div>
     </TooltipProvider>
+  )
+}
+
+/**
+ * The header's pages below the width that holds them all, as one menu named
+ * after the page on screen. The row used to scroll sideways under the logo:
+ * a 412 px phone showed 249 px of its 502, and Leaderboards and Groups sat
+ * past an edge nothing marked (2026-09-24).
+ */
+function SiteMenu({ pathname }: { pathname: string }) {
+  const current = NAV.find((item) => pathname === item.to || pathname.startsWith(`${item.to}/`))
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={`flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-3 font-display text-[13px] font-600 uppercase tracking-[0.12em] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60 lg:hidden ${
+          current ? 'bg-accent/12 text-accent-bright' : 'text-ink-dim hover:bg-white/[0.05] hover:text-ink'
+        }`}
+      >
+        <span className="truncate">
+          {current ? (
+            <>
+              <span className="sr-only">Menu, now on </span>
+              {current.label}
+            </>
+          ) : (
+            'Menu'
+          )}
+        </span>
+        <ChevronDownIcon aria-hidden className="size-4 shrink-0" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        {NAV.map((item) => (
+          <DropdownMenuItem key={item.to} asChild>
+            {/* A string class, not NavLink's function: the menu item merges
+                its own class into the link's. NavLink marks the current page
+                with aria-current, which is what colours it. */}
+            <NavLink
+              to={item.to}
+              viewTransition
+              className="font-display text-[13px] font-600 uppercase tracking-[0.12em] text-ink-dim aria-[current=page]:text-accent-bright"
+            >
+              {item.label}
+            </NavLink>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

@@ -19,12 +19,15 @@ export default function ChampionTabs({
     <Tabs value={active} onValueChange={(tab) => onChange(tab as ChampionTab)} className="mt-6">
       <TabsList aria-label="Champion sections" className="gap-x-8 gap-y-2">
         {TAB_GROUPS.map((group) => (
-          // One group never splits across two lines: the phone gets a row per
-          // group, each still reading as one set.
+          // Its label inline before its tabs. On a phone the label had a row
+          // of its own, which left the tab list 173 px tall and past the
+          // first screen of an 839 px phone.
           <div key={group.label} className="flex flex-wrap items-end gap-x-1">
-            <span className="eyebrow mb-2.5 mr-2 w-full sm:w-auto">{group.label}</span>
+            <span className="eyebrow mb-2.5 mr-2">{group.label}</span>
             {group.tabs.map((tab) => (
-              <TabsTrigger key={tab} value={tab} aria-controls="champion-tabpanel">
+              // A fixed id, so the panel (the page's own, not Radix's) can
+              // be labelled by the tab that opened it.
+              <TabsTrigger key={tab} value={tab} id={`champion-tab-${tab}`} aria-controls="champion-tabpanel">
                 {TAB_LABEL[tab]}
               </TabsTrigger>
             ))}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import type { ChampionProfile, ChampionSkin } from '../../lib/api'
 import { pct } from '../../lib/format'
@@ -32,11 +32,9 @@ export default function SkinsPanel({
 
   // Only lines with more than one skin become a filter. Most lines hold one
   // skin per champion, and a row of one-item filters is a list, not a choice.
-  const lines = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const s of skins) if (s.line) counts.set(s.line, (counts.get(s.line) ?? 0) + 1)
-    return [...counts].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1])
-  }, [skins])
+  const counts = new Map<string, number>()
+  for (const s of skins) if (s.line) counts.set(s.line, (counts.get(s.line) ?? 0) + 1)
+  const lines = [...counts].filter(([, n]) => n > 1).sort((a, b) => b[1] - a[1])
 
   if (skins.length === 0) {
     return (
@@ -113,11 +111,11 @@ export default function SkinsPanel({
                   </span>
                 )}
               </span>
-              <span
-                className="mt-1.5 block truncate text-sm font-600 text-ink group-hover:text-gold-bright"
-                title={skin.name}
-              >
-                {skin.num === 0 ? 'Original' : shortName(skin.name, name)}
+              {/* The short name on screen and the whole one to a screen
+                  reader; it was a hover title, which a phone never shows. */}
+              <span className="mt-1.5 block truncate text-sm font-600 text-ink group-hover:text-gold-bright">
+                <span aria-hidden>{skin.num === 0 ? 'Original' : shortName(skin.name, name)}</span>
+                <span className="sr-only">{skin.num === 0 ? `Original ${name}` : skin.name}</span>
               </span>
               <span className="block truncate text-xs text-ink-faint">
                 {[skin.rarity, skin.legacy ? 'Legacy' : null].filter(Boolean).join(', ') ||
