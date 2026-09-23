@@ -74,7 +74,7 @@ export default function PairTable({
     return (
       <EmptyState
         title={`No ${title.toLowerCase()} yet`}
-        body="No pairing in this slice clears the minimum sample. Lower 'min games', or ingest more matches."
+        body="No pairing in this slice has enough games yet. Lower 'Min games' above to see thinner records."
       />
     )
   }
@@ -161,8 +161,9 @@ export default function PairTable({
                   {showGold && (
                     <td className="tnum py-2 pl-3 text-right">
                       {row.avg_gold_diff_14 === null ? (
-                        <span className="text-line" title="No timeline for this matchup yet">
-                          &ndash;
+                        <span className="text-ink-faint">
+                          <span aria-hidden>&ndash;</span>
+                          <span className="sr-only">fewer than five games with a timeline</span>
                         </span>
                       ) : (
                         <span

@@ -9,10 +9,11 @@ import SelectField from '../components/SelectField'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
-import { type ChampionMetaRow } from '../lib/api'
+import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
 import { queries, TIERLIST_MIN_GAMES } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { compact, pct, positionLabel } from '../lib/format'
+import { lowerFloor } from '../lib/minGames'
 import {
   foldName,
   SLICE_DEFAULTS,
@@ -21,11 +22,13 @@ import {
   sliceParams,
   useHydratedSearchParams,
   useSearchText,
+  useSliceCorrections,
   withParams,
 } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import Hint from '../components/Hint'
 import LobbyRanks from '../components/LobbyRanks'
+import { Button } from '@/components/ui/button'
 
 /**
  * Tier badges: a ramp of treatments, not just of hues.
@@ -45,11 +48,31 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
   D: { bg: 'transparent', fg: 'var(--color-ink-faint)' },
 }
 
-// Below this many games with a timeline, an average gold lead is one or two
-// stomps, so the cell shows a dash rather than a number.
-const GOLD_FLOOR = 10
-
 const MIN_GAMES = TIERLIST_MIN_GAMES
+
+/**
+ * What a letter is, said once for the whole list rather than on every badge.
+ * On 16.18 the games separated 8 of 247 picks as better than even and 8 as
+ * worse, while the letters give 28 an S: a letter is a place in the ranking,
+ * and the list says so.
+ */
+function tierLegend(floor: number): string {
+  return (
+    `A place within the role on this patch, among champions with ${floor} or more games there: ` +
+    'S is the top tenth, then A, B, C and D. The ranking is by the low end of each win rate ' +
+    'range, so a letter is a place in that order, not a measured gap, and a few games can move it.'
+  )
+}
+
+/** How many of the listed picks the games tell apart from an even win rate. */
+function separationLine(data: MetaResponse, shown: number): string {
+  const { separated_above: above, separated_below: below } = data
+  const lead =
+    above + below === 0
+      ? `On patch ${data.patch} the games do not yet show any of these ${shown} picks to be better or worse than even.`
+      : `On patch ${data.patch} the games show ${above} of these ${shown} picks to be better than even and ${below} to be worse: their whole range sits above or below 50%.`
+  return `${lead} The letters rank the rest by the low end of their range, so a few games can move them.`
+}
 
 type SortKey =
   | 'confidence_win_rate'
@@ -76,14 +99,10 @@ const DEFAULT_SORT: SortKey = 'confidence_win_rate'
 const parseSort = (value: string | null): SortKey =>
   SORTS.find((s) => s.key === value)?.key ?? DEFAULT_SORT
 
-function goldAt14(row: ChampionMetaRow): number | null {
-  return row.timeline_games >= GOLD_FLOOR ? row.avg_gold_diff_14 : null
-}
-
 // Champions without the figure sort last whichever way round: a missing gold
-// lead is not a small one.
+// lead is not a small one. The API leaves it out under its timeline floor.
 function sortValue(row: ChampionMetaRow, key: SortKey): number | null {
-  return key === 'gold' ? goldAt14(row) : row[key]
+  return key === 'gold' ? row.avg_gold_diff_14 : row[key]
 }
 
 export default function Tierlist() {
@@ -91,6 +110,7 @@ export default function Tierlist() {
   // was lost on the way back from a champion: pick Jungle, open Skarner, press
   // back, and the list was on All roles again (reproduced on the live site).
   const [params, setParams] = useHydratedSearchParams()
+  useSliceCorrections(MIN_GAMES)
   // No bracket: the list hides "Crawled from" and describes its lobbies instead.
   const slice: SliceValue = { ...sliceFromParams(params, MIN_GAMES), bracket: null }
   const sort = parseSort(params.get('sort'))
@@ -164,8 +184,8 @@ export default function Tierlist() {
       {empty ? (
         <div className="mt-6">
           <EmptyState
-            title="No matches ingested yet"
-            body="Tier lists are built from a corpus of matches. Run the crawler to collect some: python -m scripts.ingest crawl --target 500, then python -m scripts.ingest aggregate."
+            title="No ranked games yet"
+            body="The tier list is built from the ranked games Riftline collects, and it holds none yet."
           />
         </div>
       ) : (
@@ -202,12 +222,23 @@ export default function Tierlist() {
             </div>
           )}
 
+          {meta.data?.empty_reason === 'min_games' && (
+            <div className="mt-5">
+              <TooFewGames data={meta.data} onMinGames={(minGames) => updateSlice({ minGames })} />
+            </div>
+          )}
+
           {rows.length > 0 && rows.every((r) => r.tier === null) && (
             <p className="mt-4 border-l-2 border-gold/50 py-1 pl-3 text-sm text-ink-dim">
-              Every role has too few champions with enough games in this slice to rank
-              them against each other, so the tier column is blank. The numbers below are
-              still real. Lower &ldquo;min games&rdquo; to widen the list, or ingest more
-              matches.
+              No role in this slice has enough champions with {meta.data?.tier_min_games} or
+              more games to rank them against each other, so the tier column is blank. The
+              numbers below are still real.
+            </p>
+          )}
+
+          {meta.data && rows.length > 0 && (
+            <p className="mt-3 max-w-prose text-xs leading-relaxed text-ink-faint">
+              {separationLine(meta.data, rows.length)}
             </p>
           )}
 
@@ -253,8 +284,14 @@ export default function Tierlist() {
                     onSort={setSort}
                     showRole={!position}
                     linkFor={linkFor}
+                    tierFloor={meta.data?.tier_min_games ?? MIN_GAMES}
                   />
-                  <Cards rows={shown} showRole={!position} linkFor={linkFor} />
+                  <Cards
+                    rows={shown}
+                    showRole={!position}
+                    linkFor={linkFor}
+                    tierFloor={meta.data?.tier_min_games ?? MIN_GAMES}
+                  />
                 </>
               )}
             </>
@@ -266,14 +303,22 @@ export default function Tierlist() {
   )
 }
 
-function TierBadge({ tier }: { tier: string | null }) {
+/**
+ * The letter, or why there is none. What a letter means is said once, on the
+ * column header and in the line above the list, rather than in a hover title
+ * on every badge that touch screens and keyboards never see.
+ */
+function TierBadge({ row, floor }: { row: ChampionMetaRow; floor: number }) {
+  const tier = row.tier
   if (!tier) {
     return (
-      <span
-        className="text-ink-faint"
-        title="Too few champions in this role to rank them against each other"
-      >
-        –
+      <span className="text-ink-faint">
+        <span aria-hidden>–</span>
+        <span className="sr-only">
+          {row.games < floor
+            ? `No letter: under ${floor} games`
+            : 'No letter: too few champions in this role to rank'}
+        </span>
       </span>
     )
   }
@@ -286,33 +331,53 @@ function TierBadge({ tier }: { tier: string | null }) {
         color: style.fg,
         boxShadow: style.ring ? `inset 0 0 0 1px ${style.ring}` : undefined,
       }}
-      title={`Tier ${tier} within its role on this patch`}
     >
+      <span className="sr-only">Tier </span>
       {tier}
     </span>
   )
 }
 
 function Gold({ row }: { row: ChampionMetaRow }) {
-  const gold = goldAt14(row)
+  const gold = row.avg_gold_diff_14
   if (gold === null) {
     return (
-      <span
-        className="text-ink-faint"
-        title={`${row.timeline_games} games with a timeline, too few to average`}
-      >
-        –
+      <span className="text-ink-faint">
+        <span aria-hidden>–</span>
+        <span className="sr-only">too few games with a timeline</span>
       </span>
     )
   }
   return (
-    <span
-      className={gold >= 0 ? 'text-win' : 'text-loss'}
-      title={`Average gold lead at 14 minutes over ${row.timeline_games} games with a timeline`}
-    >
+    <span className={gold >= 0 ? 'text-win' : 'text-loss'}>
       {gold >= 0 ? '+' : ''}
       {Math.round(gold).toLocaleString('en-US')}
     </span>
+  )
+}
+
+/**
+ * No champion clears the floor: an answer, with the way out. The API used to
+ * answer 404 here with "Ingest more matches or lower min_games".
+ */
+function TooFewGames({ data, onMinGames }: { data: MetaResponse; onMinGames: (min: number) => void }) {
+  const lower = lowerFloor(data.most_games, data.min_games)
+  return (
+    <EmptyState
+      title={`No champion has ${data.min_games}+ games here`}
+      body={
+        data.most_games > 0
+          ? `On patch ${data.patch} the most games any champion has in this slice is ${data.most_games}.`
+          : `Riftline holds no games in this slice on patch ${data.patch} yet.`
+      }
+      action={
+        lower !== null && (
+          <Button variant="outline" size="sm" onClick={() => onMinGames(lower)}>
+            Lower the minimum to {lower} games
+          </Button>
+        )
+      }
+    />
   )
 }
 
@@ -362,12 +427,14 @@ function Table({
   onSort,
   showRole,
   linkFor,
+  tierFloor,
 }: {
   rows: { row: ChampionMetaRow; place: number }[]
   sort: SortKey
   onSort: (key: SortKey) => void
   showRole: boolean
   linkFor: (row: ChampionMetaRow) => string
+  tierFloor: number
 }) {
   return (
     <div className="mt-3 hidden overflow-x-auto md:block">
@@ -375,7 +442,16 @@ function Table({
         <thead>
           <tr className="border-b border-line text-xs text-ink-faint">
             <th className="w-9 py-2.5 text-left font-500">#</th>
-            <th className="w-12 py-2.5 text-left font-500">Tier</th>
+            <th className="w-12 py-2.5 text-left font-500">
+              <Hint text={tierLegend(tierFloor)}>
+                <span
+                  tabIndex={0}
+                  className="cursor-help rounded-sm underline decoration-line decoration-dotted underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+                >
+                  Tier
+                </span>
+              </Hint>
+            </th>
             <th className="py-2.5 text-left font-500">Champion</th>
             {COLUMNS.map((c) => (
               <th
@@ -407,7 +483,7 @@ function Table({
             >
               <td className="tnum py-2.5 text-xs text-ink-faint">{place}</td>
               <td className="py-2.5">
-                <TierBadge tier={row.tier} />
+                <TierBadge row={row} floor={tierFloor} />
               </td>
               <td className="py-2.5">
                 <Link to={linkFor(row)} viewTransition className="group block">
@@ -452,10 +528,12 @@ function Cards({
   rows,
   showRole,
   linkFor,
+  tierFloor,
 }: {
   rows: { row: ChampionMetaRow; place: number }[]
   showRole: boolean
   linkFor: (row: ChampionMetaRow) => string
+  tierFloor: number
 }) {
   return (
     <ul className="mt-3 md:hidden">
@@ -464,7 +542,7 @@ function Cards({
           <Link to={linkFor(row)} viewTransition className="group block py-3">
             <span className="grid grid-cols-[1.5rem_1.75rem_minmax(0,1fr)_auto] items-center gap-x-2.5">
               <span className="tnum text-xs text-ink-faint">{place}</span>
-              <TierBadge tier={row.tier} />
+              <TierBadge row={row} floor={tierFloor} />
               <ChampionCell row={row} showRole={showRole} />
               <WinRateRange
                 rate={row.win_rate}

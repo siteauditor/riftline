@@ -278,6 +278,26 @@ test('a champion checked by hand is pinned above the list with its place', async
   await expect(page).not.toHaveURL(/check=/)
 })
 
+test('the tier list says how many picks its games tell apart from even', async ({ page }) => {
+  const errors = await open(page, '/tierlist')
+  const line = page.getByText(/the games (show|do not yet show)/)
+  const empty = page.getByText('No ranked games yet')
+  await expect(line.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The tier list needs a corpus of matches.')
+  await expect(page.getByRole('columnheader', { name: 'Tier' })).toBeVisible()
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('a champion link to a role without games shows the main role and says so', async ({ page }) => {
+  const errors = await open(page, '/champions/ahri?position=JUNGLE')
+  const notice = page.getByRole('status').filter({ hasText: 'has no jungle games' })
+  const story = page.getByRole('tab', { name: 'Story', selected: true })
+  await expect(notice.or(story)).toBeVisible()
+  test.skip(await story.isVisible(), 'The champion numbers need a corpus of matches.')
+  await expect(page.getByRole('button', { name: /^Mid/ })).toHaveAttribute('aria-pressed', 'true')
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

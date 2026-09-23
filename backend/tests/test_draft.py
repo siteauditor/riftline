@@ -16,7 +16,7 @@ from app.db.models import ChampionStat, MatchupStat, SynergyStat
 from app.services.aggregate import ALL_BRACKETS
 from app.services.draft import (
     CONTEXT_LIFT_CAP,
-    MIN_TIMELINE_GAMES,
+    MIN_LANE_TIMELINES,
     DraftAdvisor,
     DraftContext,
     recency,
@@ -290,16 +290,16 @@ async def test_a_lane_shows_its_gold_lead_only_once_enough_games_have_timelines(
     patch = "D17.00"
     await seed_stat(577, 200, 100, patch=patch)
     await seed_matchup(577, 987, games=30, wins=18, patch=patch,
-                       timeline_games=MIN_TIMELINE_GAMES - 1, gold_diff=400.0)
+                       timeline_games=MIN_LANE_TIMELINES - 1, gold_diff=400.0)
     await seed_stat(578, 200, 100, patch=patch)
     await seed_matchup(578, 987, games=30, wins=18, patch=patch,
-                       timeline_games=MIN_TIMELINE_GAMES, gold_diff=400.0)
+                       timeline_games=MIN_LANE_TIMELINES, gold_diff=400.0)
 
     picks = {p.champion_id: p for p in await suggest(patch=patch, enemy_laner=987)}
 
     assert picks[577].evidence[0].gold_diff_14 is None
     assert picks[578].evidence[0].gold_diff_14 == 400.0
-    assert picks[578].evidence[0].timeline_games == MIN_TIMELINE_GAMES
+    assert picks[578].evidence[0].timeline_games == MIN_LANE_TIMELINES
 
 
 def _held(monkeypatch, queue, *patches):

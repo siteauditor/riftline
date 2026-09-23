@@ -1,4 +1,4 @@
-import type { Analytics, ChampionDetail, ChampionProfile, ItemDetail, Profile } from './api'
+import type { Analytics, ChampionDetail, ItemDetail, Profile } from './api'
 import { pct, positionLabel, tierLabel } from './format'
 
 /**
@@ -13,10 +13,11 @@ import { pct, positionLabel, tierLabel } from './format'
 
 const n = (value: number) => value.toLocaleString('en-US')
 
-export function championSummary(d: ChampionDetail, profile?: ChampionProfile): string[] {
+export function championSummary(d: ChampionDetail): string[] {
   const o = d.overview
   const name = d.champion.name
   const role = positionLabel(d.position).toLowerCase()
+  const queue = d.queue_id === 440 ? 'ranked flex' : 'ranked solo'
   const out: string[] = []
 
   const main = d.positions.find((p) => p.position === d.position)
@@ -30,7 +31,7 @@ export function championSummary(d: ChampionDetail, profile?: ChampionProfile): s
       : ''
 
   out.push(
-    `On patch ${d.patch}, ${name} won ${pct(o.win_rate, 1)} of ${n(o.games)} ranked solo games as ${role} ` +
+    `On patch ${d.patch}, ${name} won ${pct(o.win_rate, 1)} of ${n(o.games)} ${queue} games as ${role} ` +
       `in the games Riftline holds, a rate the sample supports down to ${pct(o.confidence_win_rate, 1)}. ` +
       `${name} was picked in ${pct(o.pick_rate, 1)} of games and banned in ${pct(o.ban_rate, 1)}.` +
       roles,
@@ -38,8 +39,8 @@ export function championSummary(d: ChampionDetail, profile?: ChampionProfile): s
 
   if (o.tier) {
     out.push(
-      `That places ${name} in tier ${o.tier} among ${role} champions on this patch, ranked by that lower ` +
-        `figure rather than the raw win rate, so a champion with few games does not outrank one with many.`,
+      `That places ${name} in tier ${o.tier} among ${role} champions on this patch: a place in a ranking by ` +
+        `that lower figure rather than the raw win rate, not a measured gap, so a few games can move it.`,
     )
   }
 
@@ -57,7 +58,8 @@ export function championSummary(d: ChampionDetail, profile?: ChampionProfile): s
       `with ${o.avg_cs_per_min.toFixed(1)} CS a minute and ${n(Math.round(o.avg_damage))} damage to champions.`,
   )
 
-  if (profile?.blurb) out.push(profile.blurb)
+  // Not the lore blurb: Riot cuts it off mid-sentence ("Once a powerful yet
+  // wayward..."), and the Story tab has the whole of it.
   return out
 }
 

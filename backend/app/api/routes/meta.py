@@ -7,6 +7,9 @@ an empty list that looks like "no champions are any good".
 
 from __future__ import annotations
 
+import logging
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -17,16 +20,19 @@ from app.db.models import ChampionStat, Match
 from app.services import seo
 from app.services.aggregate import (
     ALL_BRACKETS,
+    MIN_LANING_TIMELINES,
     POSITIONS,
     TIER_MIN_GAMES,
     aggregated_slices,
     available_brackets,
+    cached_lobby_rank_mix,
     default_patch,
-    lobby_rank_mix,
     tier_for,
     wilson_lower_bound,
     wilson_upper_bound,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/meta", tags=["meta"])
 
@@ -55,14 +61,16 @@ class ChampionMetaRow(BaseModel):
     confidence_high: float = 1.0
     pick_rate: float
     ban_rate: float
-    # None when the slice has too few champions for percentile banding to mean
-    # anything. The UI shows that as "too thin to rank", not as a letter.
+    # The row's place in its role, S to D, among the champions with
+    # `tier_min_games` or more in the role. None under that floor, or when the
+    # role has too few such champions for a percentile to mean anything.
     tier: str | None = None
     avg_kda: float
     avg_cs_per_min: float
     avg_damage: float
     avg_vision: float
-    # Over `timeline_games` only, the games whose timeline we hold.
+    # Over `timeline_games` only, the games whose timeline we hold, and null
+    # under `MIN_LANING_TIMELINES` of them.
     avg_gold_diff_14: float | None = None
     timeline_games: int = 0
 
@@ -76,6 +84,20 @@ class MetaResponse(BaseModel):
     min_games: int
     rows: list[ChampionMetaRow] = Field(default_factory=list)
     lobby_ranks: LobbyRanksOut | None = None
+    # The games a champion needs in a role to carry a letter, whatever
+    # `min_games` shows: the field every page's letters are places in.
+    tier_min_games: int = TIER_MIN_GAMES
+    # Rows whose whole range sits above 50%, and below it: what the games
+    # actually separate from an average pick. On 16.18 that was 8 and 8 of 247
+    # rows (measured 2026-09-24), while percentile letters give 28 an S, so the
+    # page states these counts beside the letters.
+    separated_above: int = 0
+    separated_below: int = 0
+    # Why `rows` is empty, when it is: no champion has `min_games` in this
+    # slice. `most_games` is the most any champion has, so the page can offer a
+    # floor that shows something.
+    empty_reason: Literal["min_games"] | None = None
+    most_games: int = 0
 
 
 class CorpusSliceOut(BaseModel):
@@ -99,9 +121,11 @@ class CorpusResponse(BaseModel):
 def assign_tiers(rows: list[ChampionMetaRow]) -> None:
     """Stamp each row with its percentile tier within its own role.
 
-    Rows arrive sorted best first. Banded per role rather than across the whole
-    list: pooled, "All roles" at 20+ games on 16.18 gave about 19 S rows spread
-    unevenly over the roles, when a reader takes S to mean the top of that role.
+    Rows arrive sorted best first, and are the field: the caller passes only the
+    rows with `TIER_MIN_GAMES` or more. Banded per role rather than across the
+    whole list: pooled, "All roles" at 20+ games on 16.18 gave about 19 S rows
+    spread unevenly over the roles, when a reader takes S to mean the top of
+    that role.
 
     See ``tier_for``: below MIN_ROWS_FOR_TIERS in a role a percentile says more
     about the length of the list than about the champions in it.
@@ -154,18 +178,23 @@ async def get_champion_meta(
     if patch is None:
         patch = default_patch(await aggregated_slices(db), queue_id)
         if patch is None:
-            raise HTTPException(
-                404,
-                "No aggregated data yet. Run `python -m scripts.ingest crawl` to "
-                "collect matches, then `python -m scripts.ingest aggregate`.",
+            # The ingest hint is for whoever runs the server, not for a reader.
+            log.warning(
+                "tier list: nothing aggregated for queue %s; run `python -m scripts.ingest "
+                "crawl` then `python -m scripts.ingest aggregate`", queue_id
             )
+            raise HTTPException(404, "Riftline holds no ranked games for this queue yet.")
 
     bracket = (bracket or ALL_BRACKETS).upper()
+    # Every row in the slice, whatever `min_games` says: the letters are places
+    # in the `TIER_MIN_GAMES` field, and a floor chosen for display must not
+    # re-band them. At 5 games instead of 20, 81 of 175 rows changed letter
+    # and disagreed with the champion page one click away (2026-09-24).
     stmt = select(ChampionStat).where(
         ChampionStat.patch == patch,
         ChampionStat.queue_id == queue_id,
         ChampionStat.rank_bracket == bracket,
-        ChampionStat.games >= min_games,
+        ChampionStat.games > 0,
     )
     stmt = stmt.where(
         ChampionStat.team_position == position
@@ -175,12 +204,7 @@ async def get_champion_meta(
     stats = list((await db.execute(stmt)).scalars())
 
     if not stats:
-        raise HTTPException(
-            404,
-            f"No champion has {min_games}+ games on patch {patch} "
-            f"({bracket}, queue {queue_id}). "
-            "Ingest more matches or lower min_games.",
-        )
+        raise HTTPException(404, f"Riftline holds no ranked games on patch {patch} yet.")
 
     sample = max((s.pool_games for s in stats), default=0)
     rows = [
@@ -204,15 +228,18 @@ async def get_champion_meta(
             avg_cs_per_min=s.avg_cs_per_min,
             avg_damage=s.avg_damage,
             avg_vision=s.avg_vision,
-            avg_gold_diff_14=s.avg_gold_diff_14,
+            avg_gold_diff_14=(
+                s.avg_gold_diff_14 if s.timeline_games >= MIN_LANING_TIMELINES else None
+            ),
             timeline_games=s.timeline_games,
         )
         for s in stats
     ]
 
     rows.sort(key=lambda r: r.confidence_win_rate, reverse=True)
-    assign_tiers(rows)
-    mix = await lobby_rank_mix(db, patch, queue_id, bracket)
+    assign_tiers([r for r in rows if r.games >= TIER_MIN_GAMES])
+    shown = [r for r in rows if r.games >= min_games]
+    mix = await cached_lobby_rank_mix(db, patch, queue_id, bracket)
 
     return MetaResponse(
         patch=patch,
@@ -221,8 +248,14 @@ async def get_champion_meta(
         rank_bracket=bracket,
         sample_matches=sample,
         min_games=min_games,
-        rows=rows,
+        rows=shown,
         lobby_ranks=lobby_ranks_out(mix),
+        separated_above=sum(1 for r in shown if r.confidence_win_rate >= 0.5),
+        separated_below=sum(1 for r in shown if r.confidence_high <= 0.5),
+        # An empty list is an answer, not an error: the floor is above what the
+        # slice holds, and the page offers a lower one.
+        empty_reason=None if shown else "min_games",
+        most_games=max((r.games for r in rows), default=0),
     )
 
 

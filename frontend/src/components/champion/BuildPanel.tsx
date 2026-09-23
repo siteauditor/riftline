@@ -32,7 +32,7 @@ export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
     return (
       <EmptyState
         title="No builds recorded yet"
-        body="No build in this slice clears the minimum sample. Lower 'min games', or ingest more matches."
+        body="No build in this slice has enough games yet. Lower 'Min games' above to see thinner records."
       />
     )
   }
@@ -43,8 +43,8 @@ export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
         <p className="border-l-2 border-gold/50 py-1 pl-3 text-sm leading-relaxed text-ink-dim">
           These are the builds players <span className="text-ink">finished</span> games
           with, not the order they bought things in. Riot's match data records the
-          final inventory, and the slots carry no purchase order. Fetch match
-          timelines and a real build order appears here.
+          final inventory, and none of these games has a timeline yet to give the
+          order.
         </p>
       )}
 

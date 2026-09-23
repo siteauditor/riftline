@@ -967,6 +967,13 @@ export interface components {
             sample_matches: number;
             /** Min Games */
             min_games: number;
+            /** Fallback */
+            fallback: ("role" | "patch") | null;
+            /** Requested Position */
+            requested_position: string | null;
+            /** Requested Patch */
+            requested_patch: string | null;
+            lobby_ranks: components["schemas"]["LobbyRanksOut"] | null;
             /** Positions */
             positions: components["schemas"]["PositionShare"][];
             overview: components["schemas"]["ChampionOverview"];
@@ -1053,6 +1060,11 @@ export interface components {
             win_rate: number;
             /** Confidence Win Rate */
             confidence_win_rate: number;
+            /**
+             * Confidence High
+             * @default 1
+             */
+            confidence_high: number;
             /** Pick Rate */
             pick_rate: number;
             /** Ban Rate */
@@ -2318,7 +2330,8 @@ export interface components {
          *
          *     ``games`` is not the champion's game count: it is how many of those games
          *     had a timeline. On a partly backfilled corpus that gap is the difference
-         *     between an average and a claim.
+         *     between an average and a claim. The averages are null under ``min_games``
+         *     of them, as the tier list's gold column and the draft's laning figures are.
          */
         LaningSection: {
             /**
@@ -2326,6 +2339,11 @@ export interface components {
              * @default 0
              */
             games: number;
+            /**
+             * Min Games
+             * @default 10
+             */
+            min_games: number;
             /** Avg Score */
             avg_score: number | null;
             /** Avg Gold Diff */
@@ -3068,6 +3086,28 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["ChampionMetaRow"][];
             lobby_ranks: components["schemas"]["LobbyRanksOut"] | null;
+            /**
+             * Tier Min Games
+             * @default 20
+             */
+            tier_min_games: number;
+            /**
+             * Separated Above
+             * @default 0
+             */
+            separated_above: number;
+            /**
+             * Separated Below
+             * @default 0
+             */
+            separated_below: number;
+            /** Empty Reason */
+            empty_reason: "min_games" | null;
+            /**
+             * Most Games
+             * @default 0
+             */
+            most_games: number;
         };
         /** MethodResponse */
         MethodResponse: {

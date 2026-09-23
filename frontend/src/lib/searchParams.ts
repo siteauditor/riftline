@@ -148,12 +148,59 @@ export const SLICE_DEFAULTS = { queue: '420', bracket: 'ALL' }
 export function sliceFromParams(search: URLSearchParams, minGames: number): SliceValue {
   const queue = Number(firstParam(search, 'queue', 'queue_id'))
   return {
-    patch: search.get('patch'),
-    queueId: Number.isFinite(queue) && queue > 0 ? queue : 420,
-    position: search.get('position'),
+    patch: search.get('patch') || null,
+    queueId: SLICE_QUEUES.includes(queue) ? queue : 420,
+    position: positionParam(search.get('position')),
     bracket: search.get('bracket'),
-    minGames: intParam(search, 'min_games', minGames),
+    minGames: Math.min(MAX_MIN_GAMES, intParam(search, 'min_games', minGames)),
   }
+}
+
+/** The queues the rollups are built for: ranked solo and ranked flex. */
+const SLICE_QUEUES = [420, 440]
+const SLICE_POSITIONS = ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']
+/** The highest sample floor a page accepts, as the API does. */
+export const MAX_MIN_GAMES = 500
+
+/**
+ * A role from the URL in any case, or null for one the API would refuse. A
+ * link with `position=top` or `position=banana` used to reach the API as it
+ * was and come back as an error page.
+ */
+export function positionParam(value: string | null): string | null {
+  const upper = value?.toUpperCase() ?? ''
+  return SLICE_POSITIONS.includes(upper) ? upper : null
+}
+
+/**
+ * The query string a slice page should be at, or null when it already is: the
+ * one it was given with every value the page could not use put right (a role
+ * in the wrong case, a queue or floor out of range, a renamed parameter).
+ * The patch is left alone: only the API knows which patches it holds, and a
+ * page answers an unheld one with a notice.
+ */
+export function sliceCorrections(search: URLSearchParams, minGames: number): URLSearchParams | null {
+  const slice = sliceFromParams(search, minGames)
+  const next = withParams(search, sliceParams({ ...slice, patch: search.get('patch') }), {
+    ...SLICE_DEFAULTS,
+    min_games: String(minGames),
+  })
+  return next.toString() === search.toString() ? null : next
+}
+
+/**
+ * Rewrites a slice page's address once, after hydration, when it holds values
+ * the page corrected, so the address, the controls and the numbers agree. The
+ * draft board does the same with its own URL.
+ */
+export function useSliceCorrections(minGames: number): void {
+  const [search, setSearch] = useHydratedSearchParams()
+  const hydrated = useHydrated()
+  useEffect(() => {
+    if (!hydrated) return
+    const fixed = sliceCorrections(search, minGames)
+    if (fixed) setSearch(fixed, { replace: true })
+  }, [hydrated, search, minGames, setSearch])
 }
 
 /** A slice change as URL parameters, for `withParams`. */

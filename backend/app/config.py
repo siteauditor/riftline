@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     ttl_mastery: int = Field(default=600, alias="TTL_MASTERY")
     ttl_match_ids: int = Field(default=120, alias="TTL_MATCH_IDS")
     ttl_static: int = Field(default=21_600, alias="TTL_STATIC")
+    # The measured lobby ranks behind a slice: the tier list, champion pages and
+    # the draft read them, and they change only when the nightly run measures.
+    ttl_lobby_ranks: int = Field(default=3600, alias="TTL_LOBBY_RANKS")
 
     # --- Features -----------------------------------------------------------
     # Riot announced Spectator-V5's deactivation in Oct 2025 over player

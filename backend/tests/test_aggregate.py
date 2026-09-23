@@ -711,3 +711,35 @@ async def test_a_patch_with_games_but_no_aggregate_is_not_offered_to_a_page():
     assert {"AGG.raw", "AGG.done"} <= raw
     assert "AGG.done" in shown
     assert "AGG.raw" not in shown
+
+
+# ------------------------------------------------------------------------ bans
+
+
+async def test_a_champion_banned_by_both_teams_counts_once():
+    """Counting each team's ban put Talon at a 63.5% ban rate on 16.18 when he
+    was banned in 52.7% of games. The rate is a share of games."""
+    from sqlalchemy import select
+
+    from app.db.models import ChampionStat
+
+    patch = "BAN1.00"
+    await seed(patch, [
+        team([9401, 9402, 9403, 9404, 9405], 100, True) + team([9406, 9407, 9408, 9409, 9410], 200, False),
+        team([9411, 9402, 9403, 9404, 9405], 100, True) + team([9406, 9407, 9408, 9409, 9410], 200, False),
+    ])
+    async with SessionLocal() as session:
+        first = await session.get(Match, f"T{patch}_0")
+        second = await session.get(Match, f"T{patch}_1")
+        first.teams = [{"teamId": 100, "bans": [{"championId": 9412}, {"championId": -1}]},
+                       {"teamId": 200, "bans": [{"championId": 9413}]}]
+        # Both teams ban 9401 in the second game: one game with it banned.
+        second.teams = [{"teamId": 100, "bans": [{"championId": 9401}, {"championId": 9412}]},
+                        {"teamId": 200, "bans": [{"championId": 9401}]}]
+        await session.commit()
+        await rebuild_champion_stats(session, patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS)
+        row = (await session.execute(
+            select(ChampionStat).where(ChampionStat.patch == patch, ChampionStat.champion_id == 9401)
+        )).scalar_one()
+
+    assert (row.bans, row.pool_games) == (1, 2)

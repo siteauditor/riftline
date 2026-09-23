@@ -2782,6 +2782,53 @@
       "type": "integer",
       "title": "Min Games"
      },
+     "fallback": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "role",
+         "patch"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fallback"
+     },
+     "requested_position": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Requested Position"
+     },
+     "requested_patch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Requested Patch"
+     },
+     "lobby_ranks": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LobbyRanksOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
      "positions": {
       "items": {
        "$ref": "#/components/schemas/PositionShare"
@@ -3060,6 +3107,11 @@
      "confidence_win_rate": {
       "type": "number",
       "title": "Confidence Win Rate"
+     },
+     "confidence_high": {
+      "type": "number",
+      "title": "Confidence High",
+      "default": 1.0
      },
      "pick_rate": {
       "type": "number",
@@ -6369,6 +6421,11 @@
       "title": "Games",
       "default": 0
      },
+     "min_games": {
+      "type": "integer",
+      "title": "Min Games",
+      "default": 10
+     },
      "avg_score": {
       "anyOf": [
        {
@@ -6405,7 +6462,7 @@
     },
     "type": "object",
     "title": "LaningSection",
-    "description": "How the laning phase goes, measured at minute 14.\n\n``games`` is not the champion's game count: it is how many of those games\nhad a timeline. On a partly backfilled corpus that gap is the difference\nbetween an average and a claim."
+    "description": "How the laning phase goes, measured at minute 14.\n\n``games`` is not the champion's game count: it is how many of those games\nhad a timeline. On a partly backfilled corpus that gap is the difference\nbetween an average and a claim. The averages are null under ``min_games``\nof them, as the tier list's gold column and the draft's laning figures are."
    },
    "LastStoredGameOut": {
     "properties": {
@@ -8252,6 +8309,38 @@
         "type": "null"
        }
       ]
+     },
+     "tier_min_games": {
+      "type": "integer",
+      "title": "Tier Min Games",
+      "default": 20
+     },
+     "separated_above": {
+      "type": "integer",
+      "title": "Separated Above",
+      "default": 0
+     },
+     "separated_below": {
+      "type": "integer",
+      "title": "Separated Below",
+      "default": 0
+     },
+     "empty_reason": {
+      "anyOf": [
+       {
+        "type": "string",
+        "const": "min_games"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Empty Reason"
+     },
+     "most_games": {
+      "type": "integer",
+      "title": "Most Games",
+      "default": 0
      }
     },
     "type": "object",

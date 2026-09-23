@@ -144,3 +144,89 @@ async def test_the_tier_list_says_how_its_games_were_ranked(client):
     assert (lobby["total"], lobby["measured"]) == (5, 4)
     assert lobby["buckets"][0] == {"tier": APEX_BUCKET, "games": 2}
     assert lobby["as_of"] is not None
+
+
+# ------------------------------------------------- letters, counts, floors
+
+FIELD = "Q9.02"
+
+
+async def seed_field() -> None:
+    """Twelve mid laners with 100 games each, three with ten, one with gold at
+    14 from nine timelines and one from ten."""
+    async with SessionLocal() as session:
+        if (await session.execute(
+            select(ChampionStat.id).where(ChampionStat.patch == FIELD).limit(1)
+        )).first():
+            return
+        rows = [
+            ChampionStat(
+                patch=FIELD, queue_id=420, rank_bracket="ALL", champion_id=9300 + i,
+                team_position="MIDDLE", games=100, wins=62 - 2 * i, pool_games=1000, bans=0,
+                timeline_games=9 if i == 0 else 10 if i == 1 else 0,
+                avg_gold_diff_14=150.0 if i in (0, 1) else None,
+            )
+            for i in range(12)
+        ] + [
+            ChampionStat(
+                patch=FIELD, queue_id=420, rank_bracket="ALL", champion_id=9320 + i,
+                team_position="MIDDLE", games=10, wins=8, pool_games=1000, bans=0,
+            )
+            for i in range(3)
+        ]
+        session.add_all(rows)
+        await session.commit()
+
+
+async def letters(client, min_games: int) -> dict[int, str | None]:
+    body = (await client.get(
+        "/api/meta/champions", params={"patch": FIELD, "min_games": min_games}
+    )).json()
+    return {r["champion"]["id"]: r["tier"] for r in body["rows"]}
+
+
+async def test_letters_are_places_in_the_twenty_game_field_whatever_the_floor(client):
+    """Banded inside whatever the box let in, 81 of 175 rows changed letter at
+    5 games instead of 20, and the champion page, always at 20, disagreed."""
+    await seed_field()
+
+    at_five, at_twenty, at_fifty = [await letters(client, n) for n in (5, 20, 50)]
+
+    assert at_five.keys() > at_twenty.keys()
+    for champion, tier in at_twenty.items():
+        assert at_five[champion] == tier == at_fifty[champion], champion
+    # Under the field a row is listed without a letter.
+    assert [at_five[9320 + i] for i in range(3)] == [None, None, None]
+
+
+async def test_the_list_counts_what_its_games_separate_from_average(client):
+    await seed_field()
+
+    body = (await client.get("/api/meta/champions", params={"patch": FIELD})).json()
+
+    rows = body["rows"]
+    assert body["tier_min_games"] == 20
+    assert body["separated_above"] == sum(1 for r in rows if r["confidence_win_rate"] >= 0.5)
+    assert body["separated_below"] == sum(1 for r in rows if r["confidence_high"] <= 0.5)
+    assert body["separated_above"] >= 1 and body["separated_below"] >= 1
+
+
+async def test_gold_at_fourteen_needs_ten_games_with_a_timeline(client):
+    await seed_field()
+
+    body = (await client.get("/api/meta/champions", params={"patch": FIELD})).json()
+
+    gold = {r["champion"]["id"]: r["avg_gold_diff_14"] for r in body["rows"]}
+    assert (gold[9300], gold[9301]) == (None, 150.0)
+
+
+async def test_a_floor_above_the_slice_is_an_answer_with_a_way_out(client):
+    """It was a 404 whose text told the reader to ingest more matches."""
+    await seed_field()
+
+    response = await client.get("/api/meta/champions", params={"patch": FIELD, "min_games": 500})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["rows"], body["empty_reason"], body["most_games"]) == ([], "min_games", 100)
+

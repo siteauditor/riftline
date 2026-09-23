@@ -14,7 +14,7 @@ export default function RunePanel({ runes }: { runes: ChampionDetail['runes'] })
     return (
       <EmptyState
         title="No rune data yet"
-        body="No rune setup in this slice clears the minimum sample. Lower 'min games', or ingest more matches."
+        body="No rune setup in this slice has enough games yet. Lower 'Min games' above to see thinner records."
       />
     )
   }

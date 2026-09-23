@@ -18,14 +18,23 @@ drops its disclaimer, because the thing it was disclaiming is no longer true.
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import DbDep, StaticDep
-from app.api.schemas import ChampionRef, ItemRef, RuneRef, SpellRef
+from app.api.schemas import (
+    ChampionRef,
+    ItemRef,
+    LobbyRanksOut,
+    RuneRef,
+    SpellRef,
+    lobby_ranks_out,
+)
 from app.db.models import (
     ChampionFacetStat,
     ChampionStat,
@@ -37,9 +46,12 @@ from app.db.models import (
 )
 from app.services.aggregate import (
     ALL_BRACKETS,
+    MIN_LANE_TIMELINES,
+    MIN_LANING_TIMELINES,
     POSITIONS,
     TIER_MIN_GAMES,
     aggregated_slices,
+    cached_lobby_rank_mix,
     default_patch,
     tier_for,
     wilson_lower_bound,
@@ -48,6 +60,8 @@ from app.services.aggregate import (
 )
 from app.services.skins import MIN_CHAMPION_SIGHTINGS, champion_skin_counts
 from app.services.static_data import Ability, StaticDataService
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/champions", tags=["champions"])
 
@@ -114,10 +128,12 @@ class LaningSection(BaseModel):
 
     ``games`` is not the champion's game count: it is how many of those games
     had a timeline. On a partly backfilled corpus that gap is the difference
-    between an average and a claim.
+    between an average and a claim. The averages are null under ``min_games``
+    of them, as the tier list's gold column and the draft's laning figures are.
     """
 
     games: int = 0
+    min_games: int = MIN_LANING_TIMELINES
     avg_score: float | None = None
     avg_gold_diff: float | None = None
     avg_cs_diff: float | None = None
@@ -138,7 +154,8 @@ class PairEntry(BaseModel):
     confidence_high: float = 1.0
     # Only set for synergies: which lane the ally was in.
     position: str | None = None
-    # From timelines, so null until the matchup's games have been backfilled.
+    # From timelines, so null until the matchup's games have been backfilled,
+    # and under `MIN_LANE_TIMELINES` of them.
     # Turns "you lose this" into "you lose this lane by 400 gold".
     avg_laning_score: float | None = None
     avg_gold_diff_14: float | None = None
@@ -173,6 +190,8 @@ class ChampionOverview(BaseModel):
     wins: int
     win_rate: float
     confidence_win_rate: float
+    # The top of the same range: the page shows the range, as the tier list does.
+    confidence_high: float = 1.0
     pick_rate: float
     ban_rate: float
     tier: str | None = None
@@ -196,6 +215,16 @@ class ChampionDetail(BaseModel):
     rank_bracket: str
     sample_matches: int
     min_games: int
+    # Set when the slice asked for had no games and another was served: "role"
+    # when the champion has no games in the asked role (the main role is
+    # served), "patch" when the asked patch is not held or the champion has no
+    # games on it (the default patch is served). The page says so, with what
+    # was asked. A 404 here used to open the page on its story, silently.
+    fallback: Literal["role", "patch"] | None = None
+    requested_position: str | None = None
+    requested_patch: str | None = None
+    # Who the games behind the numbers were: the lobbies' measured median rank.
+    lobby_ranks: LobbyRanksOut | None = None
     positions: list[PositionShare] = Field(default_factory=list)
     overview: ChampionOverview
     builds: BuildSection
@@ -462,6 +491,9 @@ def _pair_entry(
     avg_gold_diff_14: float | None = None,
     timeline_games: int = 0,
 ) -> PairEntry:
+    # Under the floor one stomp is the average: 88 of 504 lane rows showed a
+    # gold figure from one to four games before this (2026-09-24).
+    measured = timeline_games >= MIN_LANE_TIMELINES
     return PairEntry(
         champion=ChampionRef(
             id=champion_id,
@@ -474,8 +506,8 @@ def _pair_entry(
         confidence_win_rate=wilson_lower_bound(wins, games),
         confidence_high=wilson_upper_bound(wins, games),
         position=position,
-        avg_laning_score=avg_laning_score,
-        avg_gold_diff_14=avg_gold_diff_14,
+        avg_laning_score=avg_laning_score if measured else None,
+        avg_gold_diff_14=avg_gold_diff_14 if measured else None,
         timeline_games=timeline_games,
     )
 
@@ -517,14 +549,50 @@ async def get_champion(
     # patch before the one shown is where the change figures come from.
     slices = await aggregated_slices(db)
     held = [s["patch"] for s in slices if s["queue_id"] == queue_id]
+    default = default_patch(slices, queue_id)
+    asked_patch, asked_position = patch, position
+    fallback: Literal["role", "patch"] | None = None
     if patch is None:
-        patch = default_patch(slices, queue_id)
-        if patch is None:
-            raise HTTPException(
-                404,
-                "No aggregated data yet. Run `python -m scripts.ingest crawl` then "
-                "`python -m scripts.ingest aggregate`.",
+        if default is None:
+            # The ingest hint is for whoever runs the server, not for a reader.
+            log.warning(
+                "champion page: nothing aggregated for queue %s; run `python -m scripts.ingest "
+                "crawl` then `python -m scripts.ingest aggregate`", queue_id
             )
+            raise HTTPException(404, "Riftline holds no ranked games for this queue yet.")
+        patch = default
+    elif patch not in held and default is not None:
+        patch, fallback = default, "patch"
+
+    async def roles_on(on_patch: str) -> list[ChampionStat]:
+        # Every role this champion is played in, so the UI can offer a role
+        # switch and default to where they are actually played.
+        return list(
+            (
+                await db.execute(
+                    select(ChampionStat).where(
+                        ChampionStat.patch == on_patch,
+                        ChampionStat.queue_id == queue_id,
+                        ChampionStat.rank_bracket == bracket,
+                        ChampionStat.champion_id == champion_id,
+                        ChampionStat.team_position.in_(POSITIONS),
+                    )
+                )
+            ).scalars()
+        )
+
+    role_rows = await roles_on(patch)
+    if not role_rows and default is not None and patch != default:
+        # Held, but not for this champion: the default patch may have them.
+        role_rows = await roles_on(default)
+        if role_rows:
+            patch, fallback = default, "patch"
+    if not role_rows:
+        raise HTTPException(
+            404,
+            f"Riftline holds no ranked games of {sd.champion_name(champion_id)} "
+            f"on patch {asked_patch or patch} yet.",
+        )
     previous_patch = held[held.index(patch) + 1] if patch in held[:-1] else None
 
     slice_where = (
@@ -532,26 +600,6 @@ async def get_champion(
         ChampionStat.queue_id == queue_id,
         ChampionStat.rank_bracket == bracket,
     )
-
-    # Every role this champion is played in, so the UI can offer a role switch
-    # and default to where they are actually played.
-    role_rows = list(
-        (
-            await db.execute(
-                select(ChampionStat).where(
-                    *slice_where,
-                    ChampionStat.champion_id == champion_id,
-                    ChampionStat.team_position.in_(POSITIONS),
-                )
-            )
-        ).scalars()
-    )
-    if not role_rows:
-        raise HTTPException(
-            404,
-            f"No data for this champion on patch {patch} ({bracket}, queue {queue_id}). "
-            "Ingest more matches, or try another patch.",
-        )
 
     role_rows.sort(key=lambda r: r.games, reverse=True)
     total_role_games = sum(r.games for r in role_rows) or 1
@@ -567,9 +615,8 @@ async def get_champion(
 
     chosen = next((r for r in role_rows if r.team_position == position), None) if position else None
     if position and chosen is None:
-        raise HTTPException(
-            404, f"This champion has no recorded games at {position} on patch {patch}."
-        )
+        # The main role instead, said: the page names the roles it is played in.
+        fallback = fallback or "role"
     stat = chosen or role_rows[0]
     position = stat.team_position
 
@@ -600,6 +647,7 @@ async def get_champion(
         wins=stat.wins,
         win_rate=stat.win_rate,
         confidence_win_rate=wilson_lower_bound(stat.wins, stat.games),
+        confidence_high=wilson_upper_bound(stat.wins, stat.games),
         pick_rate=stat.pick_rate,
         ban_rate=stat.bans / stat.pool_games if stat.pool_games else 0.0,
         tier=tier,
@@ -680,11 +728,14 @@ async def get_champion(
         order=entries("skill_order"),
         first=entries("skill_first"),
     )
+    # Under the floor the averages are one or two games: 74 of 289 pages drew
+    # their laning tab from one to nine (2026-09-24).
+    laned = stat.timeline_games >= MIN_LANING_TIMELINES
     laning = LaningSection(
         games=stat.timeline_games,
-        avg_score=stat.avg_laning_score,
-        avg_gold_diff=stat.avg_gold_diff_14,
-        avg_cs_diff=stat.avg_cs_diff_14,
+        avg_score=stat.avg_laning_score if laned else None,
+        avg_gold_diff=stat.avg_gold_diff_14 if laned else None,
+        avg_cs_diff=stat.avg_cs_diff_14 if laned else None,
     )
 
     # --- matchups and synergies --------------------------------------------
@@ -743,6 +794,8 @@ async def get_champion(
     # Best first: synergy is a question about who to pair with, not avoid.
     synergies.sort(key=lambda p: p.confidence_win_rate, reverse=True)
 
+    mix = await cached_lobby_rank_mix(db, patch, queue_id, bracket)
+
     return ChampionDetail(
         champion=_champion_info(champion_id, sd),
         patch=patch,
@@ -751,6 +804,12 @@ async def get_champion(
         rank_bracket=bracket,
         sample_matches=stat.pool_games,
         min_games=min_games,
+        fallback=fallback,
+        # What was asked, wherever it differs from what is served: a patch
+        # fallback can also land on a patch where the asked role has no games.
+        requested_position=asked_position if asked_position and asked_position != position else None,
+        requested_patch=asked_patch if asked_patch and asked_patch != patch else None,
+        lobby_ranks=lobby_ranks_out(mix) if mix.total else None,
         positions=positions,
         overview=overview,
         builds=builds,

@@ -231,6 +231,17 @@ cluster near 50% and "above 52%" means different things on different patches, an
 they are banded within each role, so S means the top of that role even when all
 roles are listed together.
 
+**A letter is a place, not a measured gap, and the page says so.** Letters are
+banded among the champions with 20 or more games in the role, whatever the page's
+"Min games" shows: banded inside the display floor, 81 of 175 rows changed letter at
+5 games instead of 20 and disagreed with the champion page. On production's 16.18,
+only 8 of 247 rows had a range wholly above 50% and 8 wholly below, while the letters
+gave 28 an S, and the true spread of champion win rates came to about 1.6 points, so
+a record needs roughly 950 games before it is half signal. The tier list states those
+counts above the rows. Ranking another way does not fix it: ordered by the low end, by
+a shrunk estimate or by raw rate, the top tenth of 16.17 won 52% on 16.18 and the
+bottom tenth 48%, whichever rule chose them.
+
 The tier list also says how its games were ranked: each lobby's measured median
 rank, bucketed, with Master and above merged because apex cutoffs are live and per
 region. On 16.18, 95% were Master+ lobbies. That replaced the "Crawled from" filter

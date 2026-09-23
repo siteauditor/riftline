@@ -45,6 +45,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import ChampionMastery, ChampionStat, MatchupStat, SynergyStat
 from app.services.aggregate import (
     ALL_BRACKETS,
+    MIN_LANE_TIMELINES,
+    MIN_LANING_TIMELINES,
     aggregated_slices,
     poolable_patches,
     wilson_lower_bound,
@@ -80,14 +82,6 @@ COMFORT_MAX_BONUS = 0.10
 COMFORT_FULL_DAYS = 30
 COMFORT_HALF_DAYS = 180
 COMFORT_FLOOR_DAYS = 365
-
-# Below this many games with a timeline, a lane's gold lead at 14 is one stomp.
-MIN_TIMELINE_GAMES = 5
-
-# A champion's own laning figures in the role (gold and CS at 14, the laning
-# score) are shown from this many games with a timeline. Averages over its
-# whole role, so a floor above the one for a single lane.
-MIN_LANING_TIMELINES = 10
 
 # An enemy counts as possibly in your lane from this probability. Below it the
 # record is noise weighted by almost nothing, and listing it would crowd the row.
@@ -646,7 +640,7 @@ class DraftAdvisor:
             # them, and withheld below the floor rather than averaged over two.
             used = [r for r in group if r.patch in patches]
             timelines = sum(r.timeline_games or 0 for r in used)
-            if timelines >= MIN_TIMELINE_GAMES:
+            if timelines >= MIN_LANE_TIMELINES:
                 gold = [r for r in used if r.avg_gold_diff_14 is not None and r.timeline_games]
                 laning = [r for r in used if r.avg_laning_score is not None and r.timeline_games]
                 if gold:
@@ -871,7 +865,7 @@ __all__ = [
     "Laning",
     "RoleGuess",
     "CONTEXT_LIFT_CAP",
-    "MIN_TIMELINE_GAMES",
+    "MIN_LANE_TIMELINES",
     "BanCandidate",
     "DraftAdvisor",
     "DraftContext",

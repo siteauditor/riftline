@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -22,8 +21,8 @@ from app.services.aggregate import (
     ALL_BRACKETS,
     aggregated_slices,
     available_brackets,
+    cached_lobby_rank_mix,
     default_patch,
-    lobby_rank_mix,
 )
 from app.services.draft import (
     COMFORT_MAX_BONUS,
@@ -410,26 +409,6 @@ async def _most_games(db: AsyncSession, ctx: DraftContext) -> int:
     return int(value or 0)
 
 
-# The lobby-rank mix scans every game in the slice, and the board asks for it
-# on every change: kept per slice for an hour, as the tier list's rollups are.
-LOBBY_RANKS_TTL_SECONDS = 3600
-_lobby_ranks: dict[tuple[str, int, str], tuple[float, LobbyRanksOut | None]] = {}
-
-
-async def _cached_lobby_ranks(
-    db: AsyncSession, patch: str, queue_id: int, bracket: str
-) -> LobbyRanksOut | None:
-    key = (patch, queue_id, bracket)
-    held = _lobby_ranks.get(key)
-    now = time.monotonic()
-    if held is not None and now - held[0] < LOBBY_RANKS_TTL_SECONDS:
-        return held[1]
-    mix = await lobby_rank_mix(db, patch, queue_id, bracket)
-    value = lobby_ranks_out(mix) if mix.total else None
-    _lobby_ranks[key] = (now, value)
-    return value
-
-
 def _damage_members(
     champions: list[int], board_roles: list[RoleGuess], certain: dict[int, str]
 ) -> list[tuple[int, str | None]]:
@@ -460,6 +439,10 @@ async def _damage_read(
         enemies=_damage_members(ctx.enemies, board.enemy_roles, certain),
         picks=picks,
     )
+
+
+def _lobby_ranks(mix) -> LobbyRanksOut | None:
+    return lobby_ranks_out(mix) if mix.total else None
 
 
 def _plausible_riot_id(name: str, tag: str) -> bool:
@@ -721,7 +704,7 @@ async def suggest(
             if board.role_clash
             else None
         ),
-        lobby_ranks=await _cached_lobby_ranks(db, patch, body.queue_id, bracket),
+        lobby_ranks=_lobby_ranks(await cached_lobby_rank_mix(db, patch, body.queue_id, bracket)),
         team_damage=TeamDamageOut(
             available=damage_read.available,
             allies=mix(damage_read.allies),

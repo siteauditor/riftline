@@ -203,12 +203,16 @@ async def test_synergies_list_allies_best_first(client, corpus):
     assert rates == sorted(rates, reverse=True)
 
 
-async def test_unknown_position_for_this_champion_is_an_honest_404(client, corpus):
+async def test_a_role_without_games_serves_the_main_role_and_says_so(client, corpus):
+    """A 404 here opened the page on its story with no word of why. The main
+    role is served instead, with what was asked, so the page can say so."""
     response = await client.get(
         f"/api/champions/{SUBJECT}?patch={PATCH}&position=UTILITY&min_games=1"
     )
-    assert response.status_code == 404
-    assert "UTILITY" in response.json()["detail"]
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["fallback"], body["requested_position"]) == ("role", "UTILITY")
+    assert body["position"] == body["positions"][0]["position"] != "UTILITY"
 
 
 async def test_invalid_position_is_rejected(client, corpus):
@@ -600,3 +604,85 @@ async def test_a_champion_carries_the_same_letter_as_on_the_tier_list(client):
         ).json()
         assert page["overview"]["tier"] == listed.get(champion_id), champion_id
     assert meta["min_games"] == TIER_MIN_GAMES
+
+
+# ------------------------------------------------------ fallbacks and floors
+
+
+async def test_a_patch_that_is_not_held_serves_the_default_and_says_so(client):
+    """An old link names a patch the site no longer holds: the page served a
+    404 and its Patch select went blank. The default patch comes back, named."""
+    from app.db.models import ChampionStat, Match
+
+    queue, held, champion = 4888, "F1.10", 9701
+    async with SessionLocal() as session:
+        if not await session.get(Match, "FALLBACK_PATCH_1"):
+            session.add(Match(
+                match_id="FALLBACK_PATCH_1", platform_id="EUW1", queue_id=queue, patch=held,
+                game_creation=1, game_duration=1800, is_remake=False, teams=[],
+            ))
+            session.add(ChampionStat(
+                patch=held, queue_id=queue, rank_bracket=ALL_BRACKETS, champion_id=champion,
+                team_position="MIDDLE", games=30, wins=15, bans=0, pool_games=100,
+            ))
+            await session.commit()
+
+    response = await client.get(f"/api/champions/{champion}?patch=F1.05&queue_id={queue}")
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    assert (body["fallback"], body["requested_patch"], body["patch"]) == ("patch", "F1.05", held)
+
+
+async def test_thin_timeline_figures_are_withheld(client):
+    """One stomp is not a lane: a lane's gold at 14 needs five games with a
+    timeline, and the champion's own laning figures ten."""
+    from sqlalchemy import select, update
+
+    from app.db.models import ChampionStat, Match, MatchupStat
+    from app.services.aggregate import MIN_LANE_TIMELINES, MIN_LANING_TIMELINES
+
+    patch = "C1.60"
+    async with SessionLocal() as session:
+        seeded = await session.get(Match, f"{patch}_0")
+    if not seeded:
+        positions = ("MIDDLE", "JUNGLE", "TOP", "BOTTOM", "UTILITY")
+        await seed(patch, [
+            [participant(c, p, 100, i % 2 == 0) for c, p in zip(BLUE, positions, strict=True)]
+            + [participant(c, p, 200, i % 2 == 1) for c, p in zip(RED, positions, strict=True)]
+            for i in range(6)
+        ])
+        async with SessionLocal() as session:
+            await rebuild_champion_stats(session, patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS)
+            for enemy, timelines in ((112, MIN_LANE_TIMELINES - 1), (7, MIN_LANE_TIMELINES)):
+                session.add(MatchupStat(
+                    patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS, scope="LANE",
+                    team_position="MIDDLE", champion_id=SUBJECT, enemy_champion_id=enemy,
+                    games=20, wins=10, timeline_games=timelines, avg_gold_diff_14=-640.0,
+                    avg_laning_score=0.41,
+                ))
+            await session.commit()
+
+    async def page(laning_timelines: int) -> dict:
+        async with SessionLocal() as session:
+            await session.execute(
+                update(ChampionStat)
+                .where(ChampionStat.patch == patch, ChampionStat.champion_id == SUBJECT,
+                       ChampionStat.team_position == "MIDDLE")
+                .values(timeline_games=laning_timelines, avg_laning_score=0.55,
+                        avg_gold_diff_14=310.0, avg_cs_diff_14=4.5)
+            )
+            await session.commit()
+            assert (await session.execute(select(ChampionStat.id).where(ChampionStat.patch == patch))).first()
+        return (await client.get(f"/api/champions/{SUBJECT}?patch={patch}&position=MIDDLE&min_games=5")).json()
+
+    body = await page(MIN_LANING_TIMELINES - 1)
+    gold = {p["champion"]["id"]: p["avg_gold_diff_14"] for p in body["counters"]["lane"]}
+    assert gold[112] is None and gold[7] == -640.0
+    assert body["laning"]["games"] == MIN_LANING_TIMELINES - 1
+    assert (body["laning"]["avg_score"], body["laning"]["avg_gold_diff"]) == (None, None)
+    assert body["laning"]["min_games"] == MIN_LANING_TIMELINES
+
+    body = await page(MIN_LANING_TIMELINES)
+    assert (body["laning"]["avg_score"], body["laning"]["avg_gold_diff"]) == (0.55, 310.0)
+

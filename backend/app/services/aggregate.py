@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -31,6 +32,7 @@ from typing import Any
 from sqlalchemy import Select, case, delete, func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.db.models import (
     ChampionFacetStat,
     ChampionStat,
@@ -103,6 +105,18 @@ MIN_ROWS_FOR_TIERS = 10
 # 2026-09-22 that gave 82 of 174 tier list rows a different letter on the page
 # one click away (Thresh A on the list, S on his own page).
 TIER_MIN_GAMES = 20
+
+# Below this many games with a timeline, one lane's gold lead at 14 is one or
+# two stomps. Measured 2026-09-24: 88 of 504 lane rows on the champion pages
+# showed a gold figure from one to four games. The draft and the champion
+# page's counters share it.
+MIN_LANE_TIMELINES = 5
+
+# A champion's own laning figures in a role (gold and CS at 14, the laning
+# score) average over its whole role, so they need more: 74 of 289 champion
+# pages drew their laning tab from one to nine games. The tier list's gold
+# column, the champion page and the draft share it.
+MIN_LANING_TIMELINES = 10
 
 # Percentile bands, not fixed win-rate thresholds. Win rates cluster tightly
 # around 50% by design, so "above 52%" means different things on different
@@ -222,10 +236,38 @@ async def lobby_rank_mix(
     return mix
 
 
+_lobby_mixes: dict[tuple[str, int, str], tuple[float, LobbyRankMix]] = {}
+
+
+async def cached_lobby_rank_mix(
+    session: AsyncSession, patch: str, queue_id: int, rank_bracket: str = ALL_BRACKETS
+) -> LobbyRankMix:
+    """`lobby_rank_mix`, kept per slice for `ttl_lobby_ranks` seconds.
+
+    It reads every game in the slice, and the tier list, each champion page
+    and every change on a draft board ask for it. The answer moves only when
+    games are ingested or lobby ranks measured, both nightly.
+    """
+    ttl = get_settings().ttl_lobby_ranks
+    key = (patch, queue_id, rank_bracket)
+    now = time.monotonic()
+    held = _lobby_mixes.get(key)
+    if held is not None and now - held[0] < ttl:
+        return held[1]
+    mix = await lobby_rank_mix(session, patch, queue_id, rank_bracket)
+    _lobby_mixes[key] = (now, mix)
+    return mix
+
+
 async def _ban_counts(
     session: AsyncSession, patch: str, queue_id: int, rank_bracket: str
 ) -> Counter[int]:
-    """Count bans from each match's stored team payload.
+    """Count the games each champion was banned in, from the stored team payloads.
+
+    Once per game, not once per team: both teams may ban the same champion,
+    and counting each team's ban put Talon at a 63.5% ban rate on 16.18 when
+    he was banned in 52.7% of games (857 double bans in 1,431, measured
+    2026-09-24). The rate is read as "share of games it was banned in".
 
     Done in Python rather than SQL because JSON access is the least portable
     thing in SQL and this runs offline. At warehouse scale you would denormalise
@@ -234,12 +276,14 @@ async def _ban_counts(
     stmt = _slice_filter(select(Match.teams), patch, queue_id, rank_bracket)
     counts: Counter[int] = Counter()
     for (teams,) in (await session.execute(stmt)).all():
+        banned: set[int] = set()
         for team in _as_json(teams) or []:
             for ban in team.get("bans") or []:
                 champion_id = ban.get("championId")
                 # -1 means the ban slot went unused.
                 if isinstance(champion_id, int) and champion_id > 0:
-                    counts[champion_id] += 1
+                    banned.add(champion_id)
+        counts.update(banned)
     return counts
 
 

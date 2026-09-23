@@ -26,10 +26,12 @@ import {
   sliceParams,
   useHydratedSearchParams,
   useSearchText,
+  useSliceCorrections,
   withParams,
 } from '../lib/searchParams'
 import CountUp from '../components/CountUp'
 import Hint from '../components/Hint'
+import LobbyRanks from '../components/LobbyRanks'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
 const MIN_GAMES = CHAMPION_MIN_GAMES
@@ -38,6 +40,7 @@ export default function Champion() {
   // A slug ("aatrox"), or an id from an older link; the API takes either.
   const { championId = '' } = useParams()
   const [search, setSearch] = useHydratedSearchParams()
+  useSliceCorrections(MIN_GAMES)
 
   // Slice state lives in the URL so a champion page stays deep-linkable and the
   // back button behaves.
@@ -164,13 +167,19 @@ export default function Champion() {
 
           {o && (
             <dl className="flex flex-wrap items-end gap-x-7 gap-y-5 lg:ml-auto">
-              <Stat label="Adjusted" value={pct(o.confidence_win_rate, 1)} n={o.confidence_win_rate} format={pct1} accent />
               <Stat
                 label="Win rate"
                 value={pct(o.win_rate, 1)}
                 n={o.win_rate}
                 format={pct1}
                 change={change(o.win_rate, o.previous, 'win')}
+              />
+              {/* The range the sample supports, as the tier list draws it. The
+                  low end alone was labelled "Adjusted", which read as a
+                  corrected win rate rather than the bottom of a range. */}
+              <Stat
+                label="Range"
+                value={`${(o.confidence_win_rate * 100).toFixed(1)} to ${pct(o.confidence_high, 1)}`}
               />
               <Stat
                 label="Pick"
@@ -193,7 +202,7 @@ export default function Champion() {
             reads the page without clicking a tab. */}
         {d && (
           <section aria-label={`${info.name} in brief`} className="max-w-prose space-y-2 text-sm leading-relaxed text-ink-dim">
-            {championSummary(d, profile).map((sentence, i) => (
+            {championSummary(d).map((sentence, i) => (
               <p key={i} className={i === 0 ? 'text-ink' : undefined}>
                 {sentence}
               </p>
@@ -203,9 +212,20 @@ export default function Champion() {
 
         {/* Slice controls. Shown on a patch with no numbers too, because the
             way out of that page is to pick another patch. */}
+        {d && <FallbackNotice d={d} name={info.name} />}
+
         <div className="mt-4">
+          {/* The served slice, so a fallback shows what is on screen: the patch
+              select went blank on a patch the site does not hold. "Crawled
+              from" is left out as on the tier list; the lobby line below says
+              how the games were really ranked. */}
           <SliceFilters
-            value={{ ...slice, position: d?.position ?? slice.position }}
+            value={{
+              ...slice,
+              position: d?.position ?? slice.position,
+              patch: d?.requested_patch ? null : slice.patch,
+            }}
+            hideBracket
             onChange={updateSlice}
             positions={
               d
@@ -223,6 +243,8 @@ export default function Champion() {
             }
           />
         </div>
+
+        {d?.lobby_ranks && <LobbyRanks lobby={d.lobby_ranks} />}
 
         {/* Averages */}
         {o && (
@@ -359,7 +381,11 @@ export default function Champion() {
         </div>
 
         <p className="mt-8 text-xs text-ink-faint">
-          <Link to="/tierlist" className="hover:text-ink-dim">
+          {/* Back to the same slice: the role, patch and queue read here. */}
+          <Link
+            to={`/tierlist${sliceLink({ patch: slice.patch, queueId: slice.queueId, position: d?.position ?? slice.position })}`}
+            className="hover:text-ink-dim"
+          >
             Back to the tier list
           </Link>
         </p>
@@ -459,6 +485,31 @@ function Cell({ label, value }: { label: string; value: string }) {
       <dt className="text-[11px] text-ink-faint">{label}</dt>
       <dd className="tnum display mt-0.5 text-lg font-600 text-ink">{value}</dd>
     </div>
+  )
+}
+
+/**
+ * The slice the link asked for had no games, so the API served another.
+ * Said here: the page used to open on the story tab with no word of why, and
+ * the patch select went blank on a patch the site does not hold.
+ */
+function FallbackNotice({ d, name }: { d: ChampionDetail; name: string }) {
+  const lines: string[] = []
+  if (d.requested_patch) {
+    lines.push(`Riftline holds no games of ${name} on patch ${d.requested_patch}, so this is patch ${d.patch}.`)
+  }
+  if (d.requested_position) {
+    const served = d.positions.find((p) => p.position === d.position)
+    lines.push(
+      `${name} has no ${positionLabel(d.requested_position).toLowerCase()} games on patch ${d.patch}. ` +
+        `This is ${positionLabel(d.position).toLowerCase()}, where ${pct(served?.share ?? 0)} of ${name}'s games are.`,
+    )
+  }
+  if (lines.length === 0) return null
+  return (
+    <p role="status" className="mt-4 max-w-prose border-l-2 border-gold/50 py-1 pl-3 text-sm leading-relaxed text-ink-dim">
+      {lines.join(' ')}
+    </p>
   )
 }
 

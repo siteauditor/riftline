@@ -8,9 +8,10 @@ import LobbyRanks from '../LobbyRanks'
 import { EmptyState } from '../StateViews'
 import WinRateRange from '../WinRateRange'
 import type { DraftEvidence, DraftResponse, DraftSuggestion } from '../../lib/api'
-import { COMFORT_LEVELS, MIN_GAMES_PRESETS } from '../../lib/draftBoard'
+import { COMFORT_LEVELS } from '../../lib/draftBoard'
 import { DAMAGE_TEXT, mainType } from '../../lib/damage'
 import { compact, pct, positionLabel } from '../../lib/format'
+import { lowerFloor } from '../../lib/minGames'
 
 /**
  * The answer half of the draft page: the ranked picks, who to ban, and how the
@@ -63,9 +64,7 @@ function TooFewGames({
 }) {
   // The highest offered floor that still shows something, else the most any
   // champion has.
-  const lower =
-    [...MIN_GAMES_PRESETS].reverse().find((v) => v <= data.most_games && v < min) ??
-    (data.most_games > 0 && data.most_games < min ? data.most_games : null)
+  const lower = lowerFloor(data.most_games, min)
   let action: ReactNode = null
   if (lower !== null) {
     action = (

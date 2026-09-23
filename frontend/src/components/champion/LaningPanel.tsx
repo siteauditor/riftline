@@ -17,11 +17,21 @@ interface Props {
  * Abilities, beside the abilities it is about.
  */
 export default function LaningPanel({ laning, championName }: Props) {
-  if (laning.games === 0 || laning.avg_score === null) {
+  if (laning.games === 0) {
     return (
       <EmptyState
         title="No timeline data yet"
-        body="Laning figures come from match timelines, which are fetched separately from matches. None of this slice's games has one yet."
+        body="Laning figures need a game's timeline, and none of this slice's games has one yet."
+      />
+    )
+  }
+  // Under the floor the API withholds the averages: one or two games were a
+  // stomp drawn as a lane, on 74 of 289 pages (2026-09-24).
+  if (laning.avg_score === null) {
+    return (
+      <EmptyState
+        title="Too few games with a timeline"
+        body={`${compact(laning.games)} of this slice's games ${laning.games === 1 ? 'has' : 'have'} a timeline. The laning figures appear at ${laning.min_games}.`}
       />
     )
   }
