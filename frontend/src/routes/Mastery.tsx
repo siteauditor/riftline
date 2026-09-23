@@ -10,12 +10,13 @@ import ChampionDetail from '../components/mastery/ChampionDetail'
 import { buildPool, type PoolChampion } from '../components/mastery/pool'
 import { LEGEND_STEPS } from '../components/mastery/scale'
 import { Stat, StatCell, StatStrip } from '../components/Stat'
-import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
+import { EmptyState, ErrorView, GridSkeleton } from '../components/StateViews'
 import { api } from '../lib/api'
 import { heads } from '../lib/seo'
 import { compact, pct, timeAgo } from '../lib/format'
 import { foldName, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
+import CountUp from '../components/CountUp'
 
 /** The analytics ceiling the champions tab already asks for. Same key, same
  *  options, so the two pages share one cache entry and one request. */
@@ -100,8 +101,8 @@ export default function Mastery() {
     return (
       <div>
         {header}
-        <div className="mx-auto max-w-[1280px] px-4 py-10">
-          <Spinner label="Loading champion mastery" />
+        <div className="mx-auto max-w-[1280px] px-4 py-6">
+          <GridSkeleton items={12} />
         </div>
       </div>
     )
@@ -151,7 +152,7 @@ export default function Mastery() {
           <StatCell>
             <Stat
               label="Mastery points"
-              value={compact(pool.totalPoints)}
+              value={<CountUp value={pool.totalPoints} format={compact} />}
               sub={`on ${pool.played} champions`}
               title="Every mastery point Riot records for this account, over its whole life."
             />
@@ -159,7 +160,7 @@ export default function Mastery() {
           <StatCell>
             <Stat
               label="Core pool"
-              value={String(pool.bands.core.champions.length)}
+              value={<CountUp value={pool.bands.core.champions.length} />}
               sub="hold half the points"
               title="The fewest champions that together hold the first half of their mastery points."
             />
@@ -167,7 +168,7 @@ export default function Mastery() {
           <StatCell>
             <Stat
               label="Top champion"
-              value={pool.top ? pct(pool.top.share) : '-'}
+              value={pool.top ? <CountUp value={pool.top.share} format={(n) => pct(n)} /> : '-'}
               sub={pool.top ? `${pool.top.name}, ${compact(pool.top.points)} points` : undefined}
               title="Share of their mastery points that sits on one champion."
             />
@@ -175,7 +176,7 @@ export default function Mastery() {
           <StatCell>
             <Stat
               label="Played this month"
-              value={String(pool.recent)}
+              value={<CountUp value={pool.recent} />}
               sub={`of ${pool.played} champions`}
               title="Champions with a game in the last 30 days, by the last played time Riot reports."
             />

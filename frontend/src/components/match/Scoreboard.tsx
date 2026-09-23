@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import PositionIcon from '../PositionIcon'
-import { ErrorView, Spinner } from '../StateViews'
+import { ErrorView, TableSkeleton } from '../StateViews'
 import {
   api,
   type ItemRef,
@@ -14,6 +14,7 @@ import {
 import { compact, ordinal, pct, positionLabel, scoreColor } from '../../lib/format'
 import ItemIcon from '../items/ItemIcon'
 import { LANE_TEXT, laneColor } from '../story/lanes'
+import Hint from '../Hint'
 
 /**
  * The expanded match: every player's game, not just the searched player's.
@@ -50,8 +51,8 @@ export default function Scoreboard({
 
   if (query.isLoading) {
     return (
-      <div className="px-3 py-4">
-        <Spinner label="Loading the scoreboard" />
+      <div className="px-3 py-3">
+        <TableSkeleton rows={10} />
       </div>
     )
   }
@@ -279,13 +280,11 @@ function Row({
             </span>
           )}
           {player.badges.slice(0, 2).map((badge) => (
-            <span
-              key={badge.id}
-              title={badge.detail}
-              className="shrink-0 rounded-sm bg-gold/15 px-1 text-[10px] font-600 text-gold-bright"
-            >
-              {badge.label}
-            </span>
+            <Hint key={badge.id} text={badge.detail}>
+              <span tabIndex={0} className="shrink-0 rounded-sm bg-gold/15 px-1 text-[10px] font-600 text-gold-bright">
+                {badge.label}
+              </span>
+            </Hint>
           ))}
         </div>
       </td>

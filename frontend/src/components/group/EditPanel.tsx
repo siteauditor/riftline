@@ -6,6 +6,8 @@ import { ApiError, PLATFORMS, api, type Group } from '../../lib/api'
 import { editLink, riotIdsIn } from '../../lib/groups'
 import { lastRegion, rememberRegion } from '../../lib/storage'
 import CopyButton from './CopyButton'
+import { buttonVariants } from '@/components/ui/button'
+import { toast } from 'sonner'
 
 function message(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.kind === 'rate_limited' && error.retryAfter) {
@@ -14,8 +16,7 @@ function message(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-const button =
-  'rounded-sm border border-line px-3 py-1.5 text-xs font-600 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-50 disabled:hover:border-line disabled:hover:text-ink-dim'
+const button = buttonVariants({ variant: 'outline', size: 'sm', className: 'text-xs font-600' })
 
 /**
  * Changing a group, for whoever holds its edit key. Every call carries the key
@@ -111,6 +112,7 @@ function AddOne({
         label: label.trim() || null,
       })
       setResult({ ok: true, text: `Added ${added.riot_id} (${added.platform_label}).` })
+      toast.success(`Added ${added.riot_id}`)
       setRiotId('')
       setLabel('')
       onAdded()
@@ -218,6 +220,7 @@ function AddMany({
     setProgress(`${added} added.`)
     setFailures(failed)
     if (added) {
+      toast.success(`${added} added`)
       setText('')
       onAdded()
     }
@@ -284,6 +287,7 @@ function Players({
     setError(null)
     try {
       await api.removeGroupMember(group.slug, editKey, puuid)
+      toast('Player removed')
       onChanged()
     } catch (e) {
       setError(message(e, 'That player could not be removed.'))
@@ -294,6 +298,7 @@ function Players({
     setError(null)
     try {
       await api.setGroupMemberLabel(group.slug, editKey, puuid, label.trim() || null)
+      toast('Label saved')
       onChanged()
     } catch (e) {
       setError(message(e, 'The label could not be saved.'))
@@ -373,6 +378,7 @@ function Settings({
           e.preventDefault()
           void act(async () => {
             await api.renameGroup(group.slug, editKey, name)
+            toast.success('Name saved')
             onChanged()
           }, 'The name could not be saved.')
         }}
@@ -418,6 +424,7 @@ function Settings({
                   void act(async () => {
                     const { key } = await api.rotateGroupKey(group.slug, editKey)
                     setConfirm(null)
+                    toast.success('New edit link made. The old one has stopped working.')
                     onKeyChanged(key)
                   }, 'A new link could not be made.')
                 }
@@ -446,7 +453,11 @@ function Settings({
             <button
               type="button"
               disabled={busy}
-              className="rounded-sm border border-loss/60 px-3 py-1.5 text-xs font-600 text-loss transition-colors hover:bg-loss-deep disabled:opacity-50"
+              className={buttonVariants({
+                variant: 'outline',
+                size: 'sm',
+                className: 'border-loss/60 text-xs font-600 text-loss hover:border-loss hover:bg-loss-deep hover:text-loss',
+              })}
               onClick={() =>
                 void act(async () => {
                   await api.deleteGroup(group.slug, editKey)

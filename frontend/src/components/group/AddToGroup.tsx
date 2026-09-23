@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -30,6 +31,7 @@ export default function AddToGroup({
     try {
       await api.addGroupMember(slug, key, { riot_id: riotId, platform })
       setStatus({ slug, ok: true, text: `Added to ${name}.` })
+      toast.success(`Added to ${name}`)
     } catch (error) {
       setStatus({
         slug,

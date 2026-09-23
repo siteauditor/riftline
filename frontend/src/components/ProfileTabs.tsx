@@ -1,6 +1,6 @@
-import { NavLink } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
+import NavTabs, { type NavTab } from './NavTabs'
 import { api } from '../lib/api'
 
 /**
@@ -28,7 +28,7 @@ export default function ProfileTabs({
   const health = useQuery({ queryKey: ['health'], queryFn: api.health })
 
   const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
-  const tabs: { to: string; label: string; end?: boolean }[] = [
+  const tabs: NavTab[] = [
     { to: base, label: 'Overview', end: true },
     { to: `${base}/champions`, label: 'Champions' },
     { to: `${base}/mastery`, label: 'Mastery' },
@@ -41,24 +41,5 @@ export default function ProfileTabs({
     tabs.push({ to: `${base}/live`, label: 'Live' })
   }
 
-  return (
-    <nav className="ml-auto flex gap-1 text-sm">
-      {tabs.map((tab) => (
-        <NavLink
-          key={tab.to}
-          end={tab.end}
-          to={tab.to}
-          className={({ isActive }) =>
-            `border-b-2 px-3 pb-1.5 pt-1 font-display font-600 transition-colors ${
-              isActive
-                ? 'border-gold text-gold-bright'
-                : 'border-transparent text-ink-dim hover:text-ink'
-            }`
-          }
-        >
-          {tab.label}
-        </NavLink>
-      ))}
-    </nav>
-  )
+  return <NavTabs tabs={tabs} label="Player sections" className="ml-auto" />
 }

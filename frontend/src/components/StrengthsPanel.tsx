@@ -3,6 +3,9 @@ import { useState } from 'react'
 import PositionIcon from './PositionIcon'
 import type { RoleScoreProfile } from '../lib/api'
 import { positionLabel, scoreColor } from '../lib/format'
+import { Chip, ChipGroup } from '@/components/ui/chips'
+import CountUp from './CountUp'
+import Hint from './Hint'
 
 /**
  * What the Riftline score says about this player, one role at a time.
@@ -45,25 +48,20 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
           How they play {positionLabel(role.position)}
         </h2>
         {ready.length > 1 && (
-          <div className="flex gap-1" role="group" aria-label="Role">
+          <ChipGroup label="Role" className="gap-1">
             {ready.map((p) => (
-              <button
+              <Chip
                 key={p.position}
-                type="button"
+                size="sm"
+                active={p.position === role.position}
                 onClick={() => setPicked(p.position)}
-                aria-pressed={p.position === role.position}
                 title={`${positionLabel(p.position)}, ${p.scored_games} scored games`}
-                className={`flex items-center gap-1 rounded-sm px-2 py-1 text-xs font-600 transition-colors ${
-                  p.position === role.position
-                    ? 'bg-raised text-gold-bright'
-                    : 'text-ink-dim hover:text-ink'
-                }`}
               >
                 <PositionIcon position={p.position} className="size-3.5" />
                 {positionLabel(p.position)}
-              </button>
+              </Chip>
             ))}
-          </div>
+          </ChipGroup>
         )}
       </header>
 
@@ -75,12 +73,12 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
       <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-4 px-4 py-3 sm:gap-x-8 sm:py-4">
         <div>
           <p>
-            <span
+            <CountUp
+              value={role.avg_score}
+              format={(n) => n.toFixed(1)}
               className="tnum display block text-4xl font-700 leading-none sm:text-5xl"
               style={{ color: scoreColor(role.avg_score) }}
-            >
-              {role.avg_score.toFixed(1)}
-            </span>
+            />
             <span className="mt-1 block text-xs text-ink-faint">
               average, {role.scored_games} games
             </span>
@@ -141,9 +139,10 @@ function ComponentBar({ component }: { component: RoleScoreProfile['components']
         ? 'var(--color-loss)'
         : 'var(--color-ink-dim)'
   return (
+    <Hint text={component.measures}>
     <li
-      title={component.measures}
-      className="grid grid-cols-[6.5rem_1fr_2rem] items-center gap-3 sm:grid-cols-[9rem_1fr_2rem]"
+      tabIndex={0}
+      className="grid grid-cols-[6.5rem_1fr_2rem] items-center gap-3 outline-none sm:grid-cols-[9rem_1fr_2rem]"
     >
       <span className="truncate text-xs text-ink-dim">{component.label}</span>
       <span className="relative h-1.5 rounded-full bg-raised" aria-hidden>
@@ -158,5 +157,6 @@ function ComponentBar({ component }: { component: RoleScoreProfile['components']
         {value}
       </span>
     </li>
+    </Hint>
   )
 }

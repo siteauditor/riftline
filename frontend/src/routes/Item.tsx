@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
 import SliceFilters, { type SliceValue } from '../components/SliceFilters'
-import { ErrorView, Spinner } from '../components/StateViews'
+import { ErrorView, PageSkeleton } from '../components/StateViews'
 import ItemChampions from '../components/items/ItemChampions'
 import ItemSlots from '../components/items/ItemSlots'
 import ItemTiming from '../components/items/ItemTiming'
@@ -16,6 +16,7 @@ import { itemSummary } from '../lib/prose'
 import { queries } from '../lib/queries'
 import { sliceFromParams, sliceLink, sliceParams, withParams } from '../lib/searchParams'
 import { heads } from '../lib/seo'
+import CountUp from '../components/CountUp'
 
 export default function Item() {
   const { itemId = '' } = useParams()
@@ -39,11 +40,7 @@ export default function Item() {
   }
 
   if (query.isLoading) {
-    return (
-      <div className="mx-auto max-w-[1280px] px-4 py-10">
-        <Spinner label="Loading the item" />
-      </div>
-    )
+    return <PageSkeleton />
   }
   if (query.isError || !query.data) {
     return (
@@ -193,6 +190,8 @@ function Headline({ figures, finished }: { figures: ItemFigures; finished: boole
         <Figure
           label="Bought by"
           value={pct(figures.bought_share, 1)}
+          n={figures.bought_share}
+          format={(n) => pct(n, 1)}
           sub={`of ${compact(figures.ordered_players)} players`}
         />
         {finished && (
@@ -212,6 +211,8 @@ function Headline({ figures, finished }: { figures: ItemFigures; finished: boole
         <Figure
           label="Held at the end"
           value={pct(figures.held_share, 1)}
+          n={figures.held_share}
+          format={(n) => pct(n, 1)}
           sub={`of ${compact(figures.players)} players`}
         />
       </dl>
@@ -231,11 +232,16 @@ function Headline({ figures, finished }: { figures: ItemFigures; finished: boole
 function Figure({
   label,
   value,
+  n,
+  format,
   sub,
   color,
 }: {
   label: string
   value: string
+  /** With `format`, the figure counts up to `n` when the page is navigated to. */
+  n?: number
+  format?: (n: number) => string
   sub: string
   color?: string
 }) {
@@ -243,7 +249,7 @@ function Figure({
     <div>
       <dt className="text-xs text-ink-faint">{label}</dt>
       <dd className="tnum display mt-0.5 text-[28px] font-700 leading-none" style={{ color: color ?? 'var(--color-ink)' }}>
-        {value}
+        {n !== undefined && format ? <CountUp value={n} format={format} /> : value}
       </dd>
       <dd className="tnum mt-1 text-xs text-ink-faint">{sub}</dd>
     </div>

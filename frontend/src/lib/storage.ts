@@ -42,7 +42,21 @@ export function lastRegion(): string | null {
 }
 
 export function rememberRegion(id: string) {
-  if (PLATFORMS.some((p) => p.id === id)) writeRaw(REGION_KEY, id)
+  if (!PLATFORMS.some((p) => p.id === id)) return
+  writeRaw(REGION_KEY, id)
+  listeners.forEach((notify) => notify())
+}
+
+/**
+ * The remembered region as a subscription, null on the server and during
+ * hydration. The prerendered HTML says "EUW" because the server has no
+ * storage; a first render that read "KR" from this browser would mismatch,
+ * and React would throw the page away over one word (measured 2026-09-23).
+ * An external-store read gets the server's answer while hydrating and the
+ * browser's right after, with no mismatch and no effect.
+ */
+export function useLastRegion(): string | null {
+  return useSyncExternalStore(subscribe, lastRegion, () => null)
 }
 
 // --- the Riot ID the draft board weighs by ------------------------------------

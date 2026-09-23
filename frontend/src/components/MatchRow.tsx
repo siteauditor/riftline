@@ -22,6 +22,7 @@ import {
   scoreColor,
   timeAgo,
 } from '../lib/format'
+import Hint from './Hint'
 
 /**
  * One game in the history feed.
@@ -169,10 +170,8 @@ export default function MatchRow({
               without one simply omit it rather than showing a placeholder. */}
           {match.score !== null && (
             <p className="mt-1 flex items-baseline gap-1.5">
-              <span
-                className="tnum display text-[17px] font-700"
-                style={{ color: scoreColor(match.score) }}
-                title={
+              <Hint
+                text={
                   `Riftline score ${match.score.toFixed(1)} of 10, ` +
                   `${ordinal(match.placement ?? 0)} of ten in this lobby. ` +
                   (match.score_sample
@@ -180,8 +179,14 @@ export default function MatchRow({
                     : '')
                 }
               >
-                {match.score.toFixed(1)}
-              </span>
+                <span
+                  tabIndex={0}
+                  className="tnum display text-[17px] font-700 outline-none"
+                  style={{ color: scoreColor(match.score) }}
+                >
+                  {match.score.toFixed(1)}
+                </span>
+              </Hint>
               <span className="text-[11px] text-ink-faint">
                 {ordinal(match.placement ?? 0)} of 10
               </span>
@@ -193,25 +198,22 @@ export default function MatchRow({
             games nothing about why the column was empty.
           */}
           {match.score === null && (
-            <p
-              className="mt-1 text-xs text-ink-faint"
-              title={`No Riftline score: ${withheldReason(match)}.`}
-            >
-              Score <span className="text-line">-</span>
-            </p>
+            <Hint text={`No Riftline score: ${withheldReason(match)}.`}>
+              <p tabIndex={0} className="mt-1 text-xs text-ink-faint outline-none">
+                Score <span className="text-line">-</span>
+              </p>
+            </Hint>
           )}
           {/* At most two: the rarest earned badges, which is the order the
               server sends them in. The rest are on the scoreboard. */}
           {match.badges.length > 0 && (
             <p className="mt-1 flex flex-wrap gap-1">
               {match.badges.slice(0, 2).map((badge) => (
-                <span
-                  key={badge.id}
-                  title={badge.detail}
-                  className="w-fit rounded-sm bg-gold/15 px-1.5 py-0.5 text-[11px] font-600 text-gold-bright"
-                >
-                  {badge.label}
-                </span>
+                <Hint key={badge.id} text={badge.detail}>
+                  <span tabIndex={0} className="w-fit rounded-sm bg-gold/15 px-1.5 py-0.5 text-[11px] font-600 text-gold-bright">
+                    {badge.label}
+                  </span>
+                </Hint>
               ))}
             </p>
           )}
@@ -302,6 +304,7 @@ export default function MatchRow({
             </ul>
           ))}
         </div>
+        <Hint text={open ? 'Hide the scoreboard' : 'Every player, scored'}>
         <button
           onClick={() => {
             setOpen((o) => !o)
@@ -309,7 +312,6 @@ export default function MatchRow({
           }}
           aria-expanded={open}
           aria-label={open ? 'Hide the scoreboard' : 'Show the scoreboard'}
-          title={open ? 'Hide the scoreboard' : 'Every player, scored'}
           className="ml-auto shrink-0 self-center rounded-sm px-1.5 py-3 text-ink-faint transition-colors hover:bg-raised hover:text-ink"
         >
           <svg
@@ -327,6 +329,7 @@ export default function MatchRow({
             />
           </svg>
         </button>
+        </Hint>
       </div>
     </div>
 

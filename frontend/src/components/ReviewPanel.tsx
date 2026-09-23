@@ -1,6 +1,7 @@
 import type { LaneRecord, ReviewMetric, RoleReview } from '../lib/api'
 import { pct, positionLabel } from '../lib/format'
 import { LANE_TEXT, laneColor } from './story/lanes'
+import Hint from './Hint'
 
 /**
  * Deaths and takedowns, and lanes, over the stored games with a timeline.
@@ -67,7 +68,8 @@ function Metric({ metric, position }: { metric: ReviewMetric; position: string }
   const share = metric.metric.endsWith('untraded') || metric.metric.endsWith('converted')
   const value = share ? pct(metric.value) : `${(metric.value * 100).toFixed(1)} pts`
   return (
-    <li title={metric.measures}>
+    <Hint text={metric.measures}>
+    <li tabIndex={0} className="outline-none">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-ink-dim">{metric.label}</span>
         <span className="tnum text-ink">{value}</span>
@@ -88,6 +90,7 @@ function Metric({ metric, position }: { metric: ReviewMetric; position: string }
         <p className="mt-0.5 text-[11px] text-ink-faint">Too few games in this role to place it.</p>
       )}
     </li>
+    </Hint>
   )
 }
 

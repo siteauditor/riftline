@@ -14,6 +14,7 @@ import RankBadge from '../components/RankBadge'
 import { ErrorView, TableSkeleton } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel } from '../lib/format'
 import { intParam, withParams } from '../lib/searchParams'
+import { Button } from '@/components/ui/button'
 
 /**
  * Shown while `/leaderboard/slices` is in flight, so the filters are usable on
@@ -453,12 +454,9 @@ function GoToRank({ onGo }: { onGo: (rank: number) => void }) {
           className="control tnum w-20"
         />
       </label>
-      <button
-        type="submit"
-        className="rounded-sm border border-line px-2.5 py-1 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright"
-      >
+      <Button type="submit" variant="outline" size="sm">
         Go
-      </button>
+      </Button>
     </form>
   )
 }

@@ -92,5 +92,12 @@ export async function render(url: string, { noindex = false } = {}): Promise<Ren
       : collector.head
     : null
   setServerNow(null)
-  return { status: context.statusCode, renderedAt, html, head, state: dehydrate(queryClient), errors }
+  // Errors travel with the successes. Left out, a query that failed on the
+  // server would be pending in the browser, which renders a skeleton where
+  // the server rendered nothing, and React would throw the page away over
+  // it. Hydrated as an error it renders the same, and refetches on mount.
+  const state = dehydrate(queryClient, {
+    shouldDehydrateQuery: (query) => query.state.status === 'success' || query.state.status === 'error',
+  })
+  return { status: context.statusCode, renderedAt, html, head, state, errors }
 }

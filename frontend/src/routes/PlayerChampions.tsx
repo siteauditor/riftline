@@ -6,7 +6,7 @@ import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import ProfileTabs from '../components/ProfileTabs'
-import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
+import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
 import { api, type ChampionPlayed } from '../lib/api'
 import { heads } from '../lib/seo'
 import {
@@ -19,6 +19,7 @@ import {
 } from '../lib/format'
 import { intParam, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
+import { Chip, ChipGroup } from '@/components/ui/chips'
 
 const QUEUES = [
   { id: null, label: 'All' },
@@ -132,27 +133,17 @@ export default function PlayerChampions() {
 
       <div className="mx-auto max-w-[1280px] px-4 py-6">
 
-      <div className="mt-5 flex items-center gap-1 text-sm">
+      <ChipGroup label="Queue" className="mt-5 text-sm">
         {QUEUES.map((q) => (
-          <button
-            key={q.label}
-            type="button"
-            onClick={() => setView({ queue: q.id })}
-            aria-pressed={queue === q.id}
-            className={`border-b-2 px-3 pb-1.5 pt-1 font-display font-600 transition-colors ${
-              queue === q.id
-                ? 'border-gold text-gold-bright'
-                : 'border-transparent text-ink-dim hover:text-ink'
-            }`}
-          >
+          <Chip key={q.label} active={queue === q.id} onClick={() => setView({ queue: q.id })}>
             {q.label}
-          </button>
+          </Chip>
         ))}
-      </div>
+      </ChipGroup>
 
       {query.isLoading && (
-        <div className="py-10">
-          <Spinner label="Reading stored games" />
+        <div className="pt-4">
+          <TableSkeleton rows={8} />
         </div>
       )}
 

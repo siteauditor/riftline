@@ -12,7 +12,9 @@ import EditPanel from '../components/group/EditPanel'
 import MemberTable from '../components/group/MemberTable'
 import { SORT_KEYS, sortMembers, type SortKey } from '../components/group/sorting'
 import Together from '../components/group/Together'
-import { ErrorView, Spinner } from '../components/StateViews'
+import { ErrorView, PageSkeleton } from '../components/StateViews'
+import { buttonVariants } from '@/components/ui/button'
+import { Chip, ChipGroup } from '@/components/ui/chips'
 
 // While players are loading, the page asks the server to fetch a little more
 // as soon as the last pass ends, and less often once a pass finds nothing to
@@ -137,11 +139,7 @@ function GroupPage({ slug }: { slug: string }) {
   }
 
   if (query.isLoading) {
-    return (
-      <div className="py-16">
-        <Spinner label="Opening the group" />
-      </div>
-    )
+    return <PageSkeleton />
   }
   if (query.isError || !data) {
     const missing = query.error instanceof ApiError && query.error.kind === 'not_found'
@@ -203,10 +201,7 @@ function GroupPage({ slug }: { slug: string }) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <CopyButton
-            text={viewLink(slug)}
-            className="rounded-sm border border-line px-3 py-1.5 font-600 text-ink-dim transition-colors hover:border-gold hover:text-gold-bright"
-          >
+          <CopyButton text={viewLink(slug)} className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-xs font-600' })}>
             Copy view link
           </CopyButton>
           {canEdit && data.members.length > 0 && (
@@ -214,7 +209,7 @@ function GroupPage({ slug }: { slug: string }) {
               type="button"
               onClick={() => setEditing((v) => !v)}
               aria-expanded={showEdit}
-              className="rounded-sm bg-accent px-3 py-1.5 font-700 text-deep transition-colors hover:bg-accent-bright"
+              className={buttonVariants({ size: 'sm' })}
             >
               {showEdit ? 'Done editing' : 'Edit group'}
             </button>
@@ -278,30 +273,16 @@ function GroupPage({ slug }: { slug: string }) {
         </p>
       ) : (
         <>
-          <div
-            className="flex flex-wrap items-center gap-x-1 gap-y-2 border-b border-line-soft text-sm"
-            role="group"
-            aria-label="Queues"
-          >
+          <ChipGroup label="Queues" className="gap-x-1.5 gap-y-2 text-sm">
             {data.queues.map((q) => (
-              <button
-                key={q.key}
-                type="button"
-                onClick={() => set({ queue: q.key })}
-                aria-pressed={q.key === data.queue}
-                className={`-mb-px border-b-2 px-2.5 pb-1.5 pt-1 font-display font-600 transition-colors ${
-                  q.key === data.queue
-                    ? 'border-gold text-gold-bright'
-                    : 'border-transparent text-ink-dim hover:text-ink'
-                }`}
-              >
+              <Chip key={q.key} active={q.key === data.queue} onClick={() => set({ queue: q.key })}>
                 {q.label}
-              </button>
+              </Chip>
             ))}
             {query.isPlaceholderData && (
               <span className="ml-2 text-xs text-ink-faint">Loading {queueLabel}</span>
             )}
-          </div>
+          </ChipGroup>
 
           <MemberTable
             group={data}

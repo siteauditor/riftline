@@ -9,8 +9,8 @@ import { parseRiotId } from '../lib/format'
 import { useDebounced } from '../lib/useDebounced'
 import {
   foldRiotName,
-  lastRegion,
   rememberRegion,
+  useLastRegion,
   useRecentSearches,
 } from '../lib/storage'
 
@@ -68,7 +68,11 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   const navigate = useNavigate()
   const id = useId()
   const listId = `${id}-list`
-  const [platform, setPlatform] = useState(() => initialPlatform ?? lastRegion() ?? 'euw1')
+  // The region is what was picked here, else the page's, else the one this
+  // browser remembers (read hydration-safely, see useLastRegion), else EUW.
+  const [chosen, setChosen] = useState<string | null>(null)
+  const remembered = useLastRegion()
+  const platform = chosen ?? initialPlatform ?? remembered ?? 'euw1'
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -148,7 +152,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   }
 
   function pick(option: Option) {
-    setPlatform(option.platform)
+    setChosen(option.platform)
     // Filled in, as a picked suggestion should be: if the account has since
     // been renamed, the ID is still there to correct.
     setValue(`${option.gameName}#${option.tagLine}`)
@@ -218,7 +222,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
             bare
             value={platform}
             onValueChange={(v) => {
-              setPlatform(v)
+              setChosen(v)
               rememberRegion(v)
             }}
             className="h-full"

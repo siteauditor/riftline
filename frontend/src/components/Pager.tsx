@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * Numbered pages, as real links.
@@ -55,7 +56,7 @@ export default function Pager({
             <span
               key={n}
               aria-current="page"
-              className="tnum min-w-8 rounded-sm border border-gold px-2 py-1.5 text-center font-600 text-gold-bright"
+              className="tnum inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-gold px-2 text-center font-600 text-gold-bright"
             >
               {n}
             </span>
@@ -64,7 +65,7 @@ export default function Pager({
               key={n}
               to={hrefFor(n)}
               aria-label={`Page ${n}`}
-              className="tnum min-w-8 rounded-sm border border-line px-2 py-1.5 text-center text-ink-dim transition-colors hover:border-gold hover:text-gold-bright"
+              className={buttonVariants({ variant: 'outline', size: 'sm', className: 'tnum min-w-8 px-2' })}
             >
               {n}
             </Link>

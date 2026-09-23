@@ -5,6 +5,7 @@ import ChampionTile from './ChampionTile'
 import { TILE_SIZE, type TileSize } from './scale'
 import type { Band, PoolChampion } from './pool'
 import { SectionTitle } from '../Stat'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * Below `sm` the tail is clamped to four rows of 32px tiles, which is 36
@@ -64,7 +65,7 @@ export default function BandSection({
                 type="button"
                 onClick={() => setOpen((v) => !v)}
                 aria-expanded={open}
-                className="control px-2 py-1 text-xs font-600 text-ink-dim hover:text-ink"
+                className={buttonVariants({ variant: 'outline', size: 'xs', className: 'font-600' })}
               >
                 {open ? 'Hide' : 'Show'}
               </button>

@@ -35,7 +35,7 @@ export default function RankCard({
   if (compact) {
     return (
       <div
-        className="accent-edge flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-r-sm border-y border-r border-line bg-panel px-3 py-2 text-xs"
+        className="accent-edge flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-r-lg border-y border-r border-line bg-panel px-3 py-2 text-xs"
         style={{ '--accent': color } as CSSProperties}
       >
         <span className="text-ink-dim">{rank.queue_label}</span>
@@ -62,7 +62,7 @@ export default function RankCard({
     // The rule carries this queue's own tier, which is not always the one the
     // page header shows: plenty of players are two tiers apart in solo and flex.
     <section
-      className="accent-edge rounded-r-sm border-y border-r border-line bg-panel"
+      className="accent-edge rounded-r-lg border-y border-r border-line bg-panel"
       style={{ '--accent': color } as CSSProperties}
     >
       <header className="flex items-center justify-between border-b border-line-soft px-4 py-2.5">

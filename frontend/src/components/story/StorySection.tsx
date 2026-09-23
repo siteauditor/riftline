@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 
 import { api } from '../../lib/api'
 import { pct } from '../../lib/format'
-import { ErrorView, Spinner } from '../StateViews'
+import { ErrorView, ProseSkeleton } from '../StateViews'
 import DeathReview from './DeathReview'
 import Moments from './Moments'
 import WinChanceCurve from './WinChanceCurve'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * How a game went: each side's chance to win over time, the moments that
@@ -35,7 +36,7 @@ export default function StorySection({
   if (query.isLoading) {
     return (
       <div className="frame px-4 py-6">
-        <Spinner label="Reading the game's timeline" />
+        <ProseSkeleton lines={5} />
       </div>
     )
   }
@@ -62,7 +63,7 @@ export default function StorySection({
             type="button"
             onClick={() => query.refetch()}
             disabled={query.isFetching}
-            className="rounded-sm border border-line px-3 py-1.5 text-xs text-ink-dim transition-colors hover:border-gold hover:text-gold-bright disabled:opacity-50"
+            className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-xs' })}
           >
             {query.isFetching ? 'Trying' : 'Try again'}
           </button>

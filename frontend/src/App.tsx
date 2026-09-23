@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { SearchIcon } from 'lucide-react'
+import { Toaster } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
@@ -69,7 +70,7 @@ export default function App() {
             <span className="text-accent">.</span>
           </Link>
 
-          <nav className="flex min-w-0 flex-shrink items-center gap-1 overflow-x-auto text-sm">
+          <nav className="-mx-1 -my-1 flex min-w-0 flex-shrink items-center gap-1 overflow-x-auto px-1 py-1 text-sm">
             {[
               { to: '/tierlist', label: 'Tier list' },
               { to: '/draft', label: 'Draft' },
@@ -129,6 +130,28 @@ export default function App() {
       <main className="flex-1">
         <Outlet />
       </main>
+
+      {/* Toasts: what an action did, said once, out of the way. The colours
+          are the site's own, through sonner's variables. */}
+      <Toaster
+        position="bottom-right"
+        offset={16}
+        toastOptions={{ className: 'font-sans' }}
+        style={
+          {
+            '--normal-bg': 'var(--color-panel)',
+            '--normal-text': 'var(--color-ink)',
+            '--normal-border': 'var(--color-line)',
+            '--success-bg': 'var(--color-panel)',
+            '--success-text': 'var(--color-accent-bright)',
+            '--success-border': 'color-mix(in srgb, var(--color-accent) 40%, var(--color-line))',
+            '--error-bg': 'var(--color-panel)',
+            '--error-text': 'var(--color-loss)',
+            '--error-border': 'color-mix(in srgb, var(--color-loss) 40%, var(--color-line))',
+            '--border-radius': 'var(--radius-lg)',
+          } as CSSProperties
+        }
+      />
 
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent

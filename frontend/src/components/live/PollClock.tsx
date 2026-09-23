@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * When this page will ask Riot again, and a way to ask now.
@@ -49,7 +50,7 @@ export default function PollClock({
           setHeldUntil(Date.now() + 10_000)
           onCheck()
         }}
-        className="control px-2 py-1 text-xs font-600 text-ink-dim transition-colors hover:text-ink disabled:opacity-40"
+        className={buttonVariants({ variant: 'outline', size: 'xs', className: 'font-600' })}
       >
         Check now
       </button>

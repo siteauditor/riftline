@@ -24,7 +24,7 @@ export default function ChampionTabs({
           <div key={group.label} className="flex flex-wrap items-end gap-x-1">
             <span className="eyebrow mb-2.5 mr-2 w-full sm:w-auto">{group.label}</span>
             {group.tabs.map((tab) => (
-              <TabsTrigger key={tab} value={tab}>
+              <TabsTrigger key={tab} value={tab} aria-controls="champion-tabpanel">
                 {TAB_LABEL[tab]}
               </TabsTrigger>
             ))}

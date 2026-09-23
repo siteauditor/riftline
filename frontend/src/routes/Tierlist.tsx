@@ -23,6 +23,7 @@ import {
   withParams,
 } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
+import Hint from '../components/Hint'
 
 /**
  * Tier badges: a ramp of treatments, not just of hues.
@@ -288,7 +289,8 @@ function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']>
           />
         ))}
       </span>
-      <span title={lobby.buckets.map((b) => `${label(b.tier)}: ${b.games}`).join(', ')}>
+      <Hint text={lobby.buckets.map((b) => `${label(b.tier)}: ${b.games}`).join(', ')}>
+      <span tabIndex={0} className="outline-none">
         <span className="tnum text-ink">{pct(top.games / lobby.measured)}</span> of these
         games were {label(top.tier)} lobbies
         <span className="text-ink-faint">
@@ -296,6 +298,7 @@ function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']>
           ({lobby.measured.toLocaleString('en-US')} of {lobby.total.toLocaleString('en-US')} measured)
         </span>
       </span>
+      </Hint>
       <span className="text-ink-faint">
         Median rank of each lobby
         {measuredOn ? `, measured ${measuredOn}` : ''}, not when the games were played.
@@ -421,9 +424,9 @@ function Table({
                 aria-sort={sort === c.key ? 'descending' : 'none'}
                 className="py-2.5 text-right font-500"
               >
+                <Hint text={c.hint}>
                 <button
                   onClick={() => onSort(c.key)}
-                  title={c.hint}
                   className={`border-b-2 pb-0.5 transition-colors ${
                     sort === c.key
                       ? 'border-gold text-gold-bright'
@@ -432,6 +435,7 @@ function Table({
                 >
                   {c.label}
                 </button>
+                </Hint>
               </th>
             ))}
           </tr>

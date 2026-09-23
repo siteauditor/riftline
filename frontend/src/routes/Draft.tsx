@@ -23,6 +23,8 @@ import { heads } from '../lib/seo'
 import { lastRegion, lastRiotId, rememberRegion, rememberRiotId } from '../lib/storage'
 import { useChampionArt } from '../lib/useChampionArt'
 import { useDebounced } from '../lib/useDebounced'
+import { Chip, ChipGroup } from '@/components/ui/chips'
+import { toast } from 'sonner'
 
 const COMFORT_LEVELS = [
   { value: 0, label: 'Off' },
@@ -154,23 +156,14 @@ export default function Draft() {
           <aside className="space-y-4">
             <div>
               <span className="mb-1 block text-xs text-ink-faint">Your role</span>
-              <div className="flex flex-wrap gap-1">
+              <ChipGroup label="Your role" className="gap-1">
                 {POSITIONS.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => set({ role: p.id })}
-                    aria-pressed={position === p.id}
-                    className={`flex items-center gap-1 border-b-2 px-1.5 pb-1.5 pt-1 font-display text-sm font-600 transition-colors ${
-                      position === p.id
-                        ? 'border-gold text-gold-bright'
-                        : 'border-transparent text-ink-dim hover:text-ink'
-                    }`}
-                  >
+                  <Chip key={p.id} size="sm" active={position === p.id} onClick={() => set({ role: p.id })}>
                     <PositionIcon position={p.id} className="size-4" />
                     {p.label}
-                  </button>
+                  </Chip>
                 ))}
-              </div>
+              </ChipGroup>
             </div>
 
             <Slot
@@ -258,7 +251,10 @@ export default function Draft() {
 
             {boardIsSet && (
               <button
-                onClick={() => set({ allies: null, enemies: null, bans: null, lane: null })}
+                onClick={() => {
+                  set({ allies: null, enemies: null, bans: null, lane: null })
+                  toast('Board cleared')
+                }}
                 className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
               >
                 Clear the board
@@ -365,7 +361,7 @@ function Slot({
 
 function SuggestionSkeleton() {
   return (
-    <ul className="skeleton-breathing space-y-1.5" aria-hidden>
+    <ul className="space-y-1.5" aria-hidden>
       {Array.from({ length: 8 }).map((_, i) => (
         <li key={i} className="flex items-center gap-3 border-b border-line-soft px-3 py-2.5">
           <span className="skeleton size-10 shrink-0" />

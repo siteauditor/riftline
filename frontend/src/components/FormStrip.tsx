@@ -9,6 +9,7 @@ import {
   scoreColor,
 } from '../lib/format'
 import TimeAgo from './TimeAgo'
+import Hint from './Hint'
 
 /**
  * Recent form as a rhythm.
@@ -145,13 +146,11 @@ export default function FormStrip({ matches }: Props) {
               {active.win ? 'Win' : 'Loss'}
             </span>
             {active.score !== null && (
-              <span
-                className="tnum font-600"
-                style={{ color: scoreColor(active.score) }}
-                title={`Riftline score, ${ordinal(active.placement ?? 0)} of ten in that lobby`}
-              >
-                {active.score.toFixed(1)}
-              </span>
+              <Hint text={`Riftline score, ${ordinal(active.placement ?? 0)} of ten in that lobby`}>
+                <span tabIndex={0} className="tnum font-600 outline-none" style={{ color: scoreColor(active.score) }}>
+                  {active.score.toFixed(1)}
+                </span>
+              </Hint>
             )}
             <span className="text-ink-faint">
               {positionLabel(active.position)}, {duration(active.game_duration)},{' '}

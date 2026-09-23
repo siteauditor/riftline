@@ -4,6 +4,7 @@ import { heads } from '../lib/seo'
 import Head from '../components/Head'
 import SearchBar from '../components/SearchBar'
 import { PRODUCT_NAME } from '../App'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * The two views nobody plans for, which a deployed site shows anyway.
@@ -47,7 +48,7 @@ export default function NotFound() {
           <Link
             key={exit.to}
             to={exit.to}
-            className="rounded-sm border border-line bg-raised px-3 py-1.5 text-sm font-500 text-ink transition-colors hover:border-gold hover:text-gold-bright"
+            className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-ink' })}
           >
             {exit.label}
           </Link>
@@ -89,7 +90,7 @@ export function RouteError() {
       </header>
 
       <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-16">
-        <div className="accent-edge max-w-prose rounded-r-sm border-y border-r border-line bg-panel px-5 py-6">
+        <div className="accent-edge max-w-prose rounded-r-lg border-y border-r border-line bg-panel px-5 py-6">
           <h1 className="display text-xl font-700 text-ink">This page failed to load</h1>
           <p className="mt-2 text-sm leading-relaxed text-ink-dim">
             Something in the page itself broke, so there is nothing useful to show here.
@@ -103,13 +104,13 @@ export function RouteError() {
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => window.location.reload()}
-              className="rounded-sm border border-line bg-raised px-3 py-1.5 text-sm font-500 text-ink transition-colors hover:border-gold hover:text-gold-bright"
+              className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-ink' })}
             >
               Reload
             </button>
             <Link
               to="/"
-              className="rounded-sm border border-line bg-raised px-3 py-1.5 text-sm font-500 text-ink transition-colors hover:border-gold hover:text-gold-bright"
+              className={buttonVariants({ variant: 'outline', size: 'sm', className: 'text-ink' })}
             >
               Start again
             </Link>

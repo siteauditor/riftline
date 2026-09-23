@@ -7,6 +7,9 @@ import { api } from '../lib/api'
 import { heads } from '../lib/seo'
 import { timeAgo } from '../lib/format'
 import { forgetGroup, rememberGroup, useSavedGroups } from '../lib/groups'
+import { buttonVariants } from '@/components/ui/button'
+import Hint from '../components/Hint'
+import { toast } from 'sonner'
 
 /**
  * Make a group, and the groups this browser has made or opened.
@@ -63,7 +66,7 @@ export default function Groups() {
         <button
           type="submit"
           disabled={!name.trim() || create.isPending}
-          className="rounded-sm bg-accent px-4 py-2 text-sm font-700 text-deep transition-colors hover:bg-accent-bright disabled:opacity-50"
+          className={buttonVariants({ className: 'h-10 px-4' })}
         >
           {create.isPending ? 'Making it' : 'Make the group'}
         </button>
@@ -114,18 +117,24 @@ export default function Groups() {
                 <span className="shrink-0 text-xs text-ink-faint">
                   {group.key ? 'You can edit' : 'View only'}, opened {timeAgo(group.at)}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => forgetGroup(group.slug)}
-                  title={
+                <Hint
+                  text={
                     group.key
                       ? 'Remove it from this browser. Keep the edit link somewhere first, or you cannot change the group again.'
                       : 'Remove it from this browser. The group itself stays.'
                   }
-                  className="shrink-0 text-xs text-ink-faint underline decoration-line underline-offset-2 hover:text-ink"
                 >
-                  Forget
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      forgetGroup(group.slug)
+                      toast('Removed from this browser')
+                    }}
+                    className="shrink-0 text-xs text-ink-faint underline decoration-line underline-offset-2 hover:text-ink"
+                  >
+                    Forget
+                  </button>
+                </Hint>
               </li>
             ))}
           </ul>

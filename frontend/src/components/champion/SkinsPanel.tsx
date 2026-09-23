@@ -1,7 +1,8 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { ChampionProfile, ChampionSkin } from '../../lib/api'
 import { pct } from '../../lib/format'
+import { Chip } from '@/components/ui/chips'
 
 /**
  * Every skin, from Community Dragon's catalogue.
@@ -171,28 +172,6 @@ function Stage({ skin, champion, total }: { skin: ChampionSkin; champion: string
   )
 }
 
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`border px-2.5 py-1 text-sm transition-colors ${
-        active ? 'border-gold text-gold-bright' : 'border-line text-ink-dim hover:text-ink'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
 
 /**
  * What the counts stand on. Riot publishes no skin for a finished game, so the

@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState, type ReactNode } from 'react'
 
@@ -183,17 +184,14 @@ export function ErrorView({
   }
 
   return (
-    <div className="accent-edge rounded-r-sm border-y border-r border-line bg-panel px-5 py-6">
+    <div className="accent-edge rounded-r-lg border-y border-r border-line bg-panel px-5 py-6">
       <h2 className="display text-xl font-700 text-ink">{title}</h2>
       <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-dim">{body}</p>
       {action && <div className="mt-3">{action}</div>}
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="mt-4 rounded-sm border border-line bg-raised px-3 py-1.5 text-sm font-500 text-ink transition-colors hover:border-gold hover:text-gold-bright"
-        >
+        <Button variant="outline" size="sm" onClick={onRetry} className="mt-4 text-ink">
           Try again
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -275,6 +273,36 @@ export function ProfileSkeleton() {
           <MatchListSkeleton rows={5} />
         </div>
       </div>
+    </div>
+  )
+}
+
+/** A whole page before its first answer: the header band, then rows. */
+export function PageSkeleton() {
+  return (
+    <div aria-hidden>
+      <div className="border-b border-line-soft">
+        <div className="mx-auto max-w-[1280px] px-4 py-7 sm:py-9">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="mt-3 h-9 w-72 max-w-[70vw]" />
+          <Skeleton className="mt-3 h-3.5 w-96 max-w-[80vw]" />
+        </div>
+      </div>
+      <div className="mx-auto max-w-[1280px] px-4 py-6">
+        <TableSkeleton rows={8} />
+      </div>
+    </div>
+  )
+}
+
+/** Lines of text, ragged like a paragraph. */
+export function ProseSkeleton({ lines = 6 }: { lines?: number }) {
+  const widths = [92, 85, 96, 70, 88, 60]
+  return (
+    <div className="space-y-2.5" aria-hidden>
+      {Array.from({ length: lines }).map((_, i) => (
+        <Skeleton key={i} className="h-3.5" style={{ width: `${widths[i % widths.length]}%` }} />
+      ))}
     </div>
   )
 }

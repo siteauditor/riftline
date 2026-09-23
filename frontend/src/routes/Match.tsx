@@ -6,11 +6,12 @@ import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import Scoreboard from '../components/match/Scoreboard'
 import StorySection from '../components/story/StorySection'
-import { ErrorView, Spinner } from '../components/StateViews'
+import { ErrorView, PageSkeleton } from '../components/StateViews'
 import { api } from '../lib/api'
 import { heads } from '../lib/seo'
 import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../lib/format'
 import { useChampionArt } from '../lib/useChampionArt'
+import CountUp from '../components/CountUp'
 
 /**
  * One stored game on its own page.
@@ -46,11 +47,7 @@ export default function Match() {
   )
 
   if (query.isLoading) {
-    return (
-      <div className="mx-auto max-w-[1280px] px-4 py-16">
-        <Spinner label="Loading the game" />
-      </div>
-    )
+    return <PageSkeleton />
   }
   if (query.isError || !query.data) {
     return (
@@ -116,12 +113,12 @@ export default function Match() {
 
           {subject?.score != null && (
             <div className="text-right">
-              <span
+              <CountUp
+                value={subject.score}
+                format={(n) => n.toFixed(1)}
                 className="tnum display block text-5xl font-700 leading-none"
                 style={{ color: scoreColor(subject.score) }}
-              >
-                {subject.score.toFixed(1)}
-              </span>
+              />
               <span className="mt-1 block text-xs text-ink-faint">
                 Riftline score
                 {subject.placement != null && `, ${ordinal(subject.placement)} of 10`}

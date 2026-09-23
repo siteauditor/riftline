@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import type { PoolChampion } from './pool'
 import { levelStep } from './scale'
 import { compact, pct, scoreColor, timeAgo, winRateColor } from '../../lib/format'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * One champion, opened from a tile.
@@ -171,7 +172,7 @@ export default function ChampionDetail({
           <button
             type="button"
             onClick={close}
-            className="control px-2.5 py-1 text-sm text-ink-dim hover:text-gold-bright"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
           >
             Close
           </button>

@@ -29,7 +29,10 @@ async function open(page: Page, path: string) {
   return errors
 }
 
-const hydrationErrors = (errors: string[]) => errors.filter((e) => /hydrat/i.test(e))
+// In the built bundle React reports a mismatch as a minified error code:
+// 418 is text, 425 is a tree, 423 a recoverable error during hydration.
+const hydrationErrors = (errors: string[]) =>
+  errors.filter((e) => /hydrat|Minified React error #4(18|23|25)/i.test(e))
 
 test('the home page is prerendered and a Riot ID search navigates', async ({ page }) => {
   const errors = await open(page, '/')

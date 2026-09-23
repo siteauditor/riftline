@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import Head from '../components/Head'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
-import { EmptyState, ErrorView, Spinner, TableSkeleton } from '../components/StateViews'
+import { EmptyState, ErrorView, PageSkeleton, ProseSkeleton, TableSkeleton } from '../components/StateViews'
 import AbilitiesPanel from '../components/champion/AbilitiesPanel'
 import BuildPanel from '../components/champion/BuildPanel'
 import ChampionTabs from '../components/champion/ChampionTabs'
@@ -27,6 +27,8 @@ import {
   useSearchText,
   withParams,
 } from '../lib/searchParams'
+import CountUp from '../components/CountUp'
+import Hint from '../components/Hint'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
 const MIN_GAMES = CHAMPION_MIN_GAMES
@@ -93,11 +95,7 @@ export default function Champion() {
     `/champions/${champion.slug ?? champion.id}${sliceLink({ ...slice, position })}`
 
   if (query.isLoading && profileQuery.isLoading) {
-    return (
-      <div className="mx-auto max-w-[1280px] px-4 py-10">
-        <Spinner label="Loading champion" />
-      </div>
-    )
+    return <PageSkeleton />
   }
   const info = d?.champion ?? profile?.champion
   if (!info) {
@@ -165,19 +163,23 @@ export default function Champion() {
 
           {o && (
             <dl className="flex flex-wrap items-end gap-x-7 gap-y-5 lg:ml-auto">
-              <Stat label="Adjusted" value={pct(o.confidence_win_rate, 1)} accent />
+              <Stat label="Adjusted" value={pct(o.confidence_win_rate, 1)} n={o.confidence_win_rate} format={pct1} accent />
               <Stat
                 label="Win rate"
                 value={pct(o.win_rate, 1)}
+                n={o.win_rate}
+                format={pct1}
                 change={change(o.win_rate, o.previous, 'win')}
               />
               <Stat
                 label="Pick"
                 value={pct(o.pick_rate, 1)}
+                n={o.pick_rate}
+                format={pct1}
                 change={change(o.pick_rate, o.previous, 'pick')}
               />
-              <Stat label="Ban" value={pct(o.ban_rate, 1)} />
-              <Stat label="Games" value={compact(o.games)} />
+              <Stat label="Ban" value={pct(o.ban_rate, 1)} n={o.ban_rate} format={pct1} />
+              <Stat label="Games" value={compact(o.games)} n={o.games} format={compact} />
               {o.tier && <Stat label="Tier" value={o.tier} accent />}
             </dl>
           )}
@@ -239,7 +241,7 @@ export default function Champion() {
         <ChampionTabs active={tab} onChange={selectTab} />
 
         {/* Keyed on the tab, so each section fades in as it replaces the last. */}
-        <div key={tab} className="mt-5 animate-in fade-in-0 duration-200">
+        <div key={tab} id="champion-tabpanel" role="tabpanel" className="mt-5 animate-in fade-in-0 duration-200">
           {NUMBER_TABS.has(tab) && !d ? (
             query.isLoading ? (
               <TableSkeleton rows={6} />
@@ -326,7 +328,7 @@ export default function Champion() {
             ) : playersQuery.isError ? (
               <ErrorView error={playersQuery.error} onRetry={() => playersQuery.refetch()} />
             ) : (
-              <Spinner label="Loading players" />
+              <TableSkeleton rows={8} />
             ))}
 
           {(tab === 'story' || tab === 'abilities' || tab === 'skins') &&
@@ -349,7 +351,7 @@ export default function Champion() {
             ) : profileQuery.isError ? (
               <ErrorView error={profileQuery.error} onRetry={() => profileQuery.refetch()} />
             ) : profileQuery.isLoading ? (
-              <Spinner label="Loading the champion" />
+              <ProseSkeleton />
             ) : (
               <EmptyState title="Nothing to show" body="This champion has no profile yet." />
             ))}
@@ -401,14 +403,21 @@ interface Change {
   title: string
 }
 
+const pct1 = (n: number) => pct(n, 1)
+
 function Stat({
   label,
   value,
+  n,
+  format,
   accent,
   change: moved,
 }: {
   label: string
   value: string
+  /** With `format`, the figure counts up to `n` when the page is navigated to. */
+  n?: number
+  format?: (n: number) => string
   accent?: boolean
   change?: Change
 }) {
@@ -423,16 +432,18 @@ function Stat({
           accent ? 'text-gold-bright' : 'text-ink'
         }`}
       >
-        {value}
+        {n !== undefined && format ? <CountUp value={n} format={format} /> : value}
       </dd>
       {moved && (
-        <dd
-          className="tnum absolute left-0 top-full whitespace-nowrap text-[11px]"
-          style={{ color: moved.color }}
-          title={moved.title}
-        >
-          {moved.text}
-        </dd>
+        <Hint text={moved.title}>
+          <dd
+            tabIndex={0}
+            className="tnum absolute left-0 top-full whitespace-nowrap text-[11px] outline-none"
+            style={{ color: moved.color }}
+          >
+            {moved.text}
+          </dd>
+        </Hint>
       )}
     </div>
   )

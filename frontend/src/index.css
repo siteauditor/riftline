@@ -1,5 +1,15 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+/* Self-hosted type: the weights the site sets and no others, bundled and
+   served from this origin, so no page waits on Google's font servers and
+   nothing is fetched from a third party to read a page. */
+@import '@fontsource/barlow/400.css';
+@import '@fontsource/barlow/500.css';
+@import '@fontsource/barlow/600.css';
+@import '@fontsource/barlow/700.css';
+@import '@fontsource/barlow-condensed/600.css';
+@import '@fontsource/barlow-condensed/700.css';
+@import '@fontsource/barlow-condensed/800.css';
 
 /* The site is dark only. The components under src/components/ui carry
    `dark:` variants from their shadcn/ui origin; this makes those the only
@@ -152,8 +162,6 @@
   --radius-lg: 14px;
   --radius-xl: 20px;
   --radius-2xl: 28px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
 
   /* Tailwind v4 emits `font-700` only where a token declares it. */
   --font-weight-400: 400;

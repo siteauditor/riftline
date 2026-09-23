@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
+import { Chip, ChipGroup } from '@/components/ui/chips'
+
 import PositionIcon from './PositionIcon'
 import SelectField from './SelectField'
 import { api, POSITIONS } from '../lib/api'
@@ -71,7 +73,7 @@ export default function SliceFilters({
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-line-soft pb-3 text-sm">
       {!hideRoles && (
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+        <ChipGroup label="Role" className="gap-x-1 gap-y-1">
           <span className="mr-1 text-xs text-ink-faint">Role</span>
           {allowAllPositions && (
             <Chip
@@ -95,7 +97,7 @@ export default function SliceFilters({
               )}
             </Chip>
           ))}
-        </div>
+        </ChipGroup>
       )}
 
       {patches.length > 1 && (
@@ -196,29 +198,6 @@ function MinGames({ value, onChange }: { value: number; onChange: (value: number
   )
 }
 
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`flex items-center gap-1.5 border-b-2 px-2.5 pb-1.5 pt-1 font-display font-600 transition-colors ${
-        active
-          ? 'border-gold text-gold-bright'
-          : 'border-transparent text-ink-dim hover:text-ink'
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
 
 /** Shared right-hand summary so both pages phrase the sample the same way. */
 export function SliceSummary({

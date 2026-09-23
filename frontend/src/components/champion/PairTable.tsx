@@ -6,6 +6,7 @@ import { compact, positionLabel } from '../../lib/format'
 import { foldName } from '../../lib/searchParams'
 import { EmptyState } from '../StateViews'
 import WinRateRange from '../WinRateRange'
+import { Chip, ChipGroup } from '@/components/ui/chips'
 
 /** Which way a pair list reads: the worst pairings first, or the best. */
 export type PairOrder = 'worst' | 'best'
@@ -238,23 +239,13 @@ export function PairControls({
           className="control w-full"
         />
       </label>
-      <div className="flex items-center gap-1" role="group" aria-label="Order">
+      <ChipGroup label="Order" className="gap-1">
         {options.map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            aria-pressed={order === o.value}
-            onClick={() => onOrder(o.value)}
-            className={`border-b-2 px-2.5 pb-1.5 pt-1 font-display font-600 transition-colors ${
-              order === o.value
-                ? 'border-gold text-gold-bright'
-                : 'border-transparent text-ink-dim hover:text-ink'
-            }`}
-          >
+          <Chip key={o.value} size="sm" active={order === o.value} onClick={() => onOrder(o.value)}>
             {o.label}
-          </button>
+          </Chip>
         ))}
-      </div>
+      </ChipGroup>
     </div>
   )
 }

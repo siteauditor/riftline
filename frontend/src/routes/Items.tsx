@@ -16,6 +16,8 @@ import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { pct } from '../lib/format'
 import { foldName, useSearchText, withParams } from '../lib/searchParams'
+import { Chip, ChipGroup } from '@/components/ui/chips'
+import Hint from '../components/Hint'
 
 /**
  * Every item sold on Summoner's Rift, in the sections a player thinks in.
@@ -83,25 +85,11 @@ export default function Items() {
               className="control h-8 w-52 text-sm placeholder:text-ink-faint"
             />
           </label>
-          <div
-            className="flex flex-wrap gap-1.5"
-            role="group"
-            aria-label="Filter by what an item gives, every chosen stat"
-          >
+          <ChipGroup label="Filter by what an item gives, every chosen stat">
             {STAT_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                type="button"
-                aria-pressed={chosen.includes(f.key)}
-                onClick={() => toggle(f.key)}
-                className={`border px-2 py-0.5 text-xs transition-colors ${
-                  chosen.includes(f.key)
-                    ? 'border-gold text-gold-bright'
-                    : 'border-line text-ink-dim hover:text-ink'
-                }`}
-              >
+              <Chip key={f.key} size="sm" active={chosen.includes(f.key)} onClick={() => toggle(f.key)}>
                 {f.label}
-              </button>
+              </Chip>
             ))}
             {chosen.length > 0 && (
               <button
@@ -112,7 +100,7 @@ export default function Items() {
                 Clear
               </button>
             )}
-          </div>
+          </ChipGroup>
           {list.data && (
             <span className="tnum ml-auto text-xs text-ink-faint">
               {shown === total ? `${total} items` : `${shown} of ${total} shown`}
@@ -171,11 +159,11 @@ export default function Items() {
 function ItemCard({ item, showShare }: { item: ItemSummary; showShare: boolean }) {
   return (
     <li>
+      <Hint text={item.plaintext || null}>
       <Link
         viewTransition
         to={`/items/${item.slug ?? item.id}`}
         className="lift group flex items-center gap-3 px-2 py-2"
-        title={item.plaintext || undefined}
       >
         {item.icon_url ? (
           <img
@@ -205,6 +193,7 @@ function ItemCard({ item, showShare }: { item: ItemSummary; showShare: boolean }
           </span>
         )}
       </Link>
+      </Hint>
     </li>
   )
 }

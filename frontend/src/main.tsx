@@ -79,7 +79,34 @@ async function loadRoutesFor(location: Location): Promise<void> {
 
 const container = document.getElementById('root')!
 
-loadRoutesFor(window.location).then(() => {
+// A chunk that will not load, most often because a deploy replaced the
+// hashed files under a tab that was open. Once, a reload picks up the new
+// build; a second failure in the same session is something else, and the
+// page says so rather than staying blank.
+const RELOADED = 'riftline:reloaded-for-chunk'
+function chunkFailed(): void {
+  let reloaded = false
+  try {
+    reloaded = sessionStorage.getItem(RELOADED) === '1'
+    if (!reloaded) sessionStorage.setItem(RELOADED, '1')
+  } catch {
+    // Storage refused: fall through to the message.
+  }
+  if (!reloaded) {
+    window.location.reload()
+    return
+  }
+  container.innerHTML =
+    '<div style="max-width:36rem;margin:4rem auto;padding:0 1rem;font-family:Barlow,system-ui,sans-serif;color:#a1aec2">' +
+    '<h1 style="color:#eef3fa;font-size:1.25rem">This page could not load</h1>' +
+    '<p>Part of the app failed to download. Check the connection and reload the page.</p></div>'
+}
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault()
+  chunkFailed()
+})
+
+loadRoutesFor(window.location).catch(chunkFailed).then(() => {
   const router = createBrowserRouter(routes)
   const app = (
     <StrictMode>

@@ -40,7 +40,7 @@ function SelectTrigger({
         'flex w-fit cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-panel px-2.5 text-sm whitespace-nowrap text-ink transition-colors outline-none',
         'hover:border-[color-mix(in_srgb,var(--color-gold)_45%,var(--color-line))] focus-visible:border-gold data-[state=open]:border-gold',
         'disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-ink-faint',
-        'data-[size=default]:h-9 data-[size=sm]:h-8',
+        size === 'sm' ? 'h-8' : 'h-9',
         '*:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',
         className,

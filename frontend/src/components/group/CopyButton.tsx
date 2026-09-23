@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
+import { toast } from 'sonner'
 
 /**
  * Copies a link, and says so. Where the clipboard is refused (an embedded
@@ -26,6 +27,7 @@ export default function CopyButton({
     try {
       await navigator.clipboard.writeText(text)
       setState('copied')
+      toast('Link copied')
     } catch {
       setState('manual')
     }

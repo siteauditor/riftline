@@ -24,6 +24,9 @@ import { clearRecentSearches, useRecentSearches } from '../lib/storage'
 import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import TimeAgo from '../components/TimeAgo'
+import CountUp from '../components/CountUp'
+import Hint from '../components/Hint'
+import { toast } from 'sonner'
 
 // Two accounts with a real history behind them. The previous EUW example was
 // `Caps#EUW`, which resolves to an unranked level 31 with no games: the first
@@ -156,7 +159,10 @@ function RecentOrExamples() {
       ))}
       <button
         type="button"
-        onClick={clearRecentSearches}
+        onClick={() => {
+          clearRecentSearches()
+          toast('Recent searches cleared')
+        }}
         className="text-xs text-ink-faint transition-colors hover:text-ink"
       >
         Clear
@@ -305,7 +311,7 @@ function BestPicks({
       {meta.isLoading ? (
         <ul
           aria-hidden
-          className="skeleton-breathing mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5"
+          className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5"
         >
           {POSITIONS.map((p) => (
             <li key={p.id} className="skeleton aspect-[3/4]" />
@@ -401,7 +407,7 @@ function BestGames({
       </p>
 
       {best.isLoading ? (
-        <ul aria-hidden className="skeleton-breathing mt-4 max-w-3xl">
+        <ul aria-hidden className="mt-4 max-w-3xl">
           {POSITIONS.map((p) => (
             <li
               key={p.id}
@@ -476,23 +482,25 @@ function BestGameRow({ game }: { game: BestGame }) {
 
       <span className="hidden sm:block">
         {badge && (
-          <span
-            title={badge.detail}
-            className="rounded-sm bg-gold/15 px-1.5 py-0.5 text-[11px] font-600 text-gold-bright"
-          >
-            {badge.label}
-          </span>
+          <Hint text={badge.detail}>
+            <span tabIndex={0} className="rounded-sm bg-gold/15 px-1.5 py-0.5 text-[11px] font-600 text-gold-bright">
+              {badge.label}
+            </span>
+          </Hint>
         )}
       </span>
 
       <div className="text-right">
-        <span
-          className="tnum display block text-3xl font-700 leading-none"
-          style={{ color: scoreColor(game.score) }}
-          title={`Riftline score ${game.score.toFixed(2)} of 10`}
-        >
-          {game.score.toFixed(1)}
-        </span>
+        <Hint text={`Riftline score ${game.score.toFixed(2)} of 10`}>
+          <span tabIndex={0} className="block outline-none">
+            <CountUp
+              value={game.score}
+              format={(n) => n.toFixed(1)}
+              className="tnum display block text-3xl font-700 leading-none"
+              style={{ color: scoreColor(game.score) }}
+            />
+          </span>
+        </Hint>
         <Link
           to={`/match/${game.match_id}?player=${encodeURIComponent(game.puuid)}`}
           className="mt-1 inline-block whitespace-nowrap text-xs text-ink-dim underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright hover:decoration-gold"

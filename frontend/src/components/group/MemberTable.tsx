@@ -9,6 +9,7 @@ import ReviewPanel from '../ReviewPanel'
 import StrengthsPanel from '../StrengthsPanel'
 import { laneColor } from '../story/lanes'
 import { COLUMNS, type SortKey } from './sorting'
+import { buttonVariants } from '@/components/ui/button'
 
 const SOLO = 'RANKED_SOLO_5x5'
 
@@ -186,7 +187,7 @@ function ExpandButton({
       onClick={onClick}
       aria-expanded={open}
       aria-label={`${open ? 'Hide' : 'Show'} details for ${name}`}
-      className="rounded-sm border border-line px-2 py-0.5 text-xs text-ink-dim transition-colors hover:border-gold hover:text-gold-bright"
+      className={buttonVariants({ variant: 'outline', size: 'xs' })}
     >
       {open ? 'Less' : 'More'}
     </button>

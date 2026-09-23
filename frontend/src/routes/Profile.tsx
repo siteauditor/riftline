@@ -35,6 +35,8 @@ import {
 } from '../lib/format'
 import { intParam, withParams } from '../lib/searchParams'
 import { rememberSearch } from '../lib/storage'
+import { Chip, ChipGroup } from '@/components/ui/chips'
+import Hint from '../components/Hint'
 
 
 // Riot's history filter takes one queue id. Arena is left out because Riot
@@ -179,7 +181,12 @@ export default function Profile() {
     champions.data?.champions.find((c) => c.id === championFilter)?.name ?? 'this champion'
 
   if (profileQuery.isLoading) {
-    return <ProfileSkeleton />
+    return (
+      <>
+        <Head {...heads.profile(`${name}#${tag}`, platform)} />
+        <ProfileSkeleton />
+      </>
+    )
   }
 
   // The stored answer a prerendered page carries outlives a failed live
@@ -365,21 +372,14 @@ export default function Profile() {
               <StrengthsPanel profiles={analyticsQuery.data.score_profile} />
             )}
 
-            <div className="flex flex-wrap items-center gap-x-1 gap-y-2 text-sm">
-              {QUEUE_FILTERS.map((f) => (
-                <button
-                  key={f.label}
-                  onClick={() => setFilter({ queue: f.id })}
-                  aria-pressed={queue === f.id}
-                  className={`border-b-2 px-3 pb-1.5 pt-1 font-display font-600 transition-colors ${
-                    queue === f.id
-                      ? 'border-gold text-gold-bright'
-                      : 'border-transparent text-ink-dim hover:text-ink'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+              <ChipGroup label="Queue">
+                {QUEUE_FILTERS.map((f) => (
+                  <Chip key={f.label} active={queue === f.id} onClick={() => setFilter({ queue: f.id })}>
+                    {f.label}
+                  </Chip>
+                ))}
+              </ChipGroup>
               <SelectField
                 label="Champion"
                 className="ml-auto"
@@ -463,7 +463,7 @@ export default function Profile() {
               ))}
             </div>
 
-            {matchesQuery.hasNextPage && (
+            {matchesQuery.hasNextPage && !matchesQuery.isPlaceholderData && (
               <Button
                 variant="outline"
                 onClick={() => matchesQuery.fetchNextPage()}
@@ -537,13 +537,14 @@ function LadderChip({ ladder }: { ladder: NonNullable<ProfileData['ladder']> }) 
       : `${ordinal(ladder.tier_position)} in ${tier} on ${ladder.platform_label}. `) +
     `From the ladder as it stood ${timeAgo(ladder.as_of, now)}.`
   return (
-    <Link
-      to={`/leaderboards?${params.toString()}`}
-      title={title}
-      className="tnum rounded-sm bg-raised px-1.5 py-0.5 text-xs font-600 text-ink transition-colors hover:text-gold-bright"
-    >
-      {label}
-    </Link>
+    <Hint text={title}>
+      <Link
+        to={`/leaderboards?${params.toString()}`}
+        className="tnum rounded-sm bg-raised px-1.5 py-0.5 text-xs font-600 text-ink transition-colors hover:text-gold-bright"
+      >
+        {label}
+      </Link>
+    </Hint>
   )
 }
 
@@ -580,18 +581,17 @@ function UpdateControl({
   return (
     <p className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-ink-faint">
       {updatedAt !== null && (
-        <span>Updated {now - updatedAt < 60_000 ? 'just now' : timeAgo(updatedAt)}</span>
+        <span>Updated {now - updatedAt < 60_000 ? 'just now' : timeAgo(updatedAt, now)}</span>
       )}
-      <Button
-        variant="outline"
-        size="xs"
-        onClick={run}
-        disabled={busy || cooling}
-        className="font-600"
-        title={cooling ? 'Riot was asked less than a minute ago.' : 'Ask Riot for the latest rank and games.'}
-      >
-        {busy ? 'Updating…' : 'Update'}
-      </Button>
+      <Hint text={cooling ? 'Riot was asked less than a minute ago.' : 'Ask Riot for the latest rank and games.'}>
+        {/* A disabled button takes no pointer events, so the hint sits on a
+            span around it. */}
+        <span tabIndex={cooling ? 0 : -1} className="inline-flex rounded-md outline-none">
+          <Button variant="outline" size="xs" onClick={run} disabled={busy || cooling} className="font-600">
+            {busy ? 'Updating…' : 'Update'}
+          </Button>
+        </span>
+      </Hint>
       {failed && (
         <span role="alert" className="text-loss">
           {failed}
