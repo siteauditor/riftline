@@ -165,6 +165,8 @@ jobs:
       # it as unlisted, which is the fallback path this checks.
       - name: Profiles through nginx, with and without the live renderer
         run: |
+          # On a failure, what nginx answered and what both servers logged.
+          trap 'cat headers.txt 2>/dev/null; docker logs web-nginx 2>&1 | tail -20; docker logs render 2>&1 | tail -20' ERR
           docker run --rm -v ci_pages:/pages alpine sh -c 'mkdir -p "/pages/ci/summoner/euw1/Ci Player" && cp /pages/ci/index.html "/pages/ci/summoner/euw1/Ci Player/CI1.html"'
           docker run -d --name render --network ci riftline-prerender:ci node prerender/live.mjs
           docker run -d --name web-nginx --network ci -p 6124:80 -v ci_pages:/usr/share/nginx/html/pages:ro riftline-nginx:ci
