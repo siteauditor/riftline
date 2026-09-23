@@ -49,7 +49,19 @@ export default function SelectField({
           {label}
         </label>
       )}
-      <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <Select
+        value={value}
+        // Only a value this select offers is passed on. Inside a form, Radix
+        // keeps a hidden native select in step with the value, and a value
+        // set before the options have registered (the search bar adopting
+        // the remembered region right after hydration) leaves that select on
+        // "" and fires its change event: the region became empty, the label
+        // went blank and a search went to /summoner//name (seen 2026-09-23).
+        onValueChange={(next) => {
+          if (options.some((o) => o.value === next)) onValueChange(next)
+        }}
+        disabled={disabled}
+      >
         <SelectTrigger
           id={id}
           size="sm"

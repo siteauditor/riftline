@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 /**
  * What must hold on any corpus, including the empty one CI runs with: the
@@ -83,6 +83,86 @@ test('Ctrl+K opens the search dialog anywhere and Escape closes it', async ({ pa
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('combobox', { name: 'Riot ID' })).toBeFocused()
   await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+})
+
+// Five recent searches, the rows the list shows on an empty field without any
+// data from the API: enough rows that a list cut off at the edge of whatever
+// holds the field (the home hero did, 2026-09-23) loses some of them.
+const RECENT = [
+  { platform: 'sg2', gameName: 'Rhasta', tagLine: '0403' },
+  { platform: 'euw1', gameName: 'Effortless', tagLine: 'Kind' },
+  { platform: 'sg2', gameName: 'Adamavar2020', tagLine: '12345' },
+  { platform: 'kr', gameName: 'Hide on bush', tagLine: 'KR1' },
+  { platform: 'euw1', gameName: 'Caps', tagLine: 'EUW' },
+].map((r, i) => ({ ...r, iconUrl: null, at: 1_790_000_000_000 - i }))
+
+async function remember(page: Page, region?: string) {
+  await page.addInitScript(
+    ({ recent, region }) => {
+      localStorage.setItem('riftline.recent', JSON.stringify(recent))
+      if (region) localStorage.setItem('riftline.region', region)
+    },
+    { recent: RECENT, region },
+  )
+}
+
+/**
+ * Whether nothing is drawn over the middle of the element: the point hits
+ * the element itself. A row clipped by an ancestor, painted under the next
+ * section, or left without pointer events fails this, which is exactly what
+ * a user sees as a list they cannot read or click.
+ */
+function onTop(locator: Locator): Promise<boolean> {
+  return locator.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+    return hit !== null && el.contains(hit)
+  })
+}
+
+test('the search list is drawn whole, over the section below the hero', async ({ page }) => {
+  await remember(page)
+  await open(page, '/')
+  const riotId = page.getByRole('combobox', { name: 'Riot ID' })
+  await riotId.click()
+  const options = page.getByRole('listbox').getByRole('option')
+  await expect(options).toHaveCount(RECENT.length)
+  for (const option of await options.all()) {
+    await expect.poll(() => onTop(option)).toBe(true)
+  }
+  // The field keeps focus while the list is open, and Escape closes it.
+  await expect(riotId).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('listbox')).toBeHidden()
+})
+
+test('a remembered region survives hydration and is the one searched', async ({ page }) => {
+  // The prerendered HTML says EUW; this browser remembers KR. The region
+  // once went blank right after hydration and the search went to
+  // /summoner//Faker/KR1.
+  await remember(page, 'kr')
+  const errors = await open(page, '/')
+  await expect(page.getByRole('combobox', { name: 'Region' })).toHaveText('KR')
+  const riotId = page.getByRole('combobox', { name: 'Riot ID' })
+  await riotId.fill('Faker#KR1')
+  await riotId.press('Enter')
+  await expect(page).toHaveURL(/\/summoner\/kr\/Faker\/KR1$/)
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('the search dialog shows its list above the dialog and picks from it', async ({ page }) => {
+  await remember(page)
+  await open(page, '/method/score')
+  await page.keyboard.press('Control+k')
+  const dialog = page.getByRole('dialog')
+  const riotId = dialog.getByRole('combobox', { name: 'Riot ID' })
+  await expect(riotId).toBeFocused()
+  await riotId.press('ArrowDown')
+  const last = page.getByRole('listbox').getByRole('option').last()
+  await expect.poll(() => onTop(last)).toBe(true)
+  await last.click()
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Caps\/EUW$/)
   await expect(dialog).toBeHidden()
 })
 

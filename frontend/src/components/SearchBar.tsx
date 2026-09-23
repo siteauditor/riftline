@@ -1,6 +1,8 @@
-import { useId, useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 
 import RankBadge from './RankBadge'
 import SelectField from './SelectField'
@@ -72,7 +74,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   // browser remembers (read hydration-safely, see useLastRegion), else EUW.
   const [chosen, setChosen] = useState<string | null>(null)
   const remembered = useLastRegion()
-  const platform = chosen ?? initialPlatform ?? remembered ?? 'euw1'
+  const platform = chosen || initialPlatform || remembered || 'euw1'
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
@@ -80,6 +82,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   // index would silently move the highlight onto whichever row landed there.
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const recent = useRecentSearches()
+  const rowRef = useRef<HTMLDivElement>(null)
 
   const text = value.trim()
   const settled = useDebounced(text, DEBOUNCE_MS)
@@ -209,76 +212,106 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
 
   return (
     <form onSubmit={onSubmit} className="relative w-full">
-      <div
-        className={`flex items-stretch overflow-hidden frame transition-colors focus-within:border-gold ${
-          large ? 'h-14' : 'h-10'
-        }`}
+      {/* The list is a popover anchored to the field row and portalled to the
+          body. Drawn in place, it was clipped by whatever held the field: the
+          home hero hides its overflow for the splash art, and cut the list
+          off at its bottom edge after three rows (seen 2026-09-23). */}
+      <Popover
+        open={showList}
+        onOpenChange={(next) => {
+          if (next) return
+          setOpen(false)
+          setActiveKey(null)
+        }}
       >
-        {/* The divider and ground sit on the wrapper: the select itself is
-            bare, or it would draw a second border inside this one. */}
-        <span className="flex items-stretch border-r border-line bg-raised">
-          <SelectField
-            ariaLabel="Region"
-            bare
-            value={platform}
-            onValueChange={(v) => {
-              setChosen(v)
-              rememberRegion(v)
-            }}
-            className="h-full"
-            triggerClassName={`pl-3 font-display font-600 tracking-wide text-ink-dim hover:text-ink ${
-              large ? 'text-sm' : 'text-xs'
+        <PopoverAnchor asChild>
+          <div
+            ref={rowRef}
+            className={`flex items-stretch overflow-hidden frame transition-colors focus-within:border-gold ${
+              large ? 'h-14' : 'h-10'
             }`}
-            options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
-          />
-        </span>
+          >
+            {/* The divider and ground sit on the wrapper: the select itself is
+                bare, or it would draw a second border inside this one. */}
+            <span className="flex items-stretch border-r border-line bg-raised">
+              <SelectField
+                ariaLabel="Region"
+                bare
+                value={platform}
+                onValueChange={(v) => {
+                  setChosen(v)
+                  rememberRegion(v)
+                }}
+                className="h-full"
+                triggerClassName={`pl-3 font-display font-600 tracking-wide text-ink-dim hover:text-ink ${
+                  large ? 'text-sm' : 'text-xs'
+                }`}
+                options={PLATFORMS.map((p) => ({ value: p.id, label: p.label }))}
+              />
+            </span>
 
-        <label className="sr-only" htmlFor={`${id}-riot-id`}>
-          Riot ID
-        </label>
-        <input
-          id={`${id}-riot-id`}
-          value={value}
-          autoFocus={autoFocus}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={showList}
-          aria-controls={listId}
-          aria-activedescendant={
-            showList && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
-          }
-          onChange={(e) => {
-            setValue(e.target.value)
-            setOpen(true)
-            setActiveKey(null)
-            if (error) setError(null)
-          }}
-          onKeyDown={onKeyDown}
-          onMouseDown={() => setOpen(true)}
-          onBlur={() => {
-            setOpen(false)
-            setActiveKey(null)
-          }}
-          placeholder="Caps#EUW"
-          spellCheck={false}
-          autoComplete="off"
-          className={`min-w-0 flex-1 bg-transparent px-4 text-ink placeholder:text-ink-faint ${
-            large ? 'text-lg' : 'text-sm'
-          }`}
-        />
+            <label className="sr-only" htmlFor={`${id}-riot-id`}>
+              Riot ID
+            </label>
+            <input
+              id={`${id}-riot-id`}
+              value={value}
+              autoFocus={autoFocus}
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showList}
+              aria-controls={listId}
+              aria-activedescendant={
+                showList && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
+              }
+              onChange={(e) => {
+                setValue(e.target.value)
+                setOpen(true)
+                setActiveKey(null)
+                if (error) setError(null)
+              }}
+              onKeyDown={onKeyDown}
+              onMouseDown={() => setOpen(true)}
+              onBlur={() => {
+                setOpen(false)
+                setActiveKey(null)
+              }}
+              placeholder="Caps#EUW"
+              spellCheck={false}
+              autoComplete="off"
+              className={`min-w-0 flex-1 bg-transparent px-4 text-ink placeholder:text-ink-faint ${
+                large ? 'text-lg' : 'text-sm'
+              }`}
+            />
 
-        <button
-          type="submit"
-          className={`bg-accent px-5 font-display font-700 uppercase tracking-[0.12em] text-deep transition-colors hover:bg-accent-bright ${
-            large ? 'text-sm' : 'text-xs'
-          }`}
+            <button
+              type="submit"
+              className={`bg-accent px-5 font-display font-700 uppercase tracking-[0.12em] text-deep transition-colors hover:bg-accent-bright ${
+                large ? 'text-sm' : 'text-xs'
+              }`}
+            >
+              Search
+            </button>
+          </div>
+        </PopoverAnchor>
+
+        <PopoverContent
+          align="start"
+          sideOffset={4}
+          // A list of options, not a dialog: the field keeps focus and says
+          // which option is active, so the popover takes no role of its own.
+          role="presentation"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => e.preventDefault()}
+          // A press on the field itself is not outside: it opens the list, and
+          // letting it count would close the list and reopen it in one click.
+          onInteractOutside={(e) => {
+            if (rowRef.current?.contains(e.target as Node)) e.preventDefault()
+          }}
+          // Opaque: at the panel's usual 94% the text under the list showed
+          // through it.
+          className="w-(--radix-popover-trigger-width) overflow-hidden rounded-lg border-line bg-panel p-0 text-ink shadow-[0_18px_44px_-12px_rgb(0_0_0/0.85)]"
         >
-          Search
-        </button>
-      </div>
-
-      {showList && (
-        <div className="absolute inset-x-0 top-full z-50 mt-1 overflow-hidden frame shadow-[0_16px_40px_-12px_rgb(0_0_0/0.7)]">
           {!text && (
             <p id={`${listId}-label`} className="px-3 pb-1 pt-2 text-xs text-ink-faint">
               Recent
@@ -331,8 +364,8 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
                 : 'Players Riftline has seen. For anyone else, search the full Name#TAG.'}
             </p>
           )}
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
 
       {error && (
         <p role="alert" className="mt-2 text-sm text-loss">
