@@ -252,6 +252,21 @@ test('removing the lane opponent takes them off the board, not only the mark', a
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test('a champion checked by hand is pinned above the list with its place', async ({ page }) => {
+  await open(page, '/draft')
+  const check = page.getByRole('combobox', { name: 'Check a champion' })
+  const empty = page.getByText('No matches ingested yet')
+  await expect(check.or(empty)).toBeVisible()
+  test.skip(await empty.isVisible(), 'The draft board needs a corpus of matches.')
+  await check.fill('ahri')
+  await check.press('Enter')
+  await expect(page).toHaveURL(/check=103/)
+  const checked = page.getByRole('region', { name: 'Champions you checked' })
+  await expect(checked.getByText('Ahri', { exact: true })).toBeVisible()
+  await checked.getByRole('button', { name: 'Stop checking Ahri' }).click()
+  await expect(page).not.toHaveURL(/check=/)
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

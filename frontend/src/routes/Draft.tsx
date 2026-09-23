@@ -4,30 +4,36 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
 import SelectField from '../components/SelectField'
+import ChampionPicker from '../components/ChampionPicker'
+import CopyButton from '../components/CopyButton'
 import PositionIcon from '../components/PositionIcon'
 import { Results, SuggestionSkeleton } from '../components/draft/Results'
 import RiotIdField from '../components/draft/RiotIdField'
 import Slot from '../components/draft/Slot'
 import { useDraftBoard } from '../components/draft/useDraftBoard'
 import { EmptyState, ErrorView } from '../components/StateViews'
-import { api, POSITIONS, type DraftRequest } from '../lib/api'
+import { api, POSITIONS, type DraftRequest, type DraftResponse } from '../lib/api'
 import {
   CAPS,
   COMFORT_LEVELS,
+  MAX_CHECKS,
+  addCheck,
   addTo,
   boardIsSet,
   clearBoard,
   minGamesOptions,
+  removeCheck,
   removeFrom,
   requestKey,
   setComfort,
+  setLaneUnknown,
   setMinGames,
   setRole,
   toggleLane,
   unavailable,
   type RiotIdChoice,
 } from '../lib/draftBoard'
-import { parseRiotId, plausibleRiotId, positionLabel } from '../lib/format'
+import { parseRiotId, pct, plausibleRiotId, positionLabel } from '../lib/format'
 import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { rememberRegion, useLastRegion, useLastRiotId } from '../lib/storage'
@@ -100,16 +106,27 @@ export default function Draft() {
   // suggestion: that changed with every champion added, and the header art
   // swapped with it.
   const heroArt = useChampionArt(board.lane ?? board.enemies[0] ?? board.allies[0] ?? null)
+  const read = draft.data
+  // Each enemy's likely role, from the last answer, for the enemy chips.
+  const enemyRole = new Map(
+    (read?.enemy_roles ?? []).map((r) => [r.champion.id, `${positionLabel(r.position)} ${pct(r.probability, 0)}`]),
+  )
+  const checking = new Map([...taken, ...board.check.map((id) => [id, 'checked'] as const)])
 
   return (
     <div>
       <Head {...heads.draft()} />
       <ArtHeader art={heroArt}>
-        <p className="eyebrow">{positionLabel(board.role)} · pick phase</p>
+        <p className="eyebrow">
+          {positionLabel(board.role)} · {boardIsSet(board) ? 'pick phase' : 'ban phase'}
+        </p>
         <h1 className="display mt-1 text-[clamp(2rem,5vw,3.2rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
           Draft assistant
         </h1>
-        <p className="mt-3 max-w-prose text-sm leading-relaxed text-ink-dim">
+        {/* Off on a phone: there the board has to reach the first suggestion
+            within a screen, and the page said the first suggestion started at
+            989 px of an 844 px screen. */}
+        <p className="mt-3 hidden max-w-prose text-sm leading-relaxed text-ink-dim sm:block">
           Pick your role, then fill in the draft as it happens. Suggestions are ranked by
           what the records can support, not by what a handful of games claims, and every
           row shows where its number came from.
@@ -126,9 +143,11 @@ export default function Draft() {
           />
         </div>
       ) : (
-        <div className="mt-5 grid gap-6 lg:grid-cols-[320px_1fr]">
+        // On a phone the order is the board, the answer, then the settings; on
+        // a wide screen the board and the settings share the left column.
+        <div className="mt-5 grid gap-6 [grid-template-areas:'board'_'results'_'settings'] lg:grid-cols-[320px_1fr] lg:grid-rows-[auto_1fr] lg:[grid-template-areas:'board_results'_'settings_results']">
           {/* The board */}
-          <aside className="space-y-4">
+          <aside className="space-y-4 [grid-area:board]">
             <div>
               <span className="mb-1 block text-xs text-ink-faint">Your role</span>
               <ChipGroup label="Your role" className="gap-1">
@@ -146,29 +165,47 @@ export default function Draft() {
               </ChipGroup>
             </div>
 
-            <Slot
-              label="Your team"
-              placeholder="Add an ally"
-              ids={board.allies}
-              cap={CAPS.allies}
-              championById={championById}
-              unavailable={taken}
-              onAdd={(id) => update(addTo('allies', id))}
-              onRemove={(id) => update(removeFrom('allies', id))}
-            />
+            <div>
+              <Slot
+                label="Your team"
+                placeholder="Add an ally"
+                ids={board.allies}
+                cap={CAPS.allies}
+                championById={championById}
+                unavailable={taken}
+                onAdd={(id) => update(addTo('allies', id))}
+                onRemove={(id) => update(removeFrom('allies', id))}
+              />
+              {read?.role_clash && (
+                <p className="mt-1 text-[11px] leading-snug text-gold-bright">
+                  {read.role_clash.champion.name} is played {positionLabel(read.position).toLowerCase()} in{' '}
+                  {pct(read.role_clash.share, 0)} of games. Is your role right?
+                </p>
+              )}
+            </div>
 
-            <Slot
-              label="Enemy team"
-              placeholder="Add an enemy"
-              ids={board.enemies}
-              cap={CAPS.enemies}
-              championById={championById}
-              unavailable={taken}
-              onAdd={(id) => update(addTo('enemies', id))}
-              onRemove={(id) => update(removeFrom('enemies', id))}
-              lane={board.lane}
-              onToggleLane={(id) => update(toggleLane(id))}
-            />
+            <div>
+              <Slot
+                label="Enemy team"
+                placeholder="Add an enemy"
+                ids={board.enemies}
+                cap={CAPS.enemies}
+                championById={championById}
+                unavailable={taken}
+                onAdd={(id) => update(addTo('enemies', id))}
+                onRemove={(id) => update(removeFrom('enemies', id))}
+                lane={board.lane}
+                onToggleLane={(id) => update(toggleLane(id))}
+                roleNote={(id) => enemyRole.get(id) ?? null}
+              />
+              {board.enemies.length > 0 && (
+                <LaneStatus
+                  data={read}
+                  unknown={board.laneUnknown}
+                  onUnknown={(unknown) => update(setLaneUnknown(unknown))}
+                />
+              )}
+            </div>
 
             <Slot
               label="Banned"
@@ -181,13 +218,37 @@ export default function Draft() {
               onRemove={(id) => update(removeFrom('bans', id))}
             />
 
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <CopyButton
+                text={() => window.location.href}
+                className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
+              >
+                Copy this draft’s link
+              </CopyButton>
+              {boardIsSet(board) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    update(clearBoard)
+                    toast('Board cleared')
+                  }}
+                  className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
+                >
+                  Clear the board
+                </button>
+              )}
+            </div>
+          </aside>
+
+          {/* Settings */}
+          <div className="space-y-4 self-start [grid-area:settings]">
             <RiotIdField
               platform={platform}
               onPlatformChange={(v) => {
                 setChosenRegion(v)
                 rememberRegion(v)
               }}
-              status={draft.data?.personalisation}
+              status={read?.personalisation}
               comfort={board.comfort}
             />
 
@@ -207,35 +268,35 @@ export default function Draft() {
               onValueChange={(v) => update(setMinGames(Number(v)))}
               options={minGamesOptions(board.min)}
             />
-
-            {boardIsSet(board) && (
-              <button
-                onClick={() => {
-                  update(clearBoard)
-                  toast('Board cleared')
-                }}
-                className="text-xs text-ink-faint underline decoration-line underline-offset-2 transition-colors hover:text-ink"
-              >
-                Clear the board
-              </button>
-            )}
-          </aside>
+          </div>
 
           {/* Results */}
-          <div className="min-w-0">
+          <div className="min-w-0 [grid-area:results]">
             {draft.isError && (
               <ErrorView error={draft.error} onRetry={() => draft.refetch()} />
             )}
 
             {draft.isPending && !draft.isError && <SuggestionSkeleton />}
 
-            {draft.data && (
+            {read && (
               <Results
-                data={draft.data}
+                data={read}
                 comfort={board.comfort}
                 min={board.min}
                 stale={draft.isPlaceholderData}
                 onMinGames={(min) => update(setMinGames(min))}
+                onUncheck={(id) => update(removeCheck(id))}
+                checker={
+                  <ChampionPicker
+                    label="Check a champion"
+                    placeholder="How would they do here?"
+                    inputId="draft-check"
+                    onPick={(id) => update(addCheck(id))}
+                    unavailable={checking}
+                    full={board.check.length >= MAX_CHECKS}
+                    count={board.check.length > 0 ? `${board.check.length}/${MAX_CHECKS}` : undefined}
+                  />
+                }
               />
             )}
           </div>
@@ -246,3 +307,52 @@ export default function Draft() {
   )
 }
 
+/**
+ * Who the board thinks is in your lane, and the way to say otherwise.
+ *
+ * With nobody marked, the enemies' likely roles give each one a chance of
+ * being your laner, and their lane records count by that chance. "No lane
+ * opponent yet" stops the guess, which makes the pick a blind one: each
+ * suggestion then lists the lanes it is known to lose.
+ */
+function LaneStatus({
+  data,
+  unknown,
+  onUnknown,
+}: {
+  data: DraftResponse | undefined
+  unknown: boolean
+  onUnknown: (unknown: boolean) => void
+}) {
+  const opponent = data?.lane_opponent
+  const button =
+    'rounded-sm text-[11px] text-ink-faint underline decoration-line underline-offset-2 outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60'
+  if (unknown) {
+    return (
+      <p className="mt-1.5 text-[11px] leading-snug text-ink-faint">
+        Lane opponent unknown: each pick lists the lanes it is known to lose.{' '}
+        <button type="button" className={button} onClick={() => onUnknown(false)}>
+          Guess from the enemy picks
+        </button>
+      </p>
+    )
+  }
+  if (!opponent) return null
+  if (opponent.source === 'marked') {
+    return (
+      <p className="mt-1.5 text-[11px] leading-snug text-ink-faint">
+        In your lane: {opponent.champion.name}, as you marked.
+      </p>
+    )
+  }
+  return (
+    <p className="mt-1.5 text-[11px] leading-snug text-ink-faint">
+      Probably in your lane: {opponent.champion.name}, {pct(opponent.probability, 0)} likely from how
+      often each enemy plays each role. Mark the right one, or{' '}
+      <button type="button" className={button} onClick={() => onUnknown(true)}>
+        treat the lane as unknown
+      </button>
+      .
+    </p>
+  )
+}

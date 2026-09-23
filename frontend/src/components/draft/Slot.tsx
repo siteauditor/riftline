@@ -24,6 +24,7 @@ export default function Slot({
   onRemove,
   lane,
   onToggleLane,
+  roleNote,
 }: {
   label: string
   placeholder: string
@@ -37,6 +38,8 @@ export default function Slot({
   /** The enemy side only: who is in your lane, and how to change it. */
   lane?: number | null
   onToggleLane?: (id: number) => void
+  /** A word about each champion's likely role, as "Mid 86%". */
+  roleNote?: (id: number) => string | null
 }) {
   const id = useId()
   const inputId = `${id}-input`
@@ -86,6 +89,11 @@ export default function Slot({
                   {name(champion)}
                   <span aria-hidden>✕</span>
                 </button>
+                {roleNote?.(champion) && (
+                  <span className="tnum border-l border-line px-1.5 py-1 text-[10px] text-ink-faint">
+                    {roleNote(champion)}
+                  </span>
+                )}
                 {onToggleLane && (
                   <Hint
                     text={

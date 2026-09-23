@@ -48,9 +48,15 @@ export interface Board {
   bans: number[]
   /** The enemy in your lane, when you have said which one it is. */
   lane: number | null
+  /** You have said the lane is unknown: no guess from the enemy picks (`lane=none`). */
+  laneUnknown: boolean
+  /** Champions checked by hand, ranked whatever their place (`check=`, up to three). */
+  check: number[]
   min: number
   comfort: number
 }
+
+export const MAX_CHECKS = 3
 
 export type Side = 'allies' | 'enemies' | 'bans'
 
@@ -87,6 +93,9 @@ export function parseBoard(search: URLSearchParams): Board {
   const allies = side('allies')
   const enemies = side('enemies')
   const bans = side('bans')
+  const check = ids(search.get('check'))
+    .filter((id) => !taken.has(id))
+    .slice(0, MAX_CHECKS)
   const lane = Number(search.get('lane'))
   const min = Number(search.get('min'))
   // `has` first: Number(null) is 0, which is the Off level, so a link without a
@@ -98,6 +107,8 @@ export function parseBoard(search: URLSearchParams): Board {
     enemies,
     bans,
     lane: enemies.includes(lane) ? lane : null,
+    laneUnknown: search.get('lane') === 'none',
+    check,
     min: Number.isInteger(min) && min >= 1 ? Math.min(min, MAX_MIN_GAMES) : DEFAULT_MIN_GAMES,
     comfort: COMFORT_LEVELS.some((c) => c.value === comfort) ? comfort : DEFAULT_COMFORT,
   }
@@ -112,7 +123,8 @@ export function boardParams(board: Board, base: URLSearchParams): URLSearchParam
       allies: board.allies.map(String),
       enemies: board.enemies.map(String),
       bans: board.bans.map(String),
-      lane: board.lane,
+      lane: board.lane ?? (board.laneUnknown ? 'none' : null),
+      check: board.check.map(String),
       min: board.min,
       comfort: board.comfort,
     },
@@ -146,7 +158,12 @@ export const addTo =
   (board: Board): Board =>
     unavailable(board).has(id) || isFull(board, side)
       ? board
-      : { ...board, [side]: [...board[side], id] }
+      : {
+          ...board,
+          [side]: [...board[side], id],
+          // A champion on the board is not one to check any more.
+          check: board.check.filter((c) => c !== id),
+        }
 
 export const removeFrom =
   (side: Side, id: number) =>
@@ -159,7 +176,23 @@ export const removeFrom =
 
 export const toggleLane =
   (id: number) =>
-  (board: Board): Board => ({ ...board, lane: board.lane === id ? null : id })
+  (board: Board): Board => ({ ...board, lane: board.lane === id ? null : id, laneUnknown: false })
+
+/** "No lane opponent yet": stop guessing one from the enemy picks, or start again. */
+export const setLaneUnknown =
+  (unknown: boolean) =>
+  (board: Board): Board => ({ ...board, lane: unknown ? null : board.lane, laneUnknown: unknown })
+
+export const addCheck =
+  (id: number) =>
+  (board: Board): Board =>
+    board.check.includes(id) || board.check.length >= MAX_CHECKS || unavailable(board).has(id)
+      ? board
+      : { ...board, check: [...board.check, id] }
+
+export const removeCheck =
+  (id: number) =>
+  (board: Board): Board => ({ ...board, check: board.check.filter((c) => c !== id) })
 
 export const setMinGames =
   (min: number) =>
@@ -181,6 +214,7 @@ export const clearBoard = (board: Board): Board => ({
   enemies: [],
   bans: [],
   lane: null,
+  laneUnknown: false,
 })
 
 export const boardIsSet = (board: Board) =>
@@ -209,6 +243,8 @@ export function draftRequest(board: Board, riot: RiotIdChoice | null): DraftRequ
     enemies: sorted(board.enemies),
     bans: sorted(board.bans),
     enemy_laner: board.lane,
+    infer_lane: !board.laneUnknown,
+    include: sorted(board.check),
     min_games: board.min,
     comfort_weight: board.comfort,
     platform: personal ? riot.platform : null,

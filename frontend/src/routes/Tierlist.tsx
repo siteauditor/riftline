@@ -9,10 +9,10 @@ import SelectField from '../components/SelectField'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
 import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
-import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
+import { type ChampionMetaRow } from '../lib/api'
 import { queries, TIERLIST_MIN_GAMES } from '../lib/queries'
 import { heads } from '../lib/seo'
-import { compact, pct, positionLabel, shortDate, tierColor, tierLabel } from '../lib/format'
+import { compact, pct, positionLabel } from '../lib/format'
 import {
   foldName,
   SLICE_DEFAULTS,
@@ -25,6 +25,7 @@ import {
 } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import Hint from '../components/Hint'
+import LobbyRanks from '../components/LobbyRanks'
 
 /**
  * Tier badges: a ramp of treatments, not just of hues.
@@ -261,49 +262,6 @@ export default function Tierlist() {
         </>
       )}
     </div>
-    </div>
-  )
-}
-
-/**
- * How the games behind this slice were ranked.
- *
- * Measured, not assumed: each lobby's median rank. The crawler starts from the
- * top of the ladder, so on 16.18 95% of the games were Master+ lobbies, and a
- * Gold player reading this list should know that. Riot keeps no historical
- * rank, so the measurement is where those players stood on the day it was
- * taken, which the line says.
- */
-function LobbyRanks({ lobby }: { lobby: NonNullable<MetaResponse['lobby_ranks']> }) {
-  if (lobby.measured === 0) return null
-  const top = lobby.buckets[0]
-  const label = (tier: string) => (tier === 'MASTER+' ? 'Master+' : tierLabel(tier))
-  const colour = (tier: string) => tierColor(tier === 'MASTER+' ? 'MASTER' : tier)
-  const measuredOn = lobby.as_of ? shortDate(lobby.as_of) : null
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-ink-dim">
-      <span className="flex h-1.5 w-32 overflow-hidden rounded-full bg-raised" aria-hidden>
-        {lobby.buckets.map((b) => (
-          <span
-            key={b.tier}
-            style={{ width: `${(b.games / lobby.measured) * 100}%`, background: colour(b.tier) }}
-          />
-        ))}
-      </span>
-      <Hint text={lobby.buckets.map((b) => `${label(b.tier)}: ${b.games}`).join(', ')}>
-      <span tabIndex={0} className="outline-none">
-        <span className="tnum text-ink">{pct(top.games / lobby.measured)}</span> of these
-        games were {label(top.tier)} lobbies
-        <span className="text-ink-faint">
-          {' '}
-          ({lobby.measured.toLocaleString('en-US')} of {lobby.total.toLocaleString('en-US')} measured)
-        </span>
-      </span>
-      </Hint>
-      <span className="text-ink-faint">
-        Median rank of each lobby
-        {measuredOn ? `, measured ${measuredOn}` : ''}, not when the games were played.
-      </span>
     </div>
   )
 }

@@ -13,6 +13,9 @@ import {
   setMinGames,
   toggleLane,
   unavailable,
+  addCheck,
+  removeCheck,
+  setLaneUnknown,
 } from './draftBoard'
 
 const board = (query: string) => parseBoard(new URLSearchParams(query))
@@ -25,6 +28,8 @@ describe('parseBoard', () => {
       enemies: [157, 64],
       bans: [86],
       lane: 157,
+      laneUnknown: false,
+      check: [],
       min: 30,
       comfort: 0.4,
     })
@@ -103,6 +108,28 @@ describe('the request', () => {
     const riot = { platform: 'kr', name: 'Faker', tag: 'KR1' }
     expect(JSON.parse(requestKey(board('comfort=0.15'), riot)).game_name).toBe('Faker')
     expect(JSON.parse(requestKey(board('comfort=0'), riot)).game_name).toBeNull()
+  })
+})
+
+describe('the lane and the checks', () => {
+  it('reads "no lane opponent yet" and a mark clears it', () => {
+    const unknown = board('enemies=64&lane=none')
+    expect(unknown.laneUnknown).toBe(true)
+    expect(unknown.lane).toBeNull()
+    expect(JSON.parse(requestKey(unknown, null)).infer_lane).toBe(false)
+    const marked = toggleLane(64)(unknown)
+    expect(marked.laneUnknown).toBe(false)
+    expect(boardParams(marked, new URLSearchParams('enemies=64&lane=none')).get('lane')).toBe('64')
+    expect(boardParams(setLaneUnknown(true)(board('enemies=64')), new URLSearchParams('enemies=64')).get('lane')).toBe('none')
+  })
+
+  it('checks up to three champions, none of them already on the board', () => {
+    const b = board('check=1,2,3,4&allies=2')
+    expect(b.check).toEqual([1, 3, 4])
+    expect(addCheck(9)(b)).toBe(b)
+    expect(addCheck(5)(removeCheck(1)(b)).check).toEqual([3, 4, 5])
+    // Adding a checked champion to the board takes it off the checks.
+    expect(addTo('allies', 3)(board('check=3')).check).toEqual([])
   })
 })
 

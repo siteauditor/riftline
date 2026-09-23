@@ -5,7 +5,7 @@ import SelectField from '../SelectField'
 import { ApiError, PLATFORMS, api, type Group } from '../../lib/api'
 import { editLink, riotIdsIn } from '../../lib/groups'
 import { lastRegion, rememberRegion } from '../../lib/storage'
-import CopyButton from './CopyButton'
+import CopyButton from '../CopyButton'
 import { buttonVariants } from '@/components/ui/button'
 import { toast } from 'sonner'
 

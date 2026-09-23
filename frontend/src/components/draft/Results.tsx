@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 
 import Hint from '../Hint'
+import LobbyRanks from '../LobbyRanks'
 import { EmptyState } from '../StateViews'
 import WinRateRange from '../WinRateRange'
 import type { DraftEvidence, DraftResponse, DraftSuggestion } from '../../lib/api'
@@ -91,17 +92,25 @@ export function Results({
   min,
   stale,
   onMinGames,
+  onUncheck,
+  checker,
 }: {
   data: DraftResponse
   comfort: number
   min: number
   stale: boolean
   onMinGames: (min: number) => void
+  onUncheck: (id: number) => void
+  /** The "check a champion" field, drawn under the list. */
+  checker?: ReactNode
 }) {
-  if (data.suggestions.length === 0) {
+  if (data.suggestions.length === 0 && data.pinned.length === 0) {
     return <TooFewGames data={data} min={min} onMinGames={onMinGames} />
   }
   const earlier = data.patches.filter((p) => p !== data.patch)
+  // In solo queue every ban comes before any pick, so while nothing is picked
+  // the question on screen is who to ban.
+  const banPhase = data.allies.length + data.enemies.length === 0
   return (
     <div aria-busy={stale} className={stale ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -111,7 +120,13 @@ export function Results({
             {earlier.length > 0 && `, lane records with ${earlier.join(' and ')}`}
           </span>
           <span>{positionLabel(data.position)}</span>
-          {data.enemy_laner && <span>against {data.enemy_laner.name}</span>}
+          {data.lane_opponent && (
+            <span>
+              against {data.lane_opponent.champion.name}
+              {data.lane_opponent.source === 'inferred' && ` (${pct(data.lane_opponent.probability, 0)} likely)`}
+            </span>
+          )}
+          {data.blind && <span>blind pick</span>}
           <span>{masteryNote(data, comfort)}</span>
         </p>
         <Hint
@@ -130,17 +145,50 @@ export function Results({
           </button>
         </Hint>
       </div>
+      {banPhase && (
+        <div className="mt-4">
+          <Bans data={data} />
+        </div>
+      )}
+
+      {data.pinned.length > 0 && (
+        <section aria-label="Champions you checked" className="mt-4">
+          <h2 className="eyebrow">Checked</h2>
+          <ul className="mt-1">
+            {data.pinned.map((s) => (
+              <SuggestionRow
+                key={`pinned-${s.champion.id}`}
+                suggestion={s}
+                data={data}
+                place={
+                  s.below_min
+                    ? `under ${min} games`
+                    : s.rank
+                      ? `#${s.rank}`
+                      : ''
+                }
+                onUncheck={() => onUncheck(s.champion.id)}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
 
       <ol className="mt-3">
         {data.suggestions.map((s, i) => (
-          <SuggestionRow key={s.champion.id} suggestion={s} place={i + 1} data={data} />
+          <SuggestionRow key={s.champion.id} suggestion={s} place={String(i + 1)} data={data} />
         ))}
       </ol>
 
-      {/* items-start: the folded "How this is scored" box stretched to the ban
+      {/* Under the list, not over it: on a phone the board and these two
+          pushed the first suggestion to 912 px of an 844 px screen. */}
+      {checker && <div className="mt-4 max-w-xs">{checker}</div>}
+      {data.lobby_ranks && <LobbyRanks lobby={data.lobby_ranks} className="mt-4" />}
+
+      {/* items-start: the folded "How this is ranked" box stretched to the ban
           list's height and sat there as a large empty frame. */}
       <div className="mt-6 grid items-start gap-6 lg:grid-cols-2">
-        <Bans data={data} />
+        {!banPhase && <Bans data={data} />}
         <HowScored data={data} comfort={comfort} />
       </div>
     </div>
@@ -153,40 +201,97 @@ const CALL_WORDS: Record<DraftEvidence['call'], string> = {
   level: 'too few games to call',
 }
 
-/** One record, in a line: the other champion, the W-L, and against what. */
-function recordLine(e: DraftEvidence, where: string): string {
+const points = (value: number) => `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)} points`
+const record = (e: DraftEvidence) => `${e.wins}-${e.games - e.wins} over ${e.games} games`
+
+/** One record against the rest of the board, in a line. */
+function recordLine(e: DraftEvidence, where: string, note = ''): string {
   return (
-    `${where} ${e.champion.name}: ${e.wins}-${e.games - e.wins} (${pct(e.win_rate, 0)}) ` +
+    `${where} ${e.champion.name}${note}: ${e.wins}-${e.games - e.wins} (${pct(e.win_rate, 0)}) ` +
     `against its usual ${pct(e.own_rate, 0)}, ${CALL_WORDS[e.call]}`
   )
+}
+
+/**
+ * The lane lines, written here because they name the opponent. A marked laner's
+ * record counts in full; an inferred one's counts in proportion to how likely
+ * that enemy is to be in your lane, and the line says both.
+ */
+function laneLines(s: DraftSuggestion, data: DraftResponse): string[] {
+  const lanes = s.evidence.filter((e) => e.kind === 'lane')
+  const lines: string[] = []
+  for (const e of lanes) {
+    if (data.lane_opponent?.source === 'marked') {
+      lines.push(
+        e.call === 'level'
+          ? `against ${e.champion.name}: ${record(e)}, too few games to call, ${points(e.lift)}`
+          : `${e.call} into ${e.champion.name}: ${record(e)}, ${points(e.lift)}`,
+      )
+    } else {
+      lines.push(
+        `${e.champion.name} in your lane (${pct(e.weight, 0)} likely): ${record(e)}, ` +
+          `${CALL_WORDS[e.call]}, counts ${points(e.weight * e.lift)}`,
+      )
+    }
+    if (e.gold_diff_14 !== null) {
+      lines.push(
+        `usually ${e.gold_diff_14 >= 0 ? '+' : ''}${Math.round(e.gold_diff_14).toLocaleString('en-US')} gold ` +
+          `by 14 against ${e.champion.name}, over ${e.timeline_games} games with timelines`,
+      )
+    }
+  }
+  if (data.blind) {
+    for (const e of s.blind_risks) {
+      lines.push(
+        `blind risk: loses to ${e.champion.name}, ${e.wins}-${e.games - e.wins} over ${e.games} games, ` +
+          `picked in ${pct(e.weight, 0)} of ${positionLabel(data.position).toLowerCase()} games`,
+      )
+    }
+  }
+  if (s.laning) {
+    const bits = [
+      s.laning.gold_diff_14 !== null &&
+        `${s.laning.gold_diff_14 >= 0 ? '+' : ''}${Math.round(s.laning.gold_diff_14).toLocaleString('en-US')} gold`,
+      s.laning.cs_diff_14 !== null && `${s.laning.cs_diff_14 >= 0 ? '+' : ''}${s.laning.cs_diff_14.toFixed(1)} CS`,
+    ].filter(Boolean)
+    if (bits.length) {
+      lines.push(`laning at 14 minutes: ${bits.join(' and ')}, over ${s.laning.timeline_games} games with timelines`)
+    }
+  }
+  return lines
 }
 
 function SuggestionRow({
   suggestion: s,
   place,
   data,
+  onUncheck,
 }: {
   suggestion: DraftSuggestion
-  place: number
+  place: string
   data: DraftResponse
+  onUncheck?: () => void
 }) {
   const others = s.evidence.filter((e) => e.kind !== 'lane')
   const slug = s.champion.slug
+  const opponent = data.lane_opponent?.champion
   const build = slug ? `/champions/${slug}?position=${data.position}` : null
   // The counters tab, filtered to the opponent: that matchup's own page.
   const counters =
-    slug && data.enemy_laner
+    slug && opponent
       ? `/champions/${slug}?${new URLSearchParams({
           position: data.position,
           tab: 'counters',
-          q: data.enemy_laner.name,
+          q: opponent.name,
         })}`
       : null
+  const duoRole = data.position === 'BOTTOM' ? 'support' : 'ADC'
+  const lines = [...laneLines(s, data), ...s.reasons]
 
   return (
     <li className="border-b border-line-soft px-1 py-2.5">
       <div className="flex items-start gap-3">
-        <span className="tnum w-5 shrink-0 pt-1 text-xs text-ink-faint">{place}</span>
+        <span className="tnum w-12 shrink-0 pt-1 text-xs text-ink-faint">{place}</span>
         {s.champion.icon_url && (
           <img src={s.champion.icon_url} alt="" className="size-10 shrink-0 rounded-sm" loading="lazy" decoding="async" />
         )}
@@ -214,14 +319,24 @@ function SuggestionRow({
                 viewTransition
                 className="text-[11px] text-ink-faint underline decoration-line underline-offset-2 hover:text-ink"
               >
-                vs {data.enemy_laner?.name}
+                vs {opponent?.name}
               </Link>
             )}
+            {onUncheck && (
+              <button
+                type="button"
+                onClick={onUncheck}
+                aria-label={`Stop checking ${s.champion.name}`}
+                className="rounded-sm text-[11px] text-ink-faint underline decoration-line underline-offset-2 outline-none hover:text-loss focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                remove
+              </button>
+            )}
           </div>
-          {s.reasons.length > 0 && (
+          {lines.length > 0 && (
             <ul className="mt-0.5 text-xs leading-relaxed text-ink-dim">
-              {s.reasons.map((r) => (
-                <li key={r}>{r}</li>
+              {lines.map((line) => (
+                <li key={line}>{line}</li>
               ))}
             </ul>
           )}
@@ -234,7 +349,11 @@ function SuggestionRow({
               <ul className="mt-1 space-y-0.5 pl-3">
                 {others.map((e) => (
                   <li key={`${e.kind}-${e.champion.id}`}>
-                    {recordLine(e, e.kind === 'enemy' ? 'against' : 'beside')}
+                    {recordLine(
+                      e,
+                      e.kind === 'enemy' ? 'against' : 'beside',
+                      e.kind === 'enemy' && data.duo?.id === e.champion.id ? ` (their ${duoRole})` : '',
+                    )}
                   </li>
                 ))}
               </ul>
