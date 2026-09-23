@@ -170,7 +170,7 @@ jobs:
           docker run --rm -v ci_pages:/pages alpine sh -c 'mkdir -p "/pages/ci/summoner/euw1/Ci Player" && cp /pages/ci/index.html "/pages/ci/summoner/euw1/Ci Player/CI1.html"'
           docker run -d --name render --network ci riftline-prerender:ci node prerender/live.mjs
           docker run -d --name web-nginx --network ci -p 6124:80 -v ci_pages:/usr/share/nginx/html/pages:ro riftline-nginx:ci
-          set -x
+          set -xE
           for i in $(seq 1 15); do
             if docker exec render wget -q -O /dev/null http://127.0.0.1:3000/healthz && curl -sf -o /dev/null http://127.0.0.1:6124/; then break; fi
             sleep 2
@@ -178,6 +178,7 @@ jobs:
           docker ps -a --filter name=render --filter name=web-nginx
           check_file() {
             curl -s -D headers.txt -o body.txt "http://127.0.0.1:6124/summoner/euw1/Ci%20Player/CI1"
+            cat headers.txt
             head -1 headers.txt | grep -q ' 200'
             grep -qi '^x-prerendered: ci' headers.txt
             # An `if`, because `bash -e` never fails a step on a `!` command.
