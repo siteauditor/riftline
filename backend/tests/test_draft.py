@@ -26,16 +26,18 @@ PATCH = "D1.00"
 POSITION = "BOTTOM"
 
 
-async def seed_stat(champion_id, games, wins, *, patch=PATCH, bracket=ALL_BRACKETS, queue=420):
+async def seed_stat(champion_id, games, wins, *, patch=PATCH, bracket=ALL_BRACKETS, queue=420,
+                    position=POSITION, timeline_games=0, gold_diff=None, cs_diff=None):
     async with SessionLocal() as session:
         session.add(
             ChampionStat(
                 patch=patch, queue_id=queue, rank_bracket=bracket,
-                team_position=POSITION, champion_id=champion_id,
+                team_position=position, champion_id=champion_id,
                 games=games, wins=wins, bans=0, pool_games=max(games, 100),
                 avg_kills=6.0, avg_deaths=5.0, avg_assists=9.0,
                 avg_cs_per_min=8.0, avg_gold=12000, avg_damage=20000, avg_vision=20,
-                timeline_games=0,
+                timeline_games=timeline_games, avg_gold_diff_14=gold_diff, avg_cs_diff_14=cs_diff,
+                avg_laning_score=0.55 if timeline_games else None,
             )
         )
         await session.commit()
@@ -297,8 +299,7 @@ async def test_a_lane_shows_its_gold_lead_only_once_enough_games_have_timelines(
 
     assert picks[577].evidence[0].gold_diff_14 is None
     assert picks[578].evidence[0].gold_diff_14 == 400.0
-    assert any("gold by 14" in r for r in picks[578].reasons)
-    assert not any("gold by 14" in r for r in picks[577].reasons)
+    assert picks[578].evidence[0].timeline_games == MIN_TIMELINE_GAMES
 
 
 def _held(monkeypatch, queue, *patches):
@@ -773,3 +774,136 @@ async def test_the_response_carries_the_range_the_records_and_the_model(client):
     assert pick["score"] == pytest.approx(pick["rank_score"])
     assert pick["adjusted_win_rate"] == pytest.approx(pick["expected"])
     assert body["model"]["lane_shrinkage"] == 100
+
+
+
+# ------------------------------------------------------------ reading the board
+
+
+def _roles(monkeypatch, counts):
+    """Role priors for these champions: champion -> {position: games}."""
+    from app.services.roles import RolePriors
+
+    async def priors(_session):
+        return RolePriors(champion=counts, spell={}, participants=sum(sum(c.values()) for c in counts.values()))
+
+    monkeypatch.setattr("app.services.draft.load_priors", priors)
+
+
+async def board_and_picks(**kw):
+    ctx = DraftContext(position=kw.pop("position", POSITION), patch=kw.pop("patch", PATCH), min_games=1, **kw)
+    async with SessionLocal() as session:
+        advisor = DraftAdvisor(session)
+        board = await advisor.read_board(ctx)
+        picks, pinned = await advisor.suggest_and_check(ctx, board=board, include=kw.get("include"))
+    return board, picks, pinned
+
+
+async def test_the_lane_opponent_is_inferred_from_the_enemy_picks(monkeypatch):
+    """An enemy who plays nothing but your role is your laner; the record
+    against them counts in full."""
+    patch = "D30.00"
+    _roles(monkeypatch, {760: {"BOTTOM": 500}, 761: {"JUNGLE": 500}})
+    await seed_stat(762, 200, 100, patch=patch)
+    await seed_matchup(762, 760, games=40, wins=30, patch=patch)
+
+    board, picks, _ = await board_and_picks(patch=patch, enemies=[760, 761])
+
+    assert (board.lane_opponent, board.lane_source) == (760, "inferred")
+    assert board.lane_probability > 0.99
+    assert not board.blind
+    lane = picks[0].evidence[0]
+    assert (lane.kind, lane.champion_id) == ("lane", 760)
+    assert picks[0].context_lift == pytest.approx(lane.weight * lane.lift)
+
+
+async def test_a_flex_enemy_counts_in_proportion_to_the_chance_it_is_your_laner(monkeypatch):
+    patch = "D31.00"
+    _roles(monkeypatch, {763: {"BOTTOM": 250, "TOP": 250}})
+    await seed_stat(764, 200, 100, patch=patch)
+    await seed_matchup(764, 763, games=40, wins=30, patch=patch)
+
+    board, picks, _ = await board_and_picks(patch=patch, enemies=[763])
+
+    assert board.lane_weights[763] == pytest.approx(0.5, abs=0.01)
+    assert board.blind is False or board.lane_probability < 0.5
+    lane = picks[0].evidence[0]
+    assert picks[0].context_lift == pytest.approx(lane.weight * lane.lift)
+    assert lane.weight == pytest.approx(0.5, abs=0.01)
+
+
+async def test_a_marked_laner_overrides_the_guess_and_no_inference_means_blind(monkeypatch):
+    patch = "D32.00"
+    _roles(monkeypatch, {765: {"BOTTOM": 500}, 766: {"MIDDLE": 500}})
+    await seed_stat(767, 200, 100, patch=patch)
+
+    marked, _, _ = await board_and_picks(patch=patch, enemies=[765, 766], enemy_laner=766)
+    unknown, _, _ = await board_and_picks(patch=patch, enemies=[765, 766], infer_lane=False)
+
+    assert (marked.lane_opponent, marked.lane_source, marked.lane_weights) == (766, "marked", {766: 1.0})
+    assert unknown.lane_weights == {}
+    assert unknown.lane_opponent is None and unknown.blind
+
+
+async def test_bot_lane_finds_the_other_enemy_in_the_lane_and_a_clash_is_flagged(monkeypatch):
+    patch = "D33.00"
+    _roles(monkeypatch, {
+        768: {"BOTTOM": 500}, 769: {"UTILITY": 500},
+        770: {"BOTTOM": 470, "MIDDLE": 30},   # an ally who is almost always the ADC
+    })
+    await seed_stat(771, 200, 100, patch=patch)
+
+    board, _, _ = await board_and_picks(patch=patch, enemies=[768, 769], allies=[770])
+
+    assert board.lane_opponent == 768
+    assert board.duo == 769
+    assert board.role_clash is not None and board.role_clash[0] == 770
+    assert board.role_clash[1] == pytest.approx(0.94)
+    assert [r.position for r in board.ally_roles] == ["MIDDLE"]
+
+
+async def test_a_champion_checked_by_hand_keeps_its_rank_or_says_it_is_under_the_floor(monkeypatch):
+    patch = "D34.00"
+    _roles(monkeypatch, {})
+    await seed_stat(772, 300, 165, patch=patch)
+    await seed_stat(773, 200, 100, patch=patch)
+    await seed_stat(774, 3, 3, patch=patch)
+
+    ctx = DraftContext(position=POSITION, patch=patch, min_games=20)
+    async with SessionLocal() as session:
+        advisor = DraftAdvisor(session)
+        top, pinned = await advisor.suggest_and_check(ctx, include=[773, 774], limit=1)
+
+    assert [p.champion_id for p in top] == [772]
+    assert [(p.champion_id, p.rank, p.below_min) for p in pinned] == [(773, 2, False), (774, None, True)]
+
+
+async def test_a_blind_pick_lists_the_lanes_it_is_known_to_lose(monkeypatch):
+    """Only records the posterior calls unfavoured, not the worst of many thin ones."""
+    patch = "D35.00"
+    _roles(monkeypatch, {})
+    await seed_stat(775, 400, 200, patch=patch)
+    await seed_stat(776, 300, 150, patch=patch)    # the common opponent
+    await seed_stat(777, 20, 10, patch=patch)      # a rare one
+    await seed_matchup(775, 776, games=80, wins=24, patch=patch)   # 30%: called
+    await seed_matchup(775, 777, games=3, wins=0, patch=patch)     # 0-3: not called
+
+    board, picks, _ = await board_and_picks(patch=patch)
+    pick = next(p for p in picks if p.champion_id == 775)
+
+    assert board.blind
+    assert [(r.champion_id, r.call, r.scored) for r in pick.blind_risks] == [(776, "unfavoured", False)]
+    assert pick.blind_risks[0].weight == pytest.approx(300 / 720)
+
+
+async def test_a_champions_own_laning_figures_need_ten_games_with_timelines(monkeypatch):
+    patch = "D36.00"
+    _roles(monkeypatch, {})
+    await seed_stat(778, 200, 100, patch=patch, timeline_games=12, gold_diff=180.0, cs_diff=6.5)
+    await seed_stat(779, 200, 100, patch=patch, timeline_games=9, gold_diff=900.0, cs_diff=20.0)
+
+    _, picks, _ = await board_and_picks(patch=patch)
+    by_id = {p.champion_id: p for p in picks}
+
+    assert (by_id[778].laning.gold_diff_14, by_id[778].laning.timeline_games) == (180.0, 12)
+    assert by_id[779].laning is None

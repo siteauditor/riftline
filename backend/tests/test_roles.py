@@ -7,13 +7,17 @@ and a mode without lanes gets no lanes.
 
 from __future__ import annotations
 
+import pytest
+
 from app.db.base import SessionLocal
 from app.services.roles import (
     CONFIDENT_AT,
     RolePriors,
+    assign_partial,
     assign_team,
     clear_priors_cache,
     load_priors,
+    usual_share,
 )
 
 FLASH, TELEPORT, SMITE, IGNITE, HEAL, EXHAUST = 4, 12, 11, 14, 7, 3
@@ -111,3 +115,42 @@ async def test_the_counts_are_cached_and_can_be_dropped():
         clear_priors_cache()
         assert await load_priors(session) is not first
     clear_priors_cache()
+
+
+# ---------------------------------------------------- a team still being drafted
+
+
+def test_a_partial_team_is_placed_one_pick_at_a_time():
+    one = assign_partial([22], priors())
+    assert [c.position for c in one.calls] == ["BOTTOM"]
+    assert one.probabilities[0]["BOTTOM"] > 0.9
+    assert sum(one.probabilities[0].values()) == pytest.approx(1.0)
+
+
+def test_a_filled_position_is_not_offered_again():
+    """Your allies are placed around you: with mid taken, Ahri is not mid."""
+    allies = assign_partial([103, 22], priors(), exclude=["MIDDLE"])
+    assert "MIDDLE" not in allies.probabilities[0]
+    assert allies.calls[1].position == "BOTTOM"
+
+
+def test_five_champions_are_placed_as_a_full_team_is_without_spells():
+    full = assign_partial([266, 64, 103, 22, 412], priors())
+    assert [c.position for c in full.calls] == [ROLE_OF[c] for c in (266, 64, 103, 22, 412)]
+
+
+def test_a_flex_pick_splits_its_chance_between_its_roles():
+    flex = 999
+    split = assign_partial([flex], priors({flex: {"TOP": 50, "MIDDLE": 50}}))
+    assert split.probabilities[0]["TOP"] == pytest.approx(split.probabilities[0]["MIDDLE"], abs=0.01)
+    assert split.calls[0].confidence < CONFIDENT_AT
+
+
+def test_more_champions_than_open_positions_is_no_answer():
+    assert assign_partial([266, 64, 103, 22, 412, 1], priors()).calls == []
+    assert assign_partial([], priors()).calls == []
+
+
+def test_a_champions_usual_share_of_a_position():
+    share, games = usual_share(priors({77: {"MIDDLE": 94, "TOP": 6}}), 77, "MIDDLE")
+    assert (share, games) == (0.94, 100)

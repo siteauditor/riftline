@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -12,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DbDep, PlayerServiceDep, StaticDep
-from app.api.schemas import ChampionRef
+from app.api.schemas import ChampionRef, LobbyRanksOut, lobby_ranks_out
 from app.db.models import ChampionMastery, ChampionStat
 from app.riot.errors import RiotApiError
 from app.riot.routing import UnknownPlatform, resolve_platform
@@ -21,6 +22,7 @@ from app.services.aggregate import (
     aggregated_slices,
     available_brackets,
     default_patch,
+    lobby_rank_mix,
 )
 from app.services.draft import (
     COMFORT_MAX_BONUS,
@@ -81,6 +83,11 @@ class DraftRequest(BaseModel):
     game_name: str | None = None
     tag_line: str | None = None
     comfort_weight: float = Field(default=0.15, ge=0.0, le=1.0)
+    # With no laner given: infer the likely one from the enemy picks (the
+    # default), or treat the lane as unknown, which makes the pick a blind one.
+    infer_lane: bool = True
+    # Up to three champions to rank whatever their place: "how would Viktor do?"
+    include: list[int] = Field(default_factory=list, max_length=3)
 
     _warnings: list[str] = PrivateAttr(default_factory=list)
 
@@ -114,6 +121,35 @@ class DraftRequest(BaseModel):
         return self
 
 
+class LaningOut(BaseModel):
+    """A champion's own laning figures in the role, over its games with timelines."""
+
+    gold_diff_14: float | None = None
+    cs_diff_14: float | None = None
+    laning_score: float | None = None
+    timeline_games: int
+
+
+class RoleGuessOut(BaseModel):
+    champion: ChampionRef
+    position: str
+    probability: float
+
+
+class LaneOpponentOut(BaseModel):
+    champion: ChampionRef
+    # "marked": you said so. "inferred": the likeliest enemy for your role.
+    source: Literal["marked", "inferred"]
+    probability: float
+
+
+class RoleClashOut(BaseModel):
+    """An ally who mostly plays the role you are picking for."""
+
+    champion: ChampionRef
+    share: float
+
+
 class EvidenceOut(BaseModel):
     """One record about a pick, with the sample it rests on and how it was read."""
 
@@ -136,6 +172,9 @@ class EvidenceOut(BaseModel):
     gold_diff_14: float | None = None
     laning_score: float | None = None
     timeline_games: int = 0
+    # How likely the record applies: the chance this enemy is your laner (1 when
+    # marked), or for a blind pick's risk, how often that opponent is picked.
+    weight: float = 1.0
     # Kept for one release: pages loaded before this model read it.
     credible_lift: float = 0.0
 
@@ -160,6 +199,13 @@ class SuggestionOut(BaseModel):
     comfort_bonus: float = 0.0
     evidence: list[EvidenceOut] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    # Its place in the whole ranking; null when it is under the sample floor.
+    rank: int | None = None
+    below_min: bool = False
+    # A blind pick's worst known lanes: called unfavoured, weighted by how often
+    # that opponent is picked in the role.
+    blind_risks: list[EvidenceOut] = Field(default_factory=list)
+    laning: LaningOut | None = None
     # Kept for one release, for pages loaded before this model.
     score: float = 0.0
     base_win_rate: float = 0.0
@@ -234,6 +280,18 @@ class DraftResponse(BaseModel):
         default_factory=lambda: PersonalisationOut(status="off")
     )
     suggestions: list[SuggestionOut] = Field(default_factory=list)
+    # Champions checked by hand (`include`), with their place in the ranking.
+    pinned: list[SuggestionOut] = Field(default_factory=list)
+    # The board read before scoring.
+    lane_opponent: LaneOpponentOut | None = None
+    # No lane opponent at even odds: suggestions carry their blind risks.
+    blind: bool = True
+    duo: ChampionRef | None = None
+    enemy_roles: list[RoleGuessOut] = Field(default_factory=list)
+    ally_roles: list[RoleGuessOut] = Field(default_factory=list)
+    role_clash: RoleClashOut | None = None
+    # Who the games behind the numbers were: the lobbies' measured median rank.
+    lobby_ranks: LobbyRanksOut | None = None
     # Who to deny. False when no ally is locked in yet: then these are simply
     # the patch's strongest picks, which the page has to say rather than imply
     # it read the draft.
@@ -260,7 +318,7 @@ async def _check_champions(
     static data failed to load, the check is skipped rather than turning every
     request into a 422 while Data Dragon is down.
     """
-    asked = [*body.allies, *body.enemies, *body.bans]
+    asked = [*body.allies, *body.enemies, *body.bans, *body.include]
     if not asked:
         return
     known = {c.id for c in sd.all_champions()}
@@ -295,6 +353,26 @@ async def _most_games(db: AsyncSession, ctx: DraftContext) -> int:
         )
     ).scalar_one_or_none()
     return int(value or 0)
+
+
+# The lobby-rank mix scans every game in the slice, and the board asks for it
+# on every change: kept per slice for an hour, as the tier list's rollups are.
+LOBBY_RANKS_TTL_SECONDS = 3600
+_lobby_ranks: dict[tuple[str, int, str], tuple[float, LobbyRanksOut | None]] = {}
+
+
+async def _cached_lobby_ranks(
+    db: AsyncSession, patch: str, queue_id: int, bracket: str
+) -> LobbyRanksOut | None:
+    key = (patch, queue_id, bracket)
+    held = _lobby_ranks.get(key)
+    now = time.monotonic()
+    if held is not None and now - held[0] < LOBBY_RANKS_TTL_SECONDS:
+        return held[1]
+    mix = await lobby_rank_mix(db, patch, queue_id, bracket)
+    value = lobby_ranks_out(mix) if mix.total else None
+    _lobby_ranks[key] = (now, value)
+    return value
 
 
 def _plausible_riot_id(name: str, tag: str) -> bool:
@@ -415,10 +493,12 @@ async def suggest(
         puuid=puuid,
         comfort_weight=body.comfort_weight,
         min_games=body.min_games,
+        infer_lane=body.infer_lane,
     )
 
     advisor = DraftAdvisor(db)
-    suggestions = await advisor.suggest(ctx)
+    board = await advisor.read_board(ctx)
+    suggestions, pinned = await advisor.suggest_and_check(ctx, board=board, include=body.include)
     bans = await advisor.ban_candidates(ctx)
     # An empty list is an answer, not an error: the floor is set above what the
     # corpus holds for this role, and the page says so and offers a lower one.
@@ -446,6 +526,7 @@ async def suggest(
             gold_diff_14=e.gold_diff_14,
             laning_score=e.laning_score,
             timeline_games=e.timeline_games,
+            weight=e.weight,
             credible_lift=e.lift if e.scored else 0.0,
         )
 
@@ -467,6 +548,19 @@ async def suggest(
             comfort_bonus=s.comfort_bonus,
             evidence=[evidence(e) for e in s.evidence],
             reasons=s.reasons,
+            rank=s.rank,
+            below_min=s.below_min,
+            blind_risks=[evidence(e) for e in s.blind_risks],
+            laning=(
+                LaningOut(
+                    gold_diff_14=s.laning.gold_diff_14,
+                    cs_diff_14=s.laning.cs_diff_14,
+                    laning_score=s.laning.laning_score,
+                    timeline_games=s.laning.timeline_games,
+                )
+                if s.laning
+                else None
+            ),
             score=s.rank_score,
             base_win_rate=s.base_low,
             adjusted_win_rate=s.expected,
@@ -484,6 +578,32 @@ async def suggest(
         personalised=puuid is not None,
         personalisation=personalisation,
         suggestions=[suggestion(s) for s in suggestions],
+        pinned=[suggestion(s) for s in pinned],
+        lane_opponent=(
+            LaneOpponentOut(
+                champion=champion(board.lane_opponent),
+                source=board.lane_source,
+                probability=board.lane_probability,
+            )
+            if board.lane_opponent is not None and board.lane_source is not None
+            else None
+        ),
+        blind=board.blind,
+        duo=champion(board.duo) if board.duo is not None else None,
+        enemy_roles=[
+            RoleGuessOut(champion=champion(r.champion_id), position=r.position, probability=r.probability)
+            for r in board.enemy_roles
+        ],
+        ally_roles=[
+            RoleGuessOut(champion=champion(r.champion_id), position=r.position, probability=r.probability)
+            for r in board.ally_roles
+        ],
+        role_clash=(
+            RoleClashOut(champion=champion(board.role_clash[0]), share=board.role_clash[1])
+            if board.role_clash
+            else None
+        ),
+        lobby_ranks=await _cached_lobby_ranks(db, patch, body.queue_id, bracket),
         # The ban list never reorders on the board's records (team scope, not
         # scored); the records against your allies ride along for the page.
         bans_read_the_draft=False,

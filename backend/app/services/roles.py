@@ -156,6 +156,61 @@ def assign_team(
     return calls
 
 
+@dataclass(frozen=True, slots=True)
+class PartialAssignment:
+    """Positions for part of a team, with each champion's chance of each one."""
+
+    calls: list[RoleCall]
+    # For each champion, in order: position -> probability, summing to 1.
+    probabilities: list[dict[str, float]]
+
+
+def assign_partial(
+    champions: Sequence[int], priors: RolePriors, exclude: Sequence[str] = ()
+) -> PartialAssignment:
+    """Positions for one to five champions of a team still being drafted.
+
+    The draft board knows a team one pick at a time and never its spells, so
+    this scores every way of giving the champions distinct positions from those
+    still open (at most 120), on how often each champion plays each position,
+    and softmaxes over them as `assign_team` does. `exclude` holds positions
+    already filled: your own, when these are your allies. Each champion's chance
+    of every position comes back as well, because the draft weighs a lane record
+    by how likely that enemy is to be in your lane, rather than trusting a guess.
+    """
+    open_positions = [p for p in POSITIONS if p not in exclude]
+    k = len(champions)
+    if k == 0 or k > len(open_positions):
+        return PartialAssignment([], [])
+    fit = [[_log_p_position(priors, c, pos) for pos in open_positions] for c in champions]
+    scored = [
+        (sum(fit[i][perm[i]] for i in range(k)), perm)
+        for perm in itertools.permutations(range(len(open_positions)), k)
+    ]
+    best_score, best = max(scored)
+    weighted = [(math.exp(score - best_score), perm) for score, perm in scored]
+    mass = sum(w for w, _ in weighted)
+
+    probabilities: list[dict[str, float]] = []
+    for i in range(k):
+        shares = dict.fromkeys(open_positions, 0.0)
+        for w, perm in weighted:
+            shares[open_positions[perm[i]]] += w / mass
+        probabilities.append(shares)
+    calls = [
+        RoleCall(open_positions[best[i]], probabilities[i][open_positions[best[i]]], "inferred")
+        for i in range(k)
+    ]
+    return PartialAssignment(calls, probabilities)
+
+
+def usual_share(priors: RolePriors, champion_id: int, position: str) -> tuple[float, int]:
+    """The share of a champion's positioned games in one position, and the games."""
+    counts = priors.champion.get(champion_id, {})
+    total = sum(counts.values())
+    return (counts.get(position, 0) / total if total else 0.0), total
+
+
 _cache: tuple[float, RolePriors] | None = None
 
 

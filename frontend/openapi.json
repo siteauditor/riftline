@@ -4127,6 +4127,19 @@
       "minimum": 0.0,
       "title": "Comfort Weight",
       "default": 0.15
+     },
+     "infer_lane": {
+      "type": "boolean",
+      "title": "Infer Lane",
+      "default": true
+     },
+     "include": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "maxItems": 3,
+      "title": "Include"
      }
     },
     "type": "object",
@@ -4190,6 +4203,72 @@
       },
       "type": "array",
       "title": "Suggestions"
+     },
+     "pinned": {
+      "items": {
+       "$ref": "#/components/schemas/SuggestionOut"
+      },
+      "type": "array",
+      "title": "Pinned"
+     },
+     "lane_opponent": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LaneOpponentOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "blind": {
+      "type": "boolean",
+      "title": "Blind",
+      "default": true
+     },
+     "duo": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/ChampionRef"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "enemy_roles": {
+      "items": {
+       "$ref": "#/components/schemas/RoleGuessOut"
+      },
+      "type": "array",
+      "title": "Enemy Roles"
+     },
+     "ally_roles": {
+      "items": {
+       "$ref": "#/components/schemas/RoleGuessOut"
+      },
+      "type": "array",
+      "title": "Ally Roles"
+     },
+     "role_clash": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/RoleClashOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "lobby_ranks": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LobbyRanksOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "bans_read_the_draft": {
       "type": "boolean",
@@ -4319,6 +4398,11 @@
       "type": "integer",
       "title": "Timeline Games",
       "default": 0
+     },
+     "weight": {
+      "type": "number",
+      "title": "Weight",
+      "default": 1.0
      },
      "credible_lift": {
       "type": "number",
@@ -6088,6 +6172,32 @@
     ],
     "title": "LaneMethod"
    },
+   "LaneOpponentOut": {
+    "properties": {
+     "champion": {
+      "$ref": "#/components/schemas/ChampionRef"
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "marked",
+       "inferred"
+      ],
+      "title": "Source"
+     },
+     "probability": {
+      "type": "number",
+      "title": "Probability"
+     }
+    },
+    "type": "object",
+    "required": [
+     "champion",
+     "source",
+     "probability"
+    ],
+    "title": "LaneOpponentOut"
+   },
    "LaneRecordOut": {
     "properties": {
      "position": {
@@ -6131,6 +6241,53 @@
     ],
     "title": "LaneRecordOut",
     "description": "How this player's lanes went, per role, over games with a timeline."
+   },
+   "LaningOut": {
+    "properties": {
+     "gold_diff_14": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Gold Diff 14"
+     },
+     "cs_diff_14": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cs Diff 14"
+     },
+     "laning_score": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Laning Score"
+     },
+     "timeline_games": {
+      "type": "integer",
+      "title": "Timeline Games"
+     }
+    },
+    "type": "object",
+    "required": [
+     "timeline_games"
+    ],
+    "title": "LaningOut",
+    "description": "A champion's own laning figures in the role, over its games with timelines."
    },
    "LaningSection": {
     "properties": {
@@ -9490,6 +9647,46 @@
     ],
     "title": "ReviewMetricOut"
    },
+   "RoleClashOut": {
+    "properties": {
+     "champion": {
+      "$ref": "#/components/schemas/ChampionRef"
+     },
+     "share": {
+      "type": "number",
+      "title": "Share"
+     }
+    },
+    "type": "object",
+    "required": [
+     "champion",
+     "share"
+    ],
+    "title": "RoleClashOut",
+    "description": "An ally who mostly plays the role you are picking for."
+   },
+   "RoleGuessOut": {
+    "properties": {
+     "champion": {
+      "$ref": "#/components/schemas/ChampionRef"
+     },
+     "position": {
+      "type": "string",
+      "title": "Position"
+     },
+     "probability": {
+      "type": "number",
+      "title": "Probability"
+     }
+    },
+    "type": "object",
+    "required": [
+     "champion",
+     "position",
+     "probability"
+    ],
+    "title": "RoleGuessOut"
+   },
    "RoleReviewOut": {
     "properties": {
      "position": {
@@ -10693,6 +10890,39 @@
       },
       "type": "array",
       "title": "Reasons"
+     },
+     "rank": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Rank"
+     },
+     "below_min": {
+      "type": "boolean",
+      "title": "Below Min",
+      "default": false
+     },
+     "blind_risks": {
+      "items": {
+       "$ref": "#/components/schemas/EvidenceOut"
+      },
+      "type": "array",
+      "title": "Blind Risks"
+     },
+     "laning": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/LaningOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
      },
      "score": {
       "type": "number",

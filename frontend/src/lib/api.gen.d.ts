@@ -1482,6 +1482,13 @@ export interface components {
              * @default 0.15
              */
             comfort_weight?: number;
+            /**
+             * Infer Lane
+             * @default true
+             */
+            infer_lane?: boolean;
+            /** Include */
+            include?: number[];
         };
         /** DraftResponse */
         DraftResponse: {
@@ -1504,6 +1511,21 @@ export interface components {
             personalisation: components["schemas"]["PersonalisationOut"];
             /** Suggestions */
             suggestions: components["schemas"]["SuggestionOut"][];
+            /** Pinned */
+            pinned: components["schemas"]["SuggestionOut"][];
+            lane_opponent: components["schemas"]["LaneOpponentOut"] | null;
+            /**
+             * Blind
+             * @default true
+             */
+            blind: boolean;
+            duo: components["schemas"]["ChampionRef"] | null;
+            /** Enemy Roles */
+            enemy_roles: components["schemas"]["RoleGuessOut"][];
+            /** Ally Roles */
+            ally_roles: components["schemas"]["RoleGuessOut"][];
+            role_clash: components["schemas"]["RoleClashOut"] | null;
+            lobby_ranks: components["schemas"]["LobbyRanksOut"] | null;
             /**
              * Bans Read The Draft
              * @default false
@@ -1561,6 +1583,11 @@ export interface components {
              * @default 0
              */
             timeline_games: number;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
             /**
              * Credible Lift
              * @default 0
@@ -2193,6 +2220,17 @@ export interface components {
             /** Min Games */
             min_games: number;
         };
+        /** LaneOpponentOut */
+        LaneOpponentOut: {
+            champion: components["schemas"]["ChampionRef"];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "marked" | "inferred";
+            /** Probability */
+            probability: number;
+        };
         /**
          * LaneRecordOut
          * @description How this player's lanes went, per role, over games with a timeline.
@@ -2227,6 +2265,20 @@ export interface components {
              * @default 0
              */
             lost_big: number;
+        };
+        /**
+         * LaningOut
+         * @description A champion's own laning figures in the role, over its games with timelines.
+         */
+        LaningOut: {
+            /** Gold Diff 14 */
+            gold_diff_14: number | null;
+            /** Cs Diff 14 */
+            cs_diff_14: number | null;
+            /** Laning Score */
+            laning_score: number | null;
+            /** Timeline Games */
+            timeline_games: number;
         };
         /**
          * LaningSection
@@ -3643,6 +3695,23 @@ export interface components {
              */
             games: number;
         };
+        /**
+         * RoleClashOut
+         * @description An ally who mostly plays the role you are picking for.
+         */
+        RoleClashOut: {
+            champion: components["schemas"]["ChampionRef"];
+            /** Share */
+            share: number;
+        };
+        /** RoleGuessOut */
+        RoleGuessOut: {
+            champion: components["schemas"]["ChampionRef"];
+            /** Position */
+            position: string;
+            /** Probability */
+            probability: number;
+        };
         /** RoleReviewOut */
         RoleReviewOut: {
             /** Position */
@@ -4172,6 +4241,16 @@ export interface components {
             evidence: components["schemas"]["EvidenceOut"][];
             /** Reasons */
             reasons: string[];
+            /** Rank */
+            rank: number | null;
+            /**
+             * Below Min
+             * @default false
+             */
+            below_min: boolean;
+            /** Blind Risks */
+            blind_risks: components["schemas"]["EvidenceOut"][];
+            laning: components["schemas"]["LaningOut"] | null;
             /**
              * Score
              * @default 0

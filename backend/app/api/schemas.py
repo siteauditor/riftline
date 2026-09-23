@@ -855,6 +855,34 @@ class HealthResponse(BaseModel):
 # --------------------------------------------------------------------- mappers
 
 
+class LobbyRankBucket(BaseModel):
+    tier: str
+    games: int
+
+
+class LobbyRanksOut(BaseModel):
+    """How the games behind this slice were ranked, by measured lobby median."""
+
+    total: int
+    measured: int
+    # Highest first. MASTER+ merges the apex tiers, which cannot be told apart
+    # from a points value alone.
+    buckets: list[LobbyRankBucket] = Field(default_factory=list)
+    # Epoch ms of the newest measurement. Riot keeps no historical rank, so this
+    # is where those players stood then, not when they played.
+    as_of: int | None = None
+
+
+def lobby_ranks_out(mix) -> LobbyRanksOut:
+    """`aggregate.LobbyRankMix` on the wire."""
+    return LobbyRanksOut(
+        total=mix.total,
+        measured=mix.measured,
+        buckets=[LobbyRankBucket(tier=t, games=n) for t, n in mix.buckets],
+        as_of=epoch_ms(mix.as_of),
+    )
+
+
 def epoch_ms(stamp: datetime | None) -> int | None:
     """A stored timestamp as epoch milliseconds, for the browser.
 

@@ -58,6 +58,7 @@ from app.services.evidence import (
     RecordPart,
     read_records,
 )
+from app.services.roles import assign_partial, load_priors, usual_share
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +84,24 @@ COMFORT_FLOOR_DAYS = 365
 # Below this many games with a timeline, a lane's gold lead at 14 is one stomp.
 MIN_TIMELINE_GAMES = 5
 
+# A champion's own laning figures in the role (gold and CS at 14, the laning
+# score) are shown from this many games with a timeline. Averages over its
+# whole role, so a floor above the one for a single lane.
+MIN_LANING_TIMELINES = 10
+
+# An enemy counts as possibly in your lane from this probability. Below it the
+# record is noise weighted by almost nothing, and listing it would crowd the row.
+MIN_LANE_WEIGHT = 0.05
+# With no lane opponent at least this likely, the pick is a blind one, and the
+# page lists each suggestion's worst known lanes instead.
+BLIND_BELOW = 0.5
+# An ally who plays your role in this share of their games is flagged: the
+# board says so rather than letting a mis-set role go unnoticed.
+CLASH_SHARE = 0.6
+CLASH_MIN_GAMES = 20
+# The worst lanes shown for a blind pick.
+BLIND_RISKS = 2
+
 EvidenceKind = Literal["lane", "enemy", "ally"]
 
 
@@ -107,6 +126,20 @@ class Evidence:
     gold_diff_14: float | None = None
     laning_score: float | None = None
     timeline_games: int = 0
+    # How likely the record applies: the chance this enemy is in your lane (1
+    # when you marked them), or, for a blind pick's risk, how often that
+    # opponent is picked in the role.
+    weight: float = 1.0
+
+
+@dataclass(slots=True)
+class Laning:
+    """A champion's own laning figures in the role, over its games with timelines."""
+
+    gold_diff_14: float | None
+    cs_diff_14: float | None
+    laning_score: float | None
+    timeline_games: int
 
 
 @dataclass
@@ -132,6 +165,41 @@ class Suggestion:
     base_low: float = 0.0
     evidence: list[Evidence] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+    # Its place in the full ranking, and whether it is under the sample floor
+    # (a champion checked by hand can be).
+    rank: int | None = None
+    below_min: bool = False
+    # With no lane opponent known: the lanes this pick is known to lose.
+    blind_risks: list[Evidence] = field(default_factory=list)
+    laning: Laning | None = None
+
+
+@dataclass(slots=True)
+class RoleGuess:
+    champion_id: int
+    position: str
+    probability: float
+
+
+@dataclass
+class BoardRead:
+    """What the board says before any champion is scored."""
+
+    # Enemy -> the chance they are in your lane; {laner: 1.0} when marked.
+    lane_weights: dict[int, float] = field(default_factory=dict)
+    lane_opponent: int | None = None
+    lane_source: Literal["marked", "inferred"] | None = None
+    lane_probability: float = 0.0
+    # Bot and support: the enemy's other bot laner, most likely.
+    duo: int | None = None
+    enemy_roles: list[RoleGuess] = field(default_factory=list)
+    ally_roles: list[RoleGuess] = field(default_factory=list)
+    # An ally who mostly plays your role, and how much of the time.
+    role_clash: tuple[int, float] | None = None
+
+    @property
+    def blind(self) -> bool:
+        return self.lane_probability < BLIND_BELOW
 
 
 @dataclass
@@ -173,6 +241,8 @@ class DraftContext:
     min_games: int = 20
     # When "now" is, for how long ago a champion was played. Tests pin it.
     now: float | None = None
+    # With no laner marked: whether to infer one from the enemy picks.
+    infer_lane: bool = True
 
     @property
     def unavailable(self) -> set[int]:
@@ -217,17 +287,120 @@ class DraftAdvisor:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def suggest(self, ctx: DraftContext, *, limit: int = 15) -> list[Suggestion]:
+    async def read_board(self, ctx: DraftContext) -> BoardRead:
+        """The enemies' likely roles and your lane opponent, before any scoring.
+
+        A marked laner is certain. Otherwise each enemy's chance of being in
+        your lane comes from how often it plays each role
+        (`roles.assign_partial`), and the lane evidence is weighted by it
+        rather than trusting one guess: a flex pick split between top and mid
+        counts half in each. `infer_lane` off (the page's "no lane opponent
+        yet") leaves the lane unknown, which makes the pick a blind one.
+        """
+        priors = await load_priors(self.session)
+        enemies = list(dict.fromkeys(ctx.enemies))
+        board = BoardRead()
+        if enemies:
+            placed = assign_partial(enemies, priors)
+            board.enemy_roles = [
+                RoleGuess(c, call.position, call.confidence) for c, call in zip(enemies, placed.calls, strict=True)
+            ]
+            if ctx.enemy_laner is None and ctx.infer_lane:
+                board.lane_weights = {
+                    c: probs.get(ctx.position, 0.0)
+                    for c, probs in zip(enemies, placed.probabilities, strict=True)
+                    if probs.get(ctx.position, 0.0) >= MIN_LANE_WEIGHT
+                }
+            if ctx.position in ("BOTTOM", "UTILITY"):
+                partner = "UTILITY" if ctx.position == "BOTTOM" else "BOTTOM"
+                chances = {
+                    c: probs.get(partner, 0.0)
+                    for c, probs in zip(enemies, placed.probabilities, strict=True)
+                    if c != ctx.enemy_laner
+                }
+                if chances:
+                    duo = max(chances, key=chances.get)
+                    board.duo = duo if chances[duo] >= BLIND_BELOW else None
+        if ctx.enemy_laner is not None:
+            board.lane_weights = {ctx.enemy_laner: 1.0}
+            board.lane_opponent, board.lane_source, board.lane_probability = ctx.enemy_laner, "marked", 1.0
+        elif board.lane_weights:
+            top = max(board.lane_weights, key=board.lane_weights.get)
+            board.lane_opponent, board.lane_source = top, "inferred"
+            board.lane_probability = board.lane_weights[top]
+
+        allies = list(dict.fromkeys(ctx.allies))
+        if allies:
+            placed = assign_partial(allies, priors, exclude=[ctx.position])
+            board.ally_roles = [
+                RoleGuess(c, call.position, call.confidence) for c, call in zip(allies, placed.calls, strict=True)
+            ]
+            clashes = []
+            for ally in allies:
+                share, games = usual_share(priors, ally, ctx.position)
+                if games >= CLASH_MIN_GAMES and share >= CLASH_SHARE:
+                    clashes.append((share, ally))
+            if clashes:
+                share, ally = max(clashes)
+                board.role_clash = (ally, share)
+        return board
+
+    async def suggest(
+        self, ctx: DraftContext, *, board: BoardRead | None = None, limit: int = 15
+    ) -> list[Suggestion]:
+        top, _ = await self.suggest_and_check(ctx, board=board, limit=limit)
+        return top
+
+    async def suggest_and_check(
+        self,
+        ctx: DraftContext,
+        *,
+        board: BoardRead | None = None,
+        include: list[int] | None = None,
+        limit: int = 15,
+    ) -> tuple[list[Suggestion], list[Suggestion]]:
+        """The top of the ranking, and up to three champions checked by hand.
+
+        A checked champion comes back with its place in the whole ranking, or
+        flagged as under the sample floor when it has too few games to be in it.
+        """
+        board = board if board is not None else await self.read_board(ctx)
+        pool = await self.pool(ctx)
+        own = await self._own_rates(ctx, pool, [ctx.position])
+        ranked = await self._ranked(ctx, board, pool, own, await self._role_stats(ctx))
+        for place, suggestion in enumerate(ranked, start=1):
+            suggestion.rank = place
+        top = ranked[:limit]
+
+        wanted = [c for c in dict.fromkeys(include or []) if c not in ctx.unavailable][:3]
+        by_id = {s.champion_id: s for s in ranked}
+        missing = [c for c in wanted if c not in by_id]
+        if missing:
+            for suggestion in await self._ranked(ctx, board, pool, own, await self._stats_for(ctx, missing)):
+                suggestion.below_min = True
+                by_id[suggestion.champion_id] = suggestion
+        pinned = [by_id[c] for c in wanted if c in by_id]
+
+        if board.blind:
+            await self._blind_risks(ctx, pool, own, [*top, *pinned])
+        return top, pinned
+
+    async def _ranked(
+        self,
+        ctx: DraftContext,
+        board: BoardRead,
+        pool: tuple[str, ...],
+        own: OwnRates,
+        stats: list[ChampionStat],
+    ) -> list[Suggestion]:
+        """Every champion in `stats`, scored and sorted."""
         # The laner counts as taken even when the caller did not also list them
         # among the enemy picks: the champion you are facing is on the board.
         unavailable = ctx.unavailable
-        stats = await self._role_stats(ctx)
+        stats = [s for s in stats if s.champion_id not in unavailable]
         if not stats:
             return []
-
-        pool = await self.pool(ctx)
-        own = await self._own_rates(ctx, pool, [ctx.position])
-        lane = await self._lane(ctx, pool, own)
+        lanes = await self._lanes(ctx, pool, own, board.lane_weights)
         enemies = await self._enemy_team(ctx, pool, own)
         allies = await self._ally_synergy(ctx, pool, own)
         mastery = await self._mastery(ctx)
@@ -235,14 +408,12 @@ class DraftAdvisor:
 
         suggestions: list[Suggestion] = []
         for stat in stats:
-            if stat.champion_id in unavailable:
-                continue
             evidence = [
-                *([lane[stat.champion_id]] if stat.champion_id in lane else []),
+                *lanes.get(stat.champion_id, ()),
                 *enemies.get(stat.champion_id, ()),
                 *allies.get(stat.champion_id, ()),
             ]
-            context = _cap(sum(e.lift for e in evidence if e.scored))
+            context = _cap(sum(e.weight * e.lift for e in evidence if e.scored))
             low = wilson_lower_bound(stat.wins, stat.games)
             high = wilson_upper_bound(stat.wins, stat.games)
             win_rate = stat.wins / stat.games
@@ -268,12 +439,22 @@ class DraftAdvisor:
                 rank_score=low + context + bonus,
                 base_low=low,
                 evidence=evidence,
+                laning=(
+                    Laning(
+                        gold_diff_14=stat.avg_gold_diff_14,
+                        cs_diff_14=stat.avg_cs_diff_14,
+                        laning_score=stat.avg_laning_score,
+                        timeline_games=stat.timeline_games,
+                    )
+                    if (stat.timeline_games or 0) >= MIN_LANING_TIMELINES
+                    else None
+                ),
             )
-            suggestion.reasons = self._explain(suggestion, ctx)
+            suggestion.reasons = self._explain(suggestion, ctx, board)
             suggestions.append(suggestion)
 
         suggestions.sort(key=lambda s: s.rank_score, reverse=True)
-        return suggestions[:limit]
+        return suggestions
 
     async def ban_candidates(self, ctx: DraftContext, *, limit: int = 5) -> list[BanCandidate]:
         """The strongest picks on the patch, each in its main role, by the low end.
@@ -332,6 +513,23 @@ class DraftAdvisor:
                         ChampionStat.team_position == ctx.position,
                         ChampionStat.rank_bracket == ctx.rank_bracket,
                         ChampionStat.games >= ctx.min_games,
+                    )
+                )
+            ).scalars()
+        )
+
+    async def _stats_for(self, ctx: DraftContext, champions: list[int]) -> list[ChampionStat]:
+        """These champions in the role, whatever their games: for a hand check."""
+        return list(
+            (
+                await self.session.execute(
+                    select(ChampionStat).where(
+                        ChampionStat.patch == ctx.patch,
+                        ChampionStat.queue_id == ctx.queue_id,
+                        ChampionStat.team_position == ctx.position,
+                        ChampionStat.rank_bracket == ctx.rank_bracket,
+                        ChampionStat.champion_id.in_(champions),
+                        ChampionStat.games > 0,
                     )
                 )
             ).scalars()
@@ -409,9 +607,15 @@ class DraftAdvisor:
             patches=patches,
         )
 
-    async def _lane(self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates) -> dict[int, Evidence]:
-        """Head-to-head records against the enemy laner, keyed by our champion."""
-        if ctx.enemy_laner is None:
+    async def _lanes(
+        self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates, weights: dict[int, float]
+    ) -> dict[int, list[Evidence]]:
+        """Head-to-head records against whoever may be in the lane, keyed by our champion.
+
+        Each carries the chance that enemy is the laner, and counts in the
+        context in that proportion: 1 for a marked laner.
+        """
+        if not weights:
             return {}
         rows = (
             await self.session.execute(
@@ -420,29 +624,31 @@ class DraftAdvisor:
                     MatchupStat.queue_id == ctx.queue_id,
                     MatchupStat.team_position == ctx.position,
                     MatchupStat.rank_bracket == ctx.rank_bracket,
-                    MatchupStat.enemy_champion_id == ctx.enemy_laner,
+                    MatchupStat.enemy_champion_id.in_(list(weights)),
                     MatchupStat.scope == "LANE",
                 )
             )
         ).scalars().all()
-        by_champion: dict[int, list[MatchupStat]] = defaultdict(list)
+        by_pair: dict[tuple[int, int], list[MatchupStat]] = defaultdict(list)
         for row in rows:
-            by_champion[row.champion_id].append(row)
+            by_pair[(row.champion_id, row.enemy_champion_id)].append(row)
 
-        out: dict[int, Evidence] = {}
-        for champion, group in by_champion.items():
+        out: dict[int, list[Evidence]] = defaultdict(list)
+        for (champion, enemy), group in by_pair.items():
             parts, patches = self._parts(
                 [(r.patch, r.wins, r.games) for r in group], own, champion, ctx.position
             )
-            evidence = self._evidence("lane", ctx.enemy_laner, parts, patches, LANE_STRENGTH, True)
+            evidence = self._evidence("lane", enemy, parts, patches, LANE_STRENGTH, True)
             if evidence is None:
                 continue
+            evidence.weight = weights[enemy]
             # The gold lead and laning score pooled over the timelines behind
             # them, and withheld below the floor rather than averaged over two.
-            timelines = sum(r.timeline_games or 0 for r in group if r.patch in patches)
+            used = [r for r in group if r.patch in patches]
+            timelines = sum(r.timeline_games or 0 for r in used)
             if timelines >= MIN_TIMELINE_GAMES:
-                gold = [r for r in group if r.patch in patches and r.avg_gold_diff_14 is not None and r.timeline_games]
-                laning = [r for r in group if r.patch in patches and r.avg_laning_score is not None and r.timeline_games]
+                gold = [r for r in used if r.avg_gold_diff_14 is not None and r.timeline_games]
+                laning = [r for r in used if r.avg_laning_score is not None and r.timeline_games]
                 if gold:
                     evidence.gold_diff_14 = sum(r.avg_gold_diff_14 * r.timeline_games for r in gold) / sum(
                         r.timeline_games for r in gold
@@ -452,8 +658,68 @@ class DraftAdvisor:
                         r.timeline_games for r in laning
                     )
             evidence.timeline_games = timelines
-            out[champion] = evidence
+            out[champion].append(evidence)
+        for records in out.values():
+            records.sort(key=lambda e: e.weight, reverse=True)
         return out
+
+    async def _blind_risks(
+        self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates, suggestions: list[Suggestion]
+    ) -> None:
+        """For a blind pick, each suggestion's worst known lanes.
+
+        Only records the posterior calls unfavoured, ranked by how much they
+        cost times how often that opponent is picked in the role, so the list
+        is the lanes likely to happen and likely to lose, not the worst of fifty
+        thin records (the winner's curse of taking a minimum).
+        """
+        ids = [s.champion_id for s in suggestions]
+        if not ids:
+            return
+        rows = (
+            await self.session.execute(
+                select(
+                    MatchupStat.champion_id, MatchupStat.enemy_champion_id, MatchupStat.patch,
+                    MatchupStat.wins, MatchupStat.games,
+                ).where(
+                    MatchupStat.patch.in_(pool),
+                    MatchupStat.queue_id == ctx.queue_id,
+                    MatchupStat.team_position == ctx.position,
+                    MatchupStat.rank_bracket == ctx.rank_bracket,
+                    MatchupStat.champion_id.in_(ids),
+                    MatchupStat.scope == "LANE",
+                    MatchupStat.games > 0,
+                )
+            )
+        ).all()
+        picks = (
+            await self.session.execute(
+                select(ChampionStat.champion_id, ChampionStat.games).where(
+                    ChampionStat.patch == ctx.patch,
+                    ChampionStat.queue_id == ctx.queue_id,
+                    ChampionStat.team_position == ctx.position,
+                    ChampionStat.rank_bracket == ctx.rank_bracket,
+                )
+            )
+        ).all()
+        total = sum(games for _, games in picks) or 1
+        share = {champion: games / total for champion, games in picks}
+
+        by_pair: dict[tuple[int, int], list[tuple[str, int, int]]] = defaultdict(list)
+        for champion, enemy, patch, wins, games in rows:
+            by_pair[(champion, enemy)].append((patch, wins, games))
+        risks: dict[int, list[Evidence]] = defaultdict(list)
+        for (champion, enemy), group in by_pair.items():
+            parts, patches = self._parts(group, own, champion, ctx.position)
+            evidence = self._evidence("lane", enemy, parts, patches, LANE_STRENGTH, False)
+            if evidence is None or evidence.call != "unfavoured" or enemy in ctx.unavailable:
+                continue
+            evidence.weight = share.get(enemy, 0.0)
+            risks[champion].append(evidence)
+        for suggestion in suggestions:
+            found = risks.get(suggestion.champion_id, [])
+            found.sort(key=lambda e: -e.lift * e.weight, reverse=True)
+            suggestion.blind_risks = found[:BLIND_RISKS]
 
     async def _enemy_team(
         self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates
@@ -464,6 +730,8 @@ class DraftAdvisor:
         question from the lane, and the reason the laner is excluded here rather
         than counted twice.
         """
+        # A marked laner is lane evidence only. An inferred one may not be the
+        # laner, so their team record is listed as well.
         wanted = ctx.other_enemies
         if not wanted:
             return {}
@@ -579,28 +847,12 @@ class DraftAdvisor:
     # ------------------------------------------------------------ wording
 
     @staticmethod
-    def _explain(s: Suggestion, ctx: DraftContext) -> list[str]:
+    def _explain(s: Suggestion, ctx: DraftContext, board: BoardRead) -> list[str]:
+        """Sentences for what is not a record. The page writes the record lines
+        itself, with the champions' names, from `evidence`."""
         reasons: list[str] = []
-        lane = next((e for e in s.evidence if e.kind == "lane"), None)
-        if lane is not None:
-            record = f"{lane.wins}-{lane.games - lane.wins} over {lane.games} games"
-            if lane.call == "level":
-                reasons.append(
-                    f"lane record {record}: too few games to call either way, "
-                    f"{lane.lift * 100:+.1f} points"
-                )
-            else:
-                reasons.append(
-                    f"{lane.call} into this lane: {record}, {lane.lift * 100:+.1f} points"
-                )
-            if lane.gold_diff_14 is not None:
-                reasons.append(
-                    f"usually {lane.gold_diff_14:+,.0f} gold by 14 in that lane, "
-                    f"over {lane.timeline_games} games with timelines"
-                )
-        elif ctx.enemy_laner is not None:
+        if board.lane_source == "marked" and not any(e.kind == "lane" for e in s.evidence):
             reasons.append("no head-to-head record for this lane yet")
-
         if s.mastery_points >= 10_000:
             when = ""
             if s.last_played_days is not None and s.last_played_days > COMFORT_FULL_DAYS:
@@ -613,7 +865,11 @@ class DraftAdvisor:
 
 
 __all__ = [
+    "BLIND_BELOW",
+    "BoardRead",
     "COMFORT_MAX_BONUS",
+    "Laning",
+    "RoleGuess",
     "CONTEXT_LIFT_CAP",
     "MIN_TIMELINE_GAMES",
     "BanCandidate",

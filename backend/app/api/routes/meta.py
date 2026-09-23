@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import DbDep, SettingsDep, StaticDep
-from app.api.schemas import ChampionRef, epoch_ms
+from app.api.schemas import ChampionRef, LobbyRanksOut, epoch_ms, lobby_ranks_out
 from app.db.models import ChampionStat, Match
 from app.services import seo
 from app.services.aggregate import (
@@ -65,24 +65,6 @@ class ChampionMetaRow(BaseModel):
     # Over `timeline_games` only, the games whose timeline we hold.
     avg_gold_diff_14: float | None = None
     timeline_games: int = 0
-
-
-class LobbyRankBucket(BaseModel):
-    tier: str
-    games: int
-
-
-class LobbyRanksOut(BaseModel):
-    """How the games behind this slice were ranked, by measured lobby median."""
-
-    total: int
-    measured: int
-    # Highest first. MASTER+ merges the apex tiers, which cannot be told apart
-    # from a points value alone.
-    buckets: list[LobbyRankBucket] = Field(default_factory=list)
-    # Epoch ms of the newest measurement. Riot keeps no historical rank, so this
-    # is where those players stood then, not when they played.
-    as_of: int | None = None
 
 
 class MetaResponse(BaseModel):
@@ -240,12 +222,7 @@ async def get_champion_meta(
         sample_matches=sample,
         min_games=min_games,
         rows=rows,
-        lobby_ranks=LobbyRanksOut(
-            total=mix.total,
-            measured=mix.measured,
-            buckets=[LobbyRankBucket(tier=t, games=n) for t, n in mix.buckets],
-            as_of=epoch_ms(mix.as_of),
-        ),
+        lobby_ranks=lobby_ranks_out(mix),
     )
 
 
