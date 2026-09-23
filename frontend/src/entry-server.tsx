@@ -10,7 +10,8 @@ import { routes, type RouteHandle } from './routes'
 export { jsonForHtml, renderHeadHtml }
 
 /**
- * Render one page to HTML, the way the prerenderer needs it.
+ * Render one page to HTML, the way the prerenderer needs it (and, with
+ * `live`, the way prerender/live.mjs does, on request).
  *
  * The same route table and the same components as the browser. The matched
  * routes' `prefetch` handles fill a QueryClient first, so the components find
@@ -30,7 +31,10 @@ export interface Rendered {
   errors: string[]
 }
 
-export async function render(url: string, { noindex = false } = {}): Promise<Rendered> {
+export async function render(
+  url: string,
+  { noindex = false, live = false } = {},
+): Promise<Rendered> {
   const handler = createStaticHandler(routes)
   const request = new Request(new URL(url, 'http://prerender.local'))
   const context = await handler.query(request)
@@ -54,7 +58,7 @@ export async function render(url: string, { noindex = false } = {}): Promise<Ren
     const prefetch = (match.route.handle as RouteHandle | undefined)?.prefetch
     if (!prefetch) continue
     try {
-      await prefetch({ params: match.params, search, queryClient })
+      await prefetch({ params: match.params, search, queryClient, live })
     } catch (error) {
       errors.push(String(error))
     }

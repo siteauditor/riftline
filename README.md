@@ -815,7 +815,15 @@ as the last visit left it, the ranks as last read, the games we hold, and
 not one Riot call, so a thousand profile pages cost the key nothing. The
 page hydrates from those answers and its live queries then replace them, so
 a visitor gets Riot's fresher rank a moment later while a crawler gets a
-complete page. A profile below the floor, or one nobody has looked up by
+complete page. The file is the fallback, though, not what is served: a
+stored rank moves only when someone opens the page, so a file's title said
+Bronze I in link previews for a day after the player reached Silver IV. A
+profile that has a file is therefore rendered on request by
+`frontend/prerender/live.mjs`, the same render with the header's profile
+asked live (within the API's five-minute league cache). That costs a Riot
+call only on a cold cache, gets three seconds and at most two at a time, and
+past either renders from storage; nginx serves the file whenever the
+renderer cannot answer. A profile below the floor, or one nobody has looked up by
 name, reaches the shell and stays out of the index; it still works. Match
 pages stay out too (a third have no timeline, so the page would lack its
 main content), and group pages are private by design.

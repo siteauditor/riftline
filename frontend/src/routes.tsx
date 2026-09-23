@@ -29,6 +29,13 @@ export interface PrefetchContext {
   params: Record<string, string | undefined>
   search: URLSearchParams
   queryClient: QueryClient
+  /**
+   * Rendered on request by prerender/live.mjs rather than into a file: a
+   * route may then also ask for what Riot says now. The renderer bounds how
+   * long that may take; a live query that failed is dropped before the page
+   * renders, so the page falls back to exactly what the file would hold.
+   */
+  live?: boolean
 }
 
 export type Prefetch = (ctx: PrefetchContext) => Promise<unknown>
@@ -69,16 +76,31 @@ export const routes: RouteObject[] = [
       {
         path: 'summoner/:platform/:name/:tag',
         lazy: page(() => import('./routes/Profile')),
-        // From storage only: the manifest lists a profile once the player has
-        // enough scored games, and rendering a thousand of them must not cost
-        // a Riot call. The page shows these until its live queries answer.
-        handle: handle(({ params, queryClient }) => {
+        // From storage only in the file: the manifest lists a profile once the
+        // player has enough scored games, and rendering a thousand of them
+        // must not cost a Riot call. The page shows these until its live
+        // queries answer.
+        //
+        // Rendered live, the header also asks for the live profile, so the
+        // title and description a crawler or a link preview reads carry the
+        // current rank: a file said Bronze I for a day after the player had
+        // reached Silver IV (Veystrix#999, 2026-09-23), because a stored rank
+        // moves only when someone opens the page. Only the header: the games
+        // and analytics describe stored matches either way.
+        handle: handle(async ({ params, queryClient, live }) => {
           const { platform = '', name = '', tag = '' } = params
-          return Promise.all([
+          const current = queries.profile(platform, name, tag)
+          await Promise.all([
             queryClient.prefetchQuery(queries.profileStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.matchesStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.analyticsStored(platform, name, tag)),
+            live ? queryClient.prefetchQuery(current) : null,
           ])
+          // Too slow, rate limited, or an expired key: the stored answer
+          // stands, as it does in the file, and the browser asks again.
+          if (queryClient.getQueryState(current.queryKey)?.status === 'error') {
+            queryClient.removeQueries({ queryKey: current.queryKey, exact: true })
+          }
         }),
       },
       {

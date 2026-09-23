@@ -70,6 +70,15 @@ export const queries = {
       queryFn: () => api.leaderboard(platform, slice),
     }),
 
+  // A profile as Riot has it now, within the API's league cache. The page's
+  // own query, and what the live renderer (prerender/live.mjs) fetches for a
+  // profile's HTML, so the rank a crawler reads is the one a visitor sees.
+  profile: (platform: string, name: string, tag: string) =>
+    queryOptions({
+      queryKey: ['profile', platform, name, tag],
+      queryFn: () => api.profile(platform, name, tag),
+    }),
+
   // A profile as storage has it: what the prerenderer fetches, and nothing
   // the browser ever fetches itself. Under their own keys, apart from the live
   // queries the page runs, so a prerendered profile hydrates from these and
