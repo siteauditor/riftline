@@ -388,6 +388,14 @@ that work.
   deploy, 5a11ead, created it under Compose's project-prefixed name before
   the name was fixed in the compose file; that orphan was removed on
   2026-09-23.)
+- **Each kept build's files stay reachable.** The prerender job copies the
+  build's hashed files (`dist/assets`) into `_shared/assets` in the pages
+  volume and lists them in the build's `_assets.json`, and nginx serves
+  `/assets/` from its own image first and from there second. A page served
+  from the edge cache, or a tab left open across a deploy, asks for the files
+  of the build that rendered it, which the new image no longer holds; without
+  them such a page arrived unstyled and without its script. A file goes when
+  no kept build names it, so the folder holds two builds' files at most.
 - **The order of a deploy**: build, start the api, migrate, **prerender**,
   then start the web container. The prerender is fatal on purpose: a build
   that cannot render its pages is not switched to, and the web container
@@ -417,6 +425,39 @@ curl -sI https://www.rhasta.space/summoner/sg2/Veystrix/999 | grep -i x-prerende
 ssh MyVPS 'cd /root/riftline && docker compose logs --tail 20 render'     # one line per profile: live or stored, and how long
 curl -sI https://www.rhasta.space/no-such-page | grep -i x-robots           # the shell: noindex
 ```
+
+### Pages in Cloudflare's cache (an owner step)
+
+nginx marks every prerendered page `public, max-age=0, s-maxage=300,
+stale-while-revalidate=60`: browsers revalidate every time, and a shared cache
+may keep a page five minutes and serve it a minute longer while it fetches the
+next. Cloudflare ignores that for HTML unless a rule makes the page eligible
+(`cf-cache-status: DYNAMIC` on every page, measured 2026-09-24), so every
+visit reaches the origin. Nothing in the repository manages the zone, so the
+rule is added by hand, after a deploy that includes the kept files above:
+
+- Caching > Cache Rules > Create rule, named `Riftline pages`.
+- When incoming requests match:
+  `(http.host eq "www.rhasta.space" and not starts_with(http.request.uri.path, "/api/"))`
+- Cache eligibility: **Eligible for cache**. Edge TTL: **Use cache-control
+  header if present, bypass cache if not**. Browser TTL: **Respect origin**.
+
+What the origin says then decides everything: the shell, which answers any
+path that has no page, is `no-store` and never held; a profile from the live
+renderer says `s-maxage=300` itself; hashed files are immutable for a year;
+the sitemap is an hour; and the API is outside the rule. To see it working:
+
+```bash
+curl -sI https://www.rhasta.space/tierlist | grep -i cf-cache-status      # MISS, then HIT
+curl -sI https://www.rhasta.space/no-such-page | grep -i cf-cache-status  # BYPASS: the shell
+curl -s -o /dev/null -D - https://www.rhasta.space/api/health | grep -i cf-cache-status   # DYNAMIC
+```
+
+The rate-limiting rule counts every request to the host, hashed files
+included, and one page load is 18 to 27 of them (measured on six pages,
+2026-09-24), so three quick page views come close to its 60; scoping it to
+`starts_with(http.request.uri.path, "/api/")` keeps it on what costs the
+origin work. That is the owner's call, in the same Security section.
 
 The manifest of pages, and which of them are indexable, is `GET
 /api/meta/pages`; the sitemap nginx serves at `/sitemap.xml` is `GET

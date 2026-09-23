@@ -1042,11 +1042,13 @@ async def available_slices(session: AsyncSession) -> list[dict]:
     For the ingest, which decides what to aggregate from this. A page must
     not read it: see `aggregated_slices`.
     """
+    # count() rather than count(match_id), so `ix_matches_slice_count` answers
+    # it alone: the key is not in that index.
     stmt = (
-        select(Match.patch, Match.queue_id, func.count(Match.match_id).label("n"))
+        select(Match.patch, Match.queue_id, func.count().label("n"))
         .where(Match.is_remake.is_(False), Match.patch.is_not(None))
         .group_by(Match.patch, Match.queue_id)
-        .order_by(func.count(Match.match_id).desc())
+        .order_by(func.count().desc())
     )
     slices = [
         {"patch": patch, "queue_id": queue, "matches": n}
@@ -1076,6 +1078,27 @@ async def aggregated_slices(session: AsyncSession) -> list[dict]:
     return [s for s in await available_slices(session) if (s["patch"], s["queue_id"]) in aggregated]
 
 
+_slices_held: tuple[float, list[dict]] | None = None
+
+
+async def cached_aggregated_slices(session: AsyncSession) -> list[dict]:
+    """`aggregated_slices`, kept for `ttl_corpus` seconds, for the API.
+
+    Every page asks for it (the tier list, each champion and item page, the
+    index, each change on a draft board), and it counts the stored games by
+    patch. It moves when the nightly aggregate runs, in another process, so a
+    few minutes late is the cost; the ingest CLI, which reads it right after it
+    aggregates, calls `aggregated_slices` itself.
+    """
+    global _slices_held
+    now = time.monotonic()
+    if _slices_held is not None and now - _slices_held[0] < get_settings().ttl_corpus:
+        return _slices_held[1]
+    slices = await aggregated_slices(session)
+    _slices_held = (now, slices)
+    return slices
+
+
 def default_patch(slices: list[dict], queue_id: int) -> str | None:
     """The patch a page shows when its URL names none: the newest patch in
     this queue with `SETTLED_MIN_MATCHES` games behind it, else the newest
@@ -1089,10 +1112,10 @@ def default_patch(slices: list[dict], queue_id: int) -> str | None:
 async def available_brackets(session: AsyncSession) -> list[str]:
     """Crawl provenances present, busiest first. Always includes ALL."""
     stmt = (
-        select(Match.source_bracket, func.count(Match.match_id))
+        select(Match.source_bracket, func.count())
         .where(Match.is_remake.is_(False), Match.source_bracket.is_not(None))
         .group_by(Match.source_bracket)
-        .order_by(func.count(Match.match_id).desc())
+        .order_by(func.count().desc())
     )
     found = [b for b, _ in (await session.execute(stmt)).all()]
     return [ALL_BRACKETS, *found]

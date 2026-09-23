@@ -34,10 +34,13 @@ export default function App() {
   const location = useLocation()
   const isHome = location.pathname === '/'
 
+  // Every five minutes, not every thirty seconds: it carries the patch and
+  // whether the Riot key works, which change a few times a day, and at 30 s
+  // each open tab asked 120 times an hour.
   const { data: health } = useQuery({
     queryKey: ['health'],
     queryFn: api.health,
-    refetchInterval: 30_000,
+    refetchInterval: 5 * 60_000,
   })
 
   // Says the app has taken the document over. A prerendered page is complete

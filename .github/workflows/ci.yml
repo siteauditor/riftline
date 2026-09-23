@@ -189,6 +189,22 @@ jobs:
           check_file
           curl -sI http://127.0.0.1:6124/summoner/euw1/Nobody/X1 | grep -qi '^x-robots-tag: noindex'
 
+      # An earlier build's hashed file, which the prerender job keeps in the
+      # pages volume, is served by nginx after the image's own: a page from
+      # the edge cache asks for the files it was rendered with. And a page's
+      # own cache header, which the edge cache rule in docs/deploy.md obeys.
+      - name: Earlier builds' files and the page cache header, through nginx
+        run: |
+          docker run --rm -v ci_pages:/pages alpine sh -c '
+            set -e
+            test -s /pages/ci/_assets.json
+            test -n "$(ls /pages/_shared/assets)"
+            echo kept > /pages/_shared/assets/kept-ci.js'
+          curl -sf -D headers.txt -o /dev/null http://127.0.0.1:6124/assets/kept-ci.js
+          grep -qi '^cache-control: public, max-age=31536000, immutable' headers.txt
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:6124/assets/missing-ci.js)" = 404
+          curl -sI http://127.0.0.1:6124/tierlist | grep -qi '^cache-control: public, max-age=0, s-maxage=300, stale-while-revalidate=60'
+
       - name: Stop the CI containers
         if: always()
         run: docker rm -f web-ci web-nginx render api 2>/dev/null || true

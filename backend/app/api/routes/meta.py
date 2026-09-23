@@ -8,6 +8,7 @@ an empty list that looks like "no champions are any good".
 from __future__ import annotations
 
 import logging
+import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -23,8 +24,8 @@ from app.services.aggregate import (
     MIN_LANING_TIMELINES,
     POSITIONS,
     TIER_MIN_GAMES,
-    aggregated_slices,
     available_brackets,
+    cached_aggregated_slices,
     cached_lobby_rank_mix,
     default_patch,
     poolable_patches,
@@ -149,20 +150,34 @@ def assign_tiers(rows: list[ChampionMetaRow]) -> None:
             row.tier = tier_for(index, total)
 
 
+_corpus_held: tuple[float, CorpusResponse] | None = None
+
+
 @router.get("/corpus", response_model=CorpusResponse)
-async def get_corpus(db: DbDep) -> CorpusResponse:
-    """What data has actually been aggregated. Useful before trusting a tier list."""
-    slices = await aggregated_slices(db)
-    latest_game, latest_ingest = (
-        await db.execute(select(func.max(Match.game_creation), func.max(Match.ingested_at)))
-    ).one()
-    return CorpusResponse(
+async def get_corpus(db: DbDep, settings: SettingsDep) -> CorpusResponse:
+    """What data has actually been aggregated. Useful before trusting a tier list.
+
+    Kept for `ttl_corpus` seconds: the tier list, the draft and every slice
+    control ask for it, and it took 0.57 s on production (2026-09-24).
+    """
+    global _corpus_held
+    now = time.monotonic()
+    if _corpus_held is not None and now - _corpus_held[0] < settings.ttl_corpus:
+        return _corpus_held[1]
+    slices = await cached_aggregated_slices(db)
+    # Two queries, not one: SQLite answers a lone max() from an index and
+    # scans the table for two in one statement (239 ms against under 1).
+    latest_game = (await db.execute(select(func.max(Match.game_creation)))).scalar()
+    latest_ingest = (await db.execute(select(func.max(Match.ingested_at)))).scalar()
+    answer = CorpusResponse(
         slices=slices,
         brackets=await available_brackets(db),
         total_matches=sum(s["matches"] for s in slices),
         latest_game_at=latest_game,
         latest_ingest_at=epoch_ms(latest_ingest),
     )
+    _corpus_held = (now, answer)
+    return answer
 
 
 @router.get("/champions", response_model=MetaResponse)
@@ -185,7 +200,7 @@ async def get_champion_meta(
         if position not in POSITIONS:
             raise HTTPException(400, f"position must be one of {', '.join(POSITIONS)}")
 
-    slices = await aggregated_slices(db)
+    slices = await cached_aggregated_slices(db)
     if patch is None:
         patch = default_patch(slices, queue_id)
         if patch is None:

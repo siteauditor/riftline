@@ -14,8 +14,13 @@
 // temporary directory and renames at the end, so a half-finished run is never
 // served, and it exits non-zero when a required page failed or too few pages
 // rendered, so a deploy does not switch to a build that cannot prerender.
+//
+// It also keeps the build's hashed files (`dist/assets`) in `<out>/_shared`
+// for as long as the build's pages are kept, and nginx falls back to them: a
+// page held in the edge cache, or a tab left open, asks for the files of the
+// build it was rendered with, and the new web image holds only its own.
 
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { assemble, dist, loadBuild, parseArgs, realFetch, routeFetchToApi } from './shared.mjs'
@@ -47,6 +52,7 @@ async function main() {
   const final = path.join(outRoot, buildId)
   await rm(tmp, { recursive: true, force: true })
   await mkdir(tmp, { recursive: true })
+  await keepAssets(outRoot, tmp)
 
   const results = []
   let next = 0
@@ -87,6 +93,7 @@ async function main() {
   await rm(final, { recursive: true, force: true })
   await rename(tmp, final)
   await pruneOldBuilds(outRoot, buildId)
+  await pruneAssets(outRoot)
   console.log(
     `prerender: ${ok.length}/${pages.length} pages rendered into ${final}` +
       ` (${summary.indexable} indexable, ${summary.withErrors} rendered their error state)`,
@@ -121,7 +128,7 @@ async function pruneOldBuilds(root, current) {
   }
   const builds = []
   for (const name of names) {
-    if (name === current || name.endsWith('.tmp')) continue
+    if (name === current || name.endsWith('.tmp') || name.startsWith('_')) continue
     const full = path.join(root, name)
     const info = await stat(full)
     if (info.isDirectory()) builds.push({ name, mtime: info.mtimeMs })
@@ -130,6 +137,57 @@ async function pruneOldBuilds(root, current) {
   for (const old of builds.slice(keepBuilds - 1)) {
     await rm(path.join(root, old.name), { recursive: true, force: true })
     console.log(`prerender: removed old build ${old.name}`)
+  }
+}
+
+// Where every kept build's hashed files live, beside the builds' pages.
+const SHARED = '_shared'
+
+/**
+ * This build's files into the shared folder, and their names into the build,
+ * so the files can be dropped when the build is. Hashed names never collide,
+ * so a file already there is the same file.
+ */
+async function keepAssets(root, buildDir) {
+  const from = path.join(dist, 'assets')
+  const to = path.join(root, SHARED, 'assets')
+  await mkdir(to, { recursive: true })
+  const names = []
+  for (const name of await readdir(from)) {
+    if (!(await stat(path.join(from, name))).isFile()) continue
+    names.push(name)
+    const target = path.join(to, name)
+    if (!(await isFile(target))) await copyFile(path.join(from, name), target)
+  }
+  await writeFile(path.join(buildDir, '_assets.json'), JSON.stringify(names))
+}
+
+/** Drops every shared file that no kept build names. */
+async function pruneAssets(root) {
+  const keep = new Set()
+  for (const name of await readdir(root)) {
+    if (name.startsWith('_') || name.endsWith('.tmp')) continue
+    try {
+      for (const file of JSON.parse(await readFile(path.join(root, name, '_assets.json'), 'utf8'))) keep.add(file)
+    } catch {
+      // A build from before the files were kept names none.
+    }
+  }
+  const dir = path.join(root, SHARED, 'assets')
+  let dropped = 0
+  for (const name of await readdir(dir)) {
+    if (keep.has(name)) continue
+    await rm(path.join(dir, name), { force: true })
+    dropped += 1
+  }
+  if (dropped) console.log(`prerender: removed ${dropped} files no kept build uses`)
+}
+
+async function isFile(file) {
+  try {
+    return (await stat(file)).isFile()
+  } catch {
+    return false
   }
 }
 

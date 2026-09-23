@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # The measured lobby ranks behind a slice: the tier list, champion pages and
     # the draft read them, and they change only when the nightly run measures.
     ttl_lobby_ranks: int = Field(default=3600, alias="TTL_LOBBY_RANKS")
+    # The patches and queues held, and the corpus summary built on them: every
+    # page's slice controls read them, and they move only when the nightly
+    # aggregate runs, in another process.
+    ttl_corpus: int = Field(default=300, alias="TTL_CORPUS")
 
     # --- Features -----------------------------------------------------------
     # Riot announced Spectator-V5's deactivation in Oct 2025 over player

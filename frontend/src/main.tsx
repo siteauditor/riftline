@@ -77,6 +77,37 @@ async function loadRoutesFor(location: Location): Promise<void> {
   )
 }
 
+/**
+ * The queries a page was prerendered with that come from the nightly rollups,
+ * marked as fetched now, so hydrating does not fetch them again.
+ *
+ * The prerenderer's answers carry the time they were rendered, often hours
+ * ago, so every one was stale on arrival and each page asked the API again for
+ * what it had just been given (the tier list, a champion, the item guide).
+ * These are rebuilt once a night and the pages are rendered after that, so the
+ * rendered answer is the answer; anything that moves during the day (the
+ * corpus, the ladders, a profile's live queries) is left to refetch.
+ */
+const ROLLUP_QUERIES = new Set([
+  'meta',
+  'champion',
+  'champion-profile',
+  'champion-index',
+  'champions',
+  'items',
+  'item',
+  'method',
+])
+
+function markRollupsFresh(state: DehydratedState | undefined): void {
+  const now = Date.now()
+  for (const query of state?.queries ?? []) {
+    if (query.state.status === 'success' && ROLLUP_QUERIES.has(String(query.queryKey[0]))) {
+      query.state.dataUpdatedAt = now
+    }
+  }
+}
+
 const container = document.getElementById('root')!
 
 // A chunk that will not load, most often because a deploy replaced the
@@ -107,6 +138,7 @@ window.addEventListener('vite:preloadError', (event) => {
 })
 
 loadRoutesFor(window.location).catch(chunkFailed).then(() => {
+  markRollupsFresh(window.__RQ_STATE__)
   const router = createBrowserRouter(routes)
   const app = (
     <StrictMode>

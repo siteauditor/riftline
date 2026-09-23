@@ -28,6 +28,9 @@ os.environ["TTL_LEAGUE_BULK"] = "0"
 # The lobby ranks behind a slice are cached for an hour in production; a test
 # that seeds lobbies must read them fresh.
 os.environ["TTL_LOBBY_RANKS"] = "0"
+# The slices held and the corpus summary are cached for five minutes in
+# production; a test that aggregates must see what it made.
+os.environ["TTL_CORPUS"] = "0"
 # Every test shares one client address, so the per-address group limits would
 # trip across tests. The test of the limit itself lowers it for its own run.
 os.environ["GROUP_CREATES_PER_HOUR"] = "100000"

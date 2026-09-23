@@ -89,6 +89,10 @@ http
       path.join(pages, clean === '/' ? 'index.html' : `${clean.slice(1)}.html`),
       path.join(dist, clean.slice(1) || 'nothing'),
     ]
+    // An earlier build's hashed files, kept by the prerender beside the
+    // pages, as nginx's /assets/ falls back to them: a page rendered by an
+    // earlier build still finds its own.
+    if (clean.startsWith('/assets/')) candidates.push(path.join(pages, '..', '_shared', clean.slice(1)))
     if (process.env.SERVE_DEBUG) {
       for (const file of candidates) console.log(`${url.pathname} -> ${file}: ${await exists(file)}`)
     }

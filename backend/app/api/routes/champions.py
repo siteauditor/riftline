@@ -53,7 +53,7 @@ from app.services.aggregate import (
     MIN_LANING_TIMELINES,
     POSITIONS,
     TIER_MIN_GAMES,
-    aggregated_slices,
+    cached_aggregated_slices,
     cached_lobby_rank_mix,
     default_patch,
     poolable_patches,
@@ -646,7 +646,7 @@ async def get_champion_index(
     db: DbDep, sd: StaticDep, queue_id: int = Query(420)
 ) -> ChampionIndex:
     """Every champion, with the roles it is played in on the default patch."""
-    patch = default_patch(await aggregated_slices(db), queue_id)
+    patch = default_patch(await cached_aggregated_slices(db), queue_id)
     played: dict[int, list[ChampionStat]] = defaultdict(list)
     if patch:
         for row in (
@@ -707,7 +707,7 @@ async def get_champion(
 
     # Newest first. Read whether or not a patch was asked for, because the
     # patch before the one shown is where the change figures come from.
-    slices = await aggregated_slices(db)
+    slices = await cached_aggregated_slices(db)
     held = [s["patch"] for s in slices if s["queue_id"] == queue_id]
     default = default_patch(slices, queue_id)
     asked_patch, asked_position = patch, position

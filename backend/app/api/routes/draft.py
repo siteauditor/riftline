@@ -19,8 +19,8 @@ from app.riot.routing import UnknownPlatform, resolve_platform
 from app.services import damage
 from app.services.aggregate import (
     ALL_BRACKETS,
-    aggregated_slices,
     available_brackets,
+    cached_aggregated_slices,
     cached_lobby_rank_mix,
     default_patch,
 )
@@ -537,7 +537,7 @@ async def suggest(
 
     patch = body.patch
     if patch is None:
-        patch = default_patch(await aggregated_slices(db), body.queue_id)
+        patch = default_patch(await cached_aggregated_slices(db), body.queue_id)
         if patch is None:
             # The ingest hint is for whoever runs the server, not for a player
             # reading the page.

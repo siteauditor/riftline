@@ -10,8 +10,11 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
+from app.api.routes import meta
+from app.config import get_settings
 from app.db.base import SessionLocal
 from app.db.models import Match, MatchParticipant, Player, RankedEntry
+from app.services import aggregate
 from app.services.highlights import best_games
 from app.services.suggest import clear_suggest_cache
 
@@ -264,3 +267,21 @@ async def test_corpus_says_how_new_its_newest_game_is(client):
 
     assert body["latest_game_at"] >= before
     assert body["latest_ingest_at"] >= before
+
+
+async def test_the_corpus_is_kept_for_its_ttl_and_then_read_again(client, monkeypatch):
+    """Every slice control asks for it, and it took 0.57 s on production
+    (2026-09-24): kept for `ttl_corpus`, a new game shows once that passes."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "ttl_corpus", 300)
+    monkeypatch.setattr(meta, "_corpus_held", None)
+    monkeypatch.setattr(aggregate, "_slices_held", None)
+
+    first = (await client.get("/api/meta/corpus")).json()
+    await seed_lobby("QZX_KEPT", {}, queue_id=7306, age_days=-10)
+    assert (await client.get("/api/meta/corpus")).json() == first
+    assert aggregate._slices_held is not None
+
+    monkeypatch.setattr(settings, "ttl_corpus", 0)
+    fresh = (await client.get("/api/meta/corpus")).json()
+    assert fresh["latest_game_at"] > first["latest_game_at"]

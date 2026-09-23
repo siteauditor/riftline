@@ -238,7 +238,10 @@ class Match(Base):
 
     teams: Mapped[list | None] = mapped_column(JSON)
     raw: Mapped[dict | None] = mapped_column(JSON)
-    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Indexed for the corpus endpoint's "latest ingest": the column sits after
+    # `raw` in each row, so its maximum read every payload in the table, 238 ms
+    # of the endpoint's 430 on 2,542 matches (2026-09-24).
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     # Ordered explicitly: without it the scoreboard's row order is whatever the
     # database happens to return, which can differ between two loads of the
@@ -247,6 +250,15 @@ class Match(Base):
         back_populates="match",
         cascade="all, delete-orphan",
         order_by="MatchParticipant.participant_index",
+    )
+
+    __table_args__ = (
+        # The two counts every page's slice list is built from, answered from
+        # an index rather than the rows: `source_bracket` and the lobby columns
+        # were added by ALTER TABLE, which puts them after `raw` on disk, so
+        # counting brackets read every payload (157 ms of the corpus endpoint).
+        Index("ix_matches_slice_count", "is_remake", "patch", "queue_id"),
+        Index("ix_matches_bracket_count", "is_remake", "source_bracket"),
     )
 
 
