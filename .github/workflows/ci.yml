@@ -158,9 +158,40 @@ jobs:
           pnpm exec playwright install --with-deps chromium
           for i in $(seq 1 15); do curl -sf -o /dev/null http://127.0.0.1:6123/ && break; sleep 2; done
           E2E_BASE_URL=http://127.0.0.1:6123 pnpm exec playwright test
+      # A profile through the real nginx: sent to the live renderer when it
+      # has a file, served its file whenever the renderer cannot answer, and
+      # the noindex shell when it has none. The empty corpus lists no
+      # profiles, so a planted file stands in for one: the renderer refuses
+      # it as unlisted, which is the fallback path this checks.
+      - name: Profiles through nginx, with and without the live renderer
+        run: |
+          # On a failure, what nginx answered and what both servers logged.
+          trap 'cat headers.txt 2>/dev/null; docker logs web-nginx 2>&1 | tail -20; docker logs render 2>&1 | tail -20' ERR
+          docker run --rm -v ci_pages:/pages alpine sh -c 'mkdir -p "/pages/ci/summoner/euw1/Ci Player" && cp /pages/ci/index.html "/pages/ci/summoner/euw1/Ci Player/CI1.html"'
+          docker run -d --name render --network ci riftline-prerender:ci node prerender/live.mjs
+          docker run -d --name web-nginx --network ci -p 6124:80 -v ci_pages:/usr/share/nginx/html/pages:ro riftline-nginx:ci
+          set -E
+          for i in $(seq 1 15); do
+            if docker exec render wget -q -O /dev/null http://127.0.0.1:3000/healthz && curl -sf -o /dev/null http://127.0.0.1:6124/; then break; fi
+            sleep 2
+          done
+          check_file() {
+            curl -s -D headers.txt -o body.txt "http://127.0.0.1:6124/summoner/euw1/Ci%20Player/CI1"
+            head -1 headers.txt | grep -q ' 200'
+            grep -qi '^x-prerendered: ci' headers.txt
+            # An `if`, because `bash -e` never fails a step on a `!` command.
+            if grep -qi '^x-robots-tag' headers.txt; then echo "the profile was served the noindex shell" >&2; exit 1; fi
+            grep -q '<h1' body.txt
+          }
+          docker exec render wget -S -O /dev/null "http://127.0.0.1:3000/summoner/euw1/Ci%20Player/CI1" 2>&1 | grep -q ' 404'
+          check_file
+          docker rm -f render
+          check_file
+          curl -sI http://127.0.0.1:6124/summoner/euw1/Nobody/X1 | grep -qi '^x-robots-tag: noindex'
+
       - name: Stop the CI containers
         if: always()
-        run: docker rm -f web-ci api 2>/dev/null || true
+        run: docker rm -f web-ci web-nginx render api 2>/dev/null || true
 
       - name: No em dashes
         # A house rule, enforced rather than remembered.

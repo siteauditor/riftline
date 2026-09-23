@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { api, type LiveGame } from '../lib/api'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
@@ -39,10 +40,9 @@ export default function LiveGamePage() {
   const data = query.data
 
   // The profile is nearly always already cached: this tab is reached from it.
-  // Asked without options so it shares the profile page's own entry.
+  // The same definition as the profile page's, so the two share one entry.
   const profileQuery = useQuery({
-    queryKey: ['profile', platform, name, tag],
-    queryFn: () => api.profile(platform, name, tag),
+    ...queries.profile(platform, name, tag),
     enabled: Boolean(platform && name && tag),
   })
   // History costs Riot calls, so it is read only on the branch that shows it:

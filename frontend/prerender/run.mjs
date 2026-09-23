@@ -15,14 +15,14 @@
 // served, and it exits non-zero when a required page failed or too few pages
 // rendered, so a deploy does not switch to a build that cannot prerender.
 
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const here = path.dirname(fileURLToPath(import.meta.url))
+import { assemble, dist, loadBuild, parseArgs, realFetch, routeFetchToApi } from './shared.mjs'
+
 const args = parseArgs(process.argv.slice(2))
 const apiBase = args.api ?? process.env.API_BASE ?? 'http://127.0.0.1:8000'
-const outRoot = args.out ?? process.env.PRERENDER_OUT ?? path.join(here, '..', 'dist', 'pages')
+const outRoot = args.out ?? process.env.PRERENDER_OUT ?? path.join(dist, 'pages')
 const buildId = args['build-id'] ?? process.env.BUILD_ID ?? 'dev'
 const concurrency = Number(args.concurrency ?? 6)
 const keepBuilds = 2
@@ -30,43 +30,10 @@ const keepBuilds = 2
 // build rather than with a page, and the deploy should not switch to it.
 const MIN_RENDERED_SHARE = 0.9
 
-function parseArgs(argv) {
-  const out = {}
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg.startsWith('--')) {
-      const key = arg.slice(2)
-      const next = argv[i + 1]
-      if (next && !next.startsWith('--')) {
-        out[key] = next
-        i += 1
-      } else {
-        out[key] = 'true'
-      }
-    }
-  }
-  return out
-}
-
-// The app fetches relative "/api/..." paths, which a browser resolves against
-// the page. Node has no page, so they are resolved against the API here.
-const realFetch = globalThis.fetch
-globalThis.fetch = (input, init) => {
-  if (typeof input === 'string' && input.startsWith('/')) {
-    return realFetch(new URL(input, apiBase), init)
-  }
-  return realFetch(input, init)
-}
+routeFetchToApi(apiBase)
 
 async function main() {
-  const dist = path.join(here, '..', 'dist')
-  const template = await readFile(path.join(dist, 'index.html'), 'utf8')
-  if (!template.includes('<!--app-html-->') || !template.includes('<!--app-head-->')) {
-    throw new Error('dist/index.html has no <!--app-html--> / <!--app-head--> placeholders')
-  }
-  const { render, renderHeadHtml, jsonForHtml } = await import(
-    pathToFileUrl(path.join(dist, 'server', 'entry-server.js'))
-  )
+  const { template, render, renderHeadHtml, jsonForHtml } = await loadBuild()
 
   const manifestResponse = await realFetch(new URL('/api/meta/pages', apiBase))
   if (!manifestResponse.ok) {
@@ -145,25 +112,6 @@ async function renderOne(page, { template, tmp, render, renderHeadHtml, jsonForH
   }
 }
 
-/**
- * The built shell with this page's head, markup and query cache in it. The
- * shell's own marked head tags (its default title and card) are removed
- * first, so the page's replace them rather than sit beside them.
- */
-function assemble(template, rendered, { renderHeadHtml, jsonForHtml }) {
-  let html = template
-    .replace(/<title\b[^>]*data-head="[^"]*"[^>]*>[^<]*<\/title>\s*/g, '')
-    .replace(/<(?:meta|link)\b[^>]*data-head="[^"]*"[^>]*>\s*/g, '')
-  const head = rendered.head ? renderHeadHtml(rendered.head) : ''
-  html = html.replace('<!--app-head-->', head)
-  html = html.replace('<!--app-html-->', rendered.html)
-  const state =
-    `<script>window.__RENDERED_AT__=${Number(rendered.renderedAt)};` +
-    `window.__RQ_STATE__=${jsonForHtml(rendered.state)}</script>\n    `
-  html = html.replace('<script type="module"', `${state}<script type="module"`)
-  return html
-}
-
 async function pruneOldBuilds(root, current) {
   let names
   try {
@@ -183,10 +131,6 @@ async function pruneOldBuilds(root, current) {
     await rm(path.join(root, old.name), { recursive: true, force: true })
     console.log(`prerender: removed old build ${old.name}`)
   }
-}
-
-function pathToFileUrl(file) {
-  return new URL(`file:///${file.replace(/\\/g, '/')}`).href
 }
 
 main().catch((error) => {

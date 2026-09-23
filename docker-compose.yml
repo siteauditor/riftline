@@ -134,6 +134,36 @@ services:
         max-size: "5m"
         max-file: "2"
 
+  # Profiles rendered on request with the live rank (prerender/live.mjs),
+  # from the prerender job's image: the same build, kept up rather than run to
+  # completion. nginx sends a profile that has a file here and serves the file
+  # itself whenever this is down, so the site never depends on it being up.
+  render:
+    image: riftline-prerender:local
+    # Built by `docker compose build prerender`; never pulled, since no
+    # registry has it.
+    pull_policy: never
+    container_name: riftline-render
+    restart: unless-stopped
+    command: ["node", "prerender/live.mjs"]
+    environment:
+      API_BASE: http://api:8000
+    networks: [default]
+    depends_on:
+      api:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   default:
     name: riftline_default

@@ -394,11 +394,27 @@ that work.
   still running is the previous build with its own pages, which keeps
   serving. The nightly run prerenders again after the storage stages so the
   numbers on the pages are the night's.
+- **Profiles are rendered on request**, by the `render` service
+  (`frontend/prerender/live.mjs`, kept up from the prerender image), so the
+  title and description a crawler or a link preview read carry the rank Riot
+  gives now rather than the one stored at the last prerender: a stored rank
+  moves only when someone opens the page, and Telegram's preview of a Silver
+  IV player read Bronze I for a day (2026-09-24). nginx sends a profile there
+  only when it has a file, so which profiles exist and are indexable is still
+  the prerender's call. The renderer gives the live profile three seconds
+  (`LIVE_BUDGET_MS`) and at most two at once (`MAX_LIVE`), and past either
+  renders from storage, the same HTML as the file; nginx serves the file
+  whenever the renderer is down, slow or failing. `X-Prerendered` says which
+  answered: `live <build>` or `stored <build>` from the renderer, the bare
+  build id from the file. A deploy recreates it from the new image
+  (`up -d render web`); the nightly prerender does not need to touch it.
 
 ```bash
 ssh MyVPS 'cd /root/riftline && docker compose run --rm prerender'   # render every page now
 ssh MyVPS 'docker run --rm -v riftline_pages:/pages alpine cat /pages/$(cd /root/riftline && git rev-parse --short HEAD)/_manifest.json'
 curl -sI https://www.rhasta.space/tierlist | grep -i 'x-prerendered\|x-robots'   # the build id, and no noindex
+curl -sI https://www.rhasta.space/summoner/sg2/Veystrix/999 | grep -i x-prerendered   # live <build>: the renderer answered
+ssh MyVPS 'cd /root/riftline && docker compose logs --tail 20 render'     # one line per profile: live or stored, and how long
 curl -sI https://www.rhasta.space/no-such-page | grep -i x-robots           # the shell: noindex
 ```
 

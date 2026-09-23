@@ -2,12 +2,15 @@
 // prerender by hand.
 //
 //     node prerender/serve.mjs [--pages /tmp/pages/local] [--api http://127.0.0.1:8000] [--port 5174]
+//                              [--live http://127.0.0.1:3000]
 //
 // The order is nginx's `try_files`: the prerendered file for the path, then
-// a static file from dist/, then the shell. /api/* is proxied to the API. Not
-// used in production, where nginx.conf is the authority; this exists so the
-// hydration of a prerendered page can be watched in a browser on a machine
-// without Docker.
+// a static file from dist/, then the shell. /api/* is proxied to the API.
+// With --live, a profile that has a file is asked of the live renderer
+// (live.mjs) first and served its file when that cannot answer, as nginx's
+// `@live_profile` does. Not used in production, where nginx.conf is the
+// authority; this exists so the hydration of a prerendered page can be
+// watched in a browser on a machine without Docker.
 
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
@@ -28,6 +31,8 @@ const dist = path.resolve(here, '..', 'dist')
 const pages = path.resolve(args.pages ?? path.join(dist, 'pages', 'dev'))
 const apiBase = args.api ?? 'http://127.0.0.1:8000'
 const port = Number(args.port ?? 5174)
+const liveBase = args.live ?? null
+const PROFILE_PATH = /^\/summoner\/[^/]+\/[^/]+\/[^/]+$/
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -86,6 +91,23 @@ http
     ]
     if (process.env.SERVE_DEBUG) {
       for (const file of candidates) console.log(`${url.pathname} -> ${file}: ${await exists(file)}`)
+    }
+    if (liveBase && PROFILE_PATH.test(clean) && (await exists(candidates[0]))) {
+      try {
+        const upstream = await fetch(new URL(url.pathname + url.search, liveBase), {
+          signal: AbortSignal.timeout(8000),
+        })
+        if (upstream.ok) {
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'X-Prerendered': upstream.headers.get('x-prerendered') ?? 'live',
+          })
+          res.end(Buffer.from(await upstream.arrayBuffer()))
+          return
+        }
+      } catch {
+        // Down or slow: the file, below.
+      }
     }
     for (const file of candidates) {
       if (await exists(file)) {

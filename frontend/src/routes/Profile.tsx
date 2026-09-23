@@ -99,8 +99,7 @@ export default function Profile() {
   // answer when it arrives. A profile that was not prerendered has no such
   // entries and loads as it always did.
   const profileQuery = useQuery({
-    queryKey: ['profile', platform, name, tag],
-    queryFn: () => api.profile(platform, name, tag),
+    ...queries.profile(platform, name, tag),
     placeholderData: () =>
       queryClient.getQueryData(queries.profileStored(platform, name, tag).queryKey),
   })
@@ -218,7 +217,7 @@ export default function Profile() {
 
   async function refreshAll() {
     const fresh = await api.profile(platform, name, tag, { refresh: true })
-    queryClient.setQueryData(['profile', platform, name, tag], fresh)
+    queryClient.setQueryData(queries.profile(platform, name, tag).queryKey, fresh)
     // Prefix matches: every queue filter's history, the Champions tab's
     // analytics and both rank-history lines.
     await Promise.all([

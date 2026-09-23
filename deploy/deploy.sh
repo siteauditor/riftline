@@ -40,7 +40,10 @@ main() {
   # its own pages, which keeps serving.
   docker compose run --rm prerender
 
-  docker compose up -d web
+  # The live profile renderer, from the image the prerender job just ran, so
+  # it serves this build's bundle. Before web, which sends profiles to it and
+  # serves their files if it is not up yet.
+  docker compose up -d render web
 
   # Captured before matching rather than piped into `grep -q`: grep exits on
   # its first match, the writer can then die of SIGPIPE, and under pipefail

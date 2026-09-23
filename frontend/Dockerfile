@@ -4,8 +4,10 @@
 # Three stages. pnpm builds the app twice (the browser bundle and the server
 # bundle the prerenderer imports); the prerender stage is that build plus node,
 # run at each deploy and each night against the API to write one HTML file per
-# page; nginx serves the files. Node never serves a request: the VPS runs nginx
-# and a job, not a server.
+# page; nginx serves the files. The same stage, kept up as the `render`
+# service, renders profiles on request with the live rank (prerender/live.mjs);
+# nginx serves a profile's file whenever that server cannot answer, so no page
+# depends on Node being up.
 #
 # BUILD_ID names the deploy (the short commit sha). It is baked into both the
 # nginx stage, which reads its pages from /pages/<BUILD_ID>, and the prerender
