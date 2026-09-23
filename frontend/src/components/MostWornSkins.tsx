@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { SectionTitle } from './Stat'
 import { queries } from '../lib/queries'
 import { pct } from '../lib/format'
+import { championPath } from '../lib/searchParams'
 
 /**
  * The skins people actually wear, counted from live games.
@@ -34,7 +35,7 @@ export default function MostWornSkins() {
       <ol className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-x-4 gap-y-5">
         {skins.map((skin) => (
           <li key={`${skin.champion.id}-${skin.num}`}>
-            <Link to={`/champions/${skin.champion.slug ?? skin.champion.id}?tab=skins&skin=${skin.num}`} className="group block">
+            <Link to={`${championPath(skin.champion)}?tab=skins&skin=${skin.num}`} className="group block">
               <span className="block aspect-square overflow-hidden bg-raised ring-1 ring-line transition-[box-shadow] group-hover:ring-gold">
                 {skin.tile_url && (
                   <img src={skin.tile_url} alt="" loading="lazy" className="size-full object-cover" />

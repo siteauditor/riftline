@@ -17,7 +17,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
-import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
+import { championPath, intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 
@@ -243,7 +243,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
           )}
           <span className="min-w-0">
             <Link
-              to={`/champions/${row.champion.slug ?? row.champion.id}${row.main_position ? `?position=${row.main_position}` : ''}`}
+              to={championPath(row.champion, row.main_position)}
               className="display block truncate text-[15px] font-600 text-ink hover:text-gold-bright"
             >
               {row.champion.name}

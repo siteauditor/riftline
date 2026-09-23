@@ -14,7 +14,7 @@ import { type ItemDetail, type ItemFigures } from '../lib/api'
 import { compact, pct } from '../lib/format'
 import { itemSummary } from '../lib/prose'
 import { queries } from '../lib/queries'
-import { sliceFromParams, sliceLink, sliceParams, useHydratedSearchParams, withParams } from '../lib/searchParams'
+import { sliceFromParams, sliceParams, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { heads } from '../lib/seo'
 import CountUp from '../components/CountUp'
 
@@ -154,7 +154,7 @@ export default function Item() {
                 <Headline figures={figures} finished={finished} />
                 <ItemTiming figures={figures} finished={finished} />
                 <ItemSlots figures={figures} />
-                <ItemChampions figures={figures} finished={finished} linkSuffix={sliceLink(slice)} />
+                <ItemChampions figures={figures} finished={finished} slice={slice} />
               </>
             ) : (
               <p className="max-w-prose border-l-2 border-line pl-3 text-sm leading-relaxed text-ink-dim">

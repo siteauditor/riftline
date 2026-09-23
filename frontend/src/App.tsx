@@ -73,6 +73,7 @@ export default function App() {
           <nav className="-mx-1 -my-1 flex min-w-0 flex-shrink items-center gap-1 overflow-x-auto px-1 py-1 text-sm">
             {[
               { to: '/tierlist', label: 'Tier list' },
+              { to: '/champions', label: 'Champions' },
               { to: '/draft', label: 'Draft' },
               { to: '/items', label: 'Items' },
               { to: '/leaderboards', label: 'Leaderboards' },

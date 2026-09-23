@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import { lowerFloor } from './minGames'
-import { MAX_MIN_GAMES, positionParam, sliceCorrections, sliceFromParams } from './searchParams'
+import {
+  championPageFix,
+  championPath,
+  MAX_MIN_GAMES,
+  positionFromRole,
+  positionParam,
+  roleWord,
+  sliceCorrections,
+  sliceFromParams,
+} from './searchParams'
 
 const params = (query: string) => new URLSearchParams(query)
 
@@ -39,6 +48,55 @@ describe('sliceCorrections', () => {
 
   it('leaves the patch for the API to answer', () => {
     expect(sliceCorrections(params('patch=16.9'), 20)).toBeNull()
+  })
+})
+
+describe('championPath', () => {
+  const ahri = { id: 103, slug: 'ahri' }
+
+  it('puts the role in the path as its word, and the slice in the query', () => {
+    expect(championPath(ahri)).toBe('/champions/ahri')
+    expect(championPath(ahri, 'UTILITY')).toBe('/champions/ahri/support')
+    expect(championPath(ahri, 'middle')).toBe('/champions/ahri/mid')
+    expect(championPath(ahri, 'BOTTOM', { patch: '16.18', queueId: 440, bracket: 'ALL' })).toBe(
+      '/champions/ahri/bot?patch=16.18&queue=440',
+    )
+    expect(championPath(ahri, null, { queueId: 420 })).toBe('/champions/ahri')
+  })
+
+  it('links by id when there is no slug, and never names a role the site does not have', () => {
+    expect(championPath({ id: 9999, slug: null }, 'TOP')).toBe('/champions/9999/top')
+    expect(championPath('ahri', 'ARAM')).toBe('/champions/ahri')
+  })
+
+  it('reads the words back, and the API names a hand-typed address uses', () => {
+    for (const position of ['TOP', 'JUNGLE', 'MIDDLE', 'BOTTOM', 'UTILITY']) {
+      expect(positionFromRole(roleWord(position))).toBe(position)
+    }
+    expect(positionFromRole('Support')).toBe('UTILITY')
+    expect(positionFromRole('middle')).toBe('MIDDLE')
+    expect(positionFromRole('adc')).toBeNull()
+    expect(positionFromRole(undefined)).toBeNull()
+  })
+})
+
+describe('championPageFix', () => {
+  const fix = (path: string, query: string, ref: string, role?: string) =>
+    championPageFix(path, params(query), ref, role, 5)
+
+  it('leaves a page at its own address alone', () => {
+    expect(fix('/champions/ahri', '', 'ahri')).toBeNull()
+    expect(fix('/champions/ahri/support', 'tab=runes&patch=16.18', 'ahri', 'support')).toBeNull()
+  })
+
+  it('moves an older link to the slug and the role into the path, in one step', () => {
+    expect(fix('/champions/ahri', 'position=JUNGLE&tab=runes', 'ahri')).toBe('/champions/ahri/jungle?tab=runes')
+    expect(fix('/champions/103', 'position=utility', 'ahri')).toBe('/champions/ahri/support')
+    expect(fix('/champions/ahri/middle', 'queue_id=440', 'ahri', 'middle')).toBe('/champions/ahri/mid?queue=440')
+  })
+
+  it('lets the path win over a role in the query', () => {
+    expect(fix('/champions/ahri/top', 'position=JUNGLE', 'ahri', 'top')).toBe('/champions/ahri/top')
   })
 })
 

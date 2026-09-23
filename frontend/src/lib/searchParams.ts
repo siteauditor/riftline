@@ -242,3 +242,72 @@ export function sliceLink(slice: {
   const text = params.toString()
   return text ? `?${text}` : ''
 }
+
+/**
+ * A role's own page is its path word: `/champions/pantheon/support`. The words
+ * are the site's role labels in lower case, as `ROLE_WORDS` in the backend's
+ * `app/services/seo.py` has them, and the two must agree: that list decides
+ * which role pages are prerendered and indexed.
+ */
+export const ROLE_WORDS: Record<string, string> = {
+  TOP: 'top',
+  JUNGLE: 'jungle',
+  MIDDLE: 'mid',
+  BOTTOM: 'bot',
+  UTILITY: 'support',
+}
+
+/** The path word for a role, or null for no role or one the site does not have. */
+export function roleWord(position: string | null | undefined): string | null {
+  return (position && ROLE_WORDS[position.toUpperCase()]) || null
+}
+
+/**
+ * The role a path word names, in any case, or null. The API's own names
+ * (`middle`, `utility`) are read too, since a hand-typed address uses them;
+ * the page then moves to the word.
+ */
+export function positionFromRole(word: string | null | undefined): string | null {
+  const lower = word?.toLowerCase()
+  if (!lower) return null
+  const found = Object.entries(ROLE_WORDS).find(([id, w]) => w === lower || id.toLowerCase() === lower)
+  return found ? found[0] : null
+}
+
+/**
+ * The address of a champion's page: its slug, the role as a path word when
+ * there is one, and the slice being read (patch, queue, bracket) as the query
+ * string. Every link to a champion goes through this, so a role is always a
+ * path and never `?position=`, which the page now reads only to move it.
+ */
+export function championPath(
+  champion: string | { id: number; slug?: string | null },
+  position?: string | null,
+  slice?: { patch?: string | null; queueId?: number | null; bracket?: string | null },
+): string {
+  const ref = typeof champion === 'string' ? champion : (champion.slug ?? String(champion.id))
+  const word = roleWord(position)
+  return `/champions/${ref}${word ? `/${word}` : ''}${slice ? sliceLink({ ...slice, position: null }) : ''}`
+}
+
+/**
+ * Where a champion page should be, or null when it is there already: at the
+ * slug rather than an id, with its role as the path word rather than a
+ * `?position=` from an older link or a hand-typed `middle`, and with the
+ * slice's query string corrected as on every slice page. One address, so the
+ * page moves once. `role` is the path's word, known to be valid or absent.
+ */
+export function championPageFix(
+  pathname: string,
+  search: URLSearchParams,
+  ref: string,
+  role: string | undefined,
+  minGames: number,
+): string | null {
+  const position = positionFromRole(role) ?? positionParam(search.get('position'))
+  const query = withParams(sliceCorrections(search, minGames) ?? search, { position: null }).toString()
+  const target = `${championPath(ref, position)}${query ? `?${query}` : ''}`
+  const current = search.toString()
+  const here = `${pathname}${current ? `?${current}` : ''}`
+  return target === here ? null : target
+}

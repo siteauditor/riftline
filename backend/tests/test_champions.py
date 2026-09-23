@@ -788,3 +788,21 @@ async def test_an_item_is_set_against_its_slot_once_the_item_guide_has_the_buyer
     assert by_item[LEGENDARY_A]["slot_buyers"] == 25
     # Twelve buyers is under the item guide's floor of twenty: said, not shown.
     assert (by_item[LEGENDARY_B]["slot_delta"], by_item[LEGENDARY_B]["slot_buyers"]) == (None, 12)
+
+
+async def test_the_index_lists_every_champion_a_to_z_with_where_it_is_played(client, corpus):
+    """A champion under the tier list's floor, or new and without a game, was
+    reachable only by searching for it."""
+    body = (await client.get("/api/champions")).json()
+
+    names = [e["champion"]["name"] for e in body["champions"]]
+    assert names == sorted(names)
+    assert "Ahri" in names
+    assert body["role_min_games"] == 20
+    for entry in body["champions"]:
+        if entry["games"]:
+            shares = [p["share"] for p in entry["positions"]]
+            assert shares == sorted(shares, reverse=True)
+            assert sum(shares) == pytest.approx(1.0)
+        else:
+            assert entry["positions"] == []

@@ -12,6 +12,7 @@ import { COMFORT_LEVELS } from '../../lib/draftBoard'
 import { DAMAGE_TEXT, mainType } from '../../lib/damage'
 import { compact, pct, positionLabel } from '../../lib/format'
 import { lowerFloor } from '../../lib/minGames'
+import { championPath } from '../../lib/searchParams'
 
 /**
  * The answer half of the draft page: the ranked picks, who to ban, and how the
@@ -294,16 +295,10 @@ function SuggestionRow({
   const others = s.evidence.filter((e) => e.kind !== 'lane')
   const slug = s.champion.slug
   const opponent = data.lane_opponent?.champion
-  const build = slug ? `/champions/${slug}?position=${data.position}` : null
+  const build = slug ? championPath(slug, data.position) : null
   // The counters tab, filtered to the opponent: that matchup's own page.
   const counters =
-    slug && opponent
-      ? `/champions/${slug}?${new URLSearchParams({
-          position: data.position,
-          tab: 'counters',
-          q: opponent.name,
-        })}`
-      : null
+    build && opponent ? `${build}?${new URLSearchParams({ tab: 'counters', q: opponent.name })}` : null
   const duoRole = data.position === 'BOTTOM' ? 'support' : 'ADC'
   const lines = [...laneLines(s, data), ...s.reasons]
   const balances = Boolean(s.damage?.balances && data.team_damage.allies?.shares)

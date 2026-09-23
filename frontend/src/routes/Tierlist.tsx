@@ -15,10 +15,10 @@ import { heads } from '../lib/seo'
 import { compact, pct, positionLabel } from '../lib/format'
 import { lowerFloor } from '../lib/minGames'
 import {
+  championPath,
   foldName,
   SLICE_DEFAULTS,
   sliceFromParams,
-  sliceLink,
   sliceParams,
   useHydratedSearchParams,
   useSearchText,
@@ -152,8 +152,7 @@ export default function Tierlist() {
     : ranked
   const visible = showAll || query ? shown : shown.slice(0, FIRST_ROWS)
   const queueName = slice.queueId === 440 ? 'ranked flex' : 'ranked solo'
-  const linkFor = (row: ChampionMetaRow) =>
-    `/champions/${row.champion.slug ?? row.champion.id}${sliceLink({ ...slice, position: row.position })}`
+  const linkFor = (row: ChampionMetaRow) => championPath(row.champion, row.position, slice)
   const rows = ranked.map((r) => r.row)
 
   const empty = corpus.data && corpus.data.total_matches === 0

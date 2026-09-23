@@ -2,6 +2,8 @@ import { Link } from 'react-router-dom'
 
 import type { ItemFigures } from '../../lib/api'
 import { compact, pct } from '../../lib/format'
+import type { ItemSlice } from '../../lib/queries'
+import { championPath } from '../../lib/searchParams'
 import { slotLabel } from './groups'
 import { Delta } from './ItemSlots'
 
@@ -9,12 +11,12 @@ import { Delta } from './ItemSlots'
 export default function ItemChampions({
   figures,
   finished,
-  linkSuffix = '',
+  slice,
 }: {
   figures: ItemFigures
   finished: boolean
   /** The slice being read, carried to each champion's page. */
-  linkSuffix?: string
+  slice?: ItemSlice
 }) {
   if (figures.champions.length === 0) return null
   return (
@@ -43,7 +45,7 @@ export default function ItemChampions({
             {figures.champions.map((c) => (
               <tr key={c.champion.id} className="lift border-b border-line-soft">
                 <td className="py-1.5">
-                  <Link to={`/champions/${c.champion.slug ?? c.champion.id}${linkSuffix}`} className="group flex items-center gap-2">
+                  <Link to={championPath(c.champion, null, slice)} className="group flex items-center gap-2">
                     {c.champion.icon_url && (
                       <img
                         src={c.champion.icon_url}

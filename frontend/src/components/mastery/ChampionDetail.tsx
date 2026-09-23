@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import type { PoolChampion } from './pool'
 import { levelStep } from './scale'
 import { compact, pct, scoreColor, timeAgo, winRateColor } from '../../lib/format'
+import { championPath } from '../../lib/searchParams'
 import { buttonVariants } from '@/components/ui/button'
 
 /**
@@ -163,7 +164,7 @@ export default function ChampionDetail({
           )}
           {champion.known && (
             <Link
-              to={`/champions/${champion.slug ?? champion.id}`}
+              to={championPath(champion)}
               className="text-ink-dim underline decoration-line underline-offset-2 hover:text-gold-bright"
             >
               Champion page

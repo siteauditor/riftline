@@ -3,7 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { RouteObject } from 'react-router-dom'
 
 import App from './App'
-import { sliceFromParams } from './lib/searchParams'
+import { positionFromRole, sliceFromParams } from './lib/searchParams'
 import { CHAMPION_MIN_GAMES, DEFAULT_LADDER, queries, TIERLIST_MIN_GAMES } from './lib/queries'
 import NotFound, { RouteError } from './routes/NotFound'
 
@@ -51,6 +51,17 @@ const page = (load: () => Promise<{ default: ComponentType }>) => async () => ({
 })
 
 const prefetchMethod: Prefetch = ({ queryClient }) => queryClient.prefetchQuery(queries.method())
+
+// The slice the page builds on its first render: the role from the path, and
+// the query string empty, as the page reads it while it hydrates.
+const prefetchChampion: Prefetch = ({ params, search, queryClient }) => {
+  const ref = params.championId ?? ''
+  const slice = { ...sliceFromParams(search, CHAMPION_MIN_GAMES), position: positionFromRole(params.role) }
+  return Promise.all([
+    queryClient.prefetchQuery(queries.champion(ref, slice)),
+    queryClient.prefetchQuery(queries.championProfile(ref)),
+  ])
+}
 
 export const routes: RouteObject[] = [
   {
@@ -147,16 +158,18 @@ export const routes: RouteObject[] = [
         ),
       },
       {
-        path: 'champions/:championId',
+        path: 'champions',
+        lazy: page(() => import('./routes/Champions')),
+        handle: handle(({ queryClient }) => queryClient.prefetchQuery(queries.championIndex())),
+      },
+      // The bare path is the champion's main role; a role's own page carries
+      // the role as a path word (`/champions/pantheon/support`), so each has
+      // an address to prerender and index. One module serves both.
+      { path: 'champions/:championId', lazy: page(() => import('./routes/Champion')), handle: handle(prefetchChampion) },
+      {
+        path: 'champions/:championId/:role',
         lazy: page(() => import('./routes/Champion')),
-        handle: handle(({ params, search, queryClient }) => {
-          const ref = params.championId ?? ''
-          const slice = sliceFromParams(search, CHAMPION_MIN_GAMES)
-          return Promise.all([
-            queryClient.prefetchQuery(queries.champion(ref, slice)),
-            queryClient.prefetchQuery(queries.championProfile(ref)),
-          ])
-        }),
+        handle: handle(prefetchChampion),
       },
       {
         path: 'items',

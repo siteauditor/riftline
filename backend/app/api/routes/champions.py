@@ -102,6 +102,28 @@ class PositionShare(BaseModel):
     win_rate: float
 
 
+class ChampionIndexEntry(BaseModel):
+    champion: ChampionRef
+    # The roles it was played in on `patch`, most games first, and its games.
+    positions: list[PositionShare] = Field(default_factory=list)
+    games: int = 0
+
+
+class ChampionIndex(BaseModel):
+    """Every champion Data Dragon knows, A to Z, with where each is played.
+
+    For the index page: a champion under the tier list's floor, or new and
+    without a game, was reachable only by searching for it.
+    """
+
+    patch: str | None = None
+    queue_id: int = 420
+    # A role is named on the index from this many games: the tier list's field,
+    # and the sample at which a role's own page is indexed (`app/services/seo.py`).
+    role_min_games: int = TIER_MIN_GAMES
+    champions: list[ChampionIndexEntry] = Field(default_factory=list)
+
+
 class FacetEntry(BaseModel):
     """One thing a champion took, with how often and how it went."""
 
@@ -617,6 +639,52 @@ def _champion_id(ref: str, sd: StaticDataService) -> int:
     if champion is None:
         raise HTTPException(404, f"No champion called {ref!r}.")
     return champion.id
+
+
+@router.get("", response_model=ChampionIndex)
+async def get_champion_index(
+    db: DbDep, sd: StaticDep, queue_id: int = Query(420)
+) -> ChampionIndex:
+    """Every champion, with the roles it is played in on the default patch."""
+    patch = default_patch(await aggregated_slices(db), queue_id)
+    played: dict[int, list[ChampionStat]] = defaultdict(list)
+    if patch:
+        for row in (
+            await db.execute(
+                select(ChampionStat).where(
+                    ChampionStat.patch == patch,
+                    ChampionStat.queue_id == queue_id,
+                    ChampionStat.rank_bracket == ALL_BRACKETS,
+                    ChampionStat.team_position.in_(POSITIONS),
+                    ChampionStat.games > 0,
+                )
+            )
+        ).scalars():
+            played[row.champion_id].append(row)
+    entries = []
+    for champion in sorted(sd.champions_by_id.values(), key=lambda c: c.name):
+        rows = sorted(played.get(champion.id, []), key=lambda r: r.games, reverse=True)
+        games = sum(r.games for r in rows)
+        entries.append(
+            ChampionIndexEntry(
+                champion=ChampionRef(
+                    id=champion.id,
+                    name=sd.champion_name(champion.id),
+                    icon_url=sd.champion_icon(champion.id),
+                ),
+                positions=[
+                    PositionShare(
+                        position=r.team_position,
+                        games=r.games,
+                        share=r.games / games,
+                        win_rate=r.win_rate,
+                    )
+                    for r in rows
+                ],
+                games=games,
+            )
+        )
+    return ChampionIndex(patch=patch, queue_id=queue_id, champions=entries)
 
 
 @router.get("/{champion}", response_model=ChampionDetail)

@@ -22,6 +22,7 @@ import {
 } from '../lib/format'
 import { clearRecentSearches, useRecentSearches } from '../lib/storage'
 import { queries } from '../lib/queries'
+import { championPath } from '../lib/searchParams'
 import { heads } from '../lib/seo'
 import TimeAgo from '../components/TimeAgo'
 import CountUp from '../components/CountUp'
@@ -322,7 +323,7 @@ function BestPicks({
           {picks.map((row) => (
             <li key={row.position}>
               <Link
-                to={`/champions/${row.champion.slug ?? row.champion.id}?position=${row.position}`}
+                to={championPath(row.champion, row.position)}
                 className="group block overflow-hidden rounded-sm ring-1 ring-line transition-[box-shadow] hover:ring-gold"
               >
                 {/* Tile art, not a 48px icon. The art is the point. */}

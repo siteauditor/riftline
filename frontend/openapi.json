@@ -846,6 +846,50 @@
     }
    }
   },
+  "/api/champions": {
+   "get": {
+    "tags": [
+     "champions"
+    ],
+    "summary": "Get Champion Index",
+    "description": "Every champion, with the roles it is played in on the default patch.",
+    "operationId": "get_champion_index_api_champions_get",
+    "parameters": [
+     {
+      "name": "queue_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "default": 420,
+       "title": "Queue Id"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ChampionIndex"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/champions/{champion}": {
    "get": {
     "tags": [
@@ -2889,6 +2933,65 @@
      "counters"
     ],
     "title": "ChampionDetail"
+   },
+   "ChampionIndex": {
+    "properties": {
+     "patch": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Patch"
+     },
+     "queue_id": {
+      "type": "integer",
+      "title": "Queue Id",
+      "default": 420
+     },
+     "role_min_games": {
+      "type": "integer",
+      "title": "Role Min Games",
+      "default": 20
+     },
+     "champions": {
+      "items": {
+       "$ref": "#/components/schemas/ChampionIndexEntry"
+      },
+      "type": "array",
+      "title": "Champions"
+     }
+    },
+    "type": "object",
+    "title": "ChampionIndex",
+    "description": "Every champion Data Dragon knows, A to Z, with where each is played.\n\nFor the index page: a champion under the tier list's floor, or new and\nwithout a game, was reachable only by searching for it."
+   },
+   "ChampionIndexEntry": {
+    "properties": {
+     "champion": {
+      "$ref": "#/components/schemas/ChampionRef"
+     },
+     "positions": {
+      "items": {
+       "$ref": "#/components/schemas/PositionShare"
+      },
+      "type": "array",
+      "title": "Positions"
+     },
+     "games": {
+      "type": "integer",
+      "title": "Games",
+      "default": 0
+     }
+    },
+    "type": "object",
+    "required": [
+     "champion"
+    ],
+    "title": "ChampionIndexEntry"
    },
    "ChampionInfo": {
     "properties": {

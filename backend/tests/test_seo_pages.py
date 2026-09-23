@@ -119,3 +119,41 @@ async def test_the_sitemap_is_xml_and_agrees_with_the_manifest(client, seeded):
     assert locs == expected
     assert f"{manifest['origin']}/champions/thin" not in locs
     assert manifest["origin"].startswith("https://")
+
+
+async def test_a_champion_gets_a_page_for_each_role_the_tier_list_would_rank(client, seeded, monkeypatch):
+    """"Pantheon support build" had no page of its own: roles were a query on
+    one page, and only the main role was indexed. A role with the tier list's
+    sample now has its own path; the main role's path is rendered for links
+    but left to the bare page, which is its canonical."""
+    flex = 9_403
+    monkeypatch.setitem(static_data.champions_by_id, flex, Champion(id=flex, key="Flex", name="Flex", title=""))
+    async with SessionLocal() as session:
+        seeded_flex = (await session.execute(
+            select(ChampionStat.id).where(ChampionStat.patch == PATCH, ChampionStat.champion_id == flex)
+        )).first()
+        if not seeded_flex:
+            session.add_all([
+                ChampionStat(patch=PATCH, queue_id=420, rank_bracket="ALL", champion_id=flex,
+                             team_position=position, games=games, wins=games // 2, pool_games=100,
+                             computed_at=COMPUTED)
+                for position, games in (("MIDDLE", 40), ("UTILITY", 22), ("TOP", 5))
+            ])
+            await session.commit()
+
+    async def the_seeded_patch(_session):
+        return PATCH
+
+    monkeypatch.setattr("app.services.seo.index_patch", the_seeded_patch)
+    body = (await client.get("/api/meta/pages")).json()
+    by_path = {p["path"]: p for p in body["pages"]}
+
+    assert by_path["/champions/flex"]["indexable"] is True
+    assert by_path["/champions/flex/support"]["indexable"] is True
+    assert by_path["/champions/flex/mid"]["indexable"] is False, "the main role's page is the bare one"
+    assert "/champions/flex/top" not in by_path, "five games is not a page"
+    assert by_path["/champions"]["indexable"] and by_path["/champions"]["required"]
+
+    sitemap = (await client.get("/api/meta/sitemap.xml")).text
+    assert "/champions/flex/support<" in sitemap
+    assert "/champions/flex/mid<" not in sitemap

@@ -1,4 +1,5 @@
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import Head from '../components/Head'
@@ -21,31 +22,39 @@ import { calledCount, pairPatches } from '../lib/pairs'
 import { CHAMPION_MIN_GAMES, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import {
+  championPageFix,
+  championPath,
+  positionFromRole,
   SLICE_DEFAULTS,
   sliceFromParams,
   sliceLink,
   sliceParams,
+  useHydrated,
   useHydratedSearchParams,
   useSearchText,
-  useSliceCorrections,
   withParams,
 } from '../lib/searchParams'
 import CountUp from '../components/CountUp'
 import Hint from '../components/Hint'
 import LobbyRanks from '../components/LobbyRanks'
+import NotFound from './NotFound'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
 const MIN_GAMES = CHAMPION_MIN_GAMES
 
 export default function Champion() {
-  // A slug ("aatrox"), or an id from an older link; the API takes either.
-  const { championId = '' } = useParams()
+  // A slug ("aatrox"), or an id from an older link; the API takes either. The
+  // role is a path word on a role's own page and absent on the main role's.
+  const { championId = '', role } = useParams()
   const [search, setSearch] = useHydratedSearchParams()
-  useSliceCorrections(MIN_GAMES)
+  const pathPosition = positionFromRole(role)
+  const unknownRole = role !== undefined && pathPosition === null
 
   // Slice state lives in the URL so a champion page stays deep-linkable and the
-  // back button behaves.
-  const slice: SliceValue = sliceFromParams(search, MIN_GAMES)
+  // back button behaves. The role is the path's; an older link's `?position=`
+  // is read until the page moves it into the path.
+  const fromQuery = sliceFromParams(search, MIN_GAMES)
+  const slice: SliceValue = { ...fromQuery, position: pathPosition ?? fromQuery.position }
   // The counters and synergies controls too, so back from an opponent's page
   // returns to the same list rather than to the top fifteen.
   const [pairQuery, setPairQuery] = useSearchText('q')
@@ -66,6 +75,17 @@ export default function Champion() {
 
   const d: ChampionDetail | undefined = query.data
   const profile = profileQuery.data
+
+  // One move to the page's own address, after hydration: the slug for an id,
+  // the role in the path for an older `?position=`, the slice put right.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const hydrated = useHydrated()
+  const ref = (d?.champion ?? profile?.champion)?.slug ?? championId
+  const fix = hydrated && !unknownRole ? championPageFix(location.pathname, search, ref, role, MIN_GAMES) : null
+  useEffect(() => {
+    if (fix) navigate(fix, { replace: true })
+  }, [fix, navigate])
   // A numbers tab on a patch with no numbers would open on an error, so a page
   // without them opens on the story unless the link asked for something else.
   const tab: ChampionTab = parseTab(search.get('tab')) ?? (query.isError ? 'story' : 'build')
@@ -96,9 +116,18 @@ export default function Champion() {
 
   // Where a pair row links: the other champion on the slice being read, in
   // the lane they were in when it is known.
-  const pairLink = (champion: ChampionRef, position: string | null) =>
-    `/champions/${champion.slug ?? champion.id}${sliceLink({ ...slice, position })}`
+  const pairLink = (champion: ChampionRef, position: string | null) => championPath(champion, position, slice)
 
+  // A role's page, with whatever else the address holds (the tab, the slice)
+  // but not a search typed for this role's list. The main role's page is the
+  // bare path, the address its role path points search engines to.
+  const mainPosition = d?.positions[0]?.position
+  const roleLink = (position: string) => {
+    const rest = withParams(search, { position: null, q: null, order: null }).toString()
+    return `${championPath(ref, position === mainPosition ? null : position)}${rest ? `?${rest}` : ''}`
+  }
+
+  if (unknownRole) return <NotFound />
   if (query.isLoading && profileQuery.isLoading) {
     return <PageSkeleton />
   }
@@ -117,19 +146,16 @@ export default function Champion() {
     )
   }
 
-  // Older links carry the id. The slug is the address a crawler should see
-  // and the one people can read, so the id form is replaced, not served twice.
-  if (/^\d+$/.test(championId) && info.slug) {
-    const query = search.toString()
-    return <Navigate to={`/champions/${info.slug}${query ? `?${query}` : ''}`} replace />
-  }
-
   const o = d?.overview
   const playedPositions = new Set(d?.positions.map((p) => p.position))
+  // A role's own page is its own canonical; the main role's path shows what
+  // the bare path shows and points there. So does a role the champion was not
+  // played in, which is served the main role with a notice.
+  const rolePage = Boolean(pathPosition && d && !d.requested_position && d.positions[0]?.position !== d.position)
 
   return (
     <div>
-      <Head {...heads.champion(info, d?.patch, d?.position, d?.overview.games)} />
+      <Head {...heads.champion(info, d?.patch, d?.position, d?.overview.games, rolePage)} />
       {/*
         The hero. One image per page, full strength, and the only place on the
         site where art is allowed to be the loudest thing. The scrim resolves to
@@ -166,7 +192,9 @@ export default function Champion() {
                 <span className="text-ink-faint"> &nbsp;/&nbsp; {info.tags.join(', ')}</span>
               )}
             </p>
-            {d && d.positions.length > 1 && <PositionShare positions={d.positions} />}
+            {d && d.positions.length > 1 && (
+              <PositionShare positions={d.positions} current={d.position} roleLink={roleLink} />
+            )}
           </div>
 
           {o && (
@@ -231,6 +259,7 @@ export default function Champion() {
             }}
             hideBracket
             onChange={updateSlice}
+            roleLink={roleLink}
             positions={
               d
                 ? POSITIONS.filter((p) => playedPositions.has(p.id)).map((p) => ({
@@ -530,9 +559,18 @@ function FallbackNotice({ d, name }: { d: ChampionDetail; name: string }) {
 
 /**
  * Where the champion is played, as one bar. The role filter below carries the
- * same shares as hints on its buttons; this is the picture of them.
+ * same shares as hints on its buttons; this is the picture of them, and each
+ * role named under it is a link to that role's page.
  */
-function PositionShare({ positions }: { positions: ChampionDetail['positions'] }) {
+function PositionShare({
+  positions,
+  current,
+  roleLink,
+}: {
+  positions: ChampionDetail['positions']
+  current: string
+  roleLink: (position: string) => string
+}) {
   const shown = positions.filter((p) => p.share >= 0.02)
   return (
     <div className="mt-3 max-w-sm">
@@ -546,7 +584,22 @@ function PositionShare({ positions }: { positions: ChampionDetail['positions'] }
         ))}
       </div>
       <p className="tnum mt-1 text-xs text-ink-dim">
-        {shown.map((p) => `${positionLabel(p.position)} ${pct(p.share)}`).join(', ')}
+        {shown.map((p, i) => (
+          <span key={p.position}>
+            {i > 0 && ', '}
+            {p.position === current ? (
+              <span className="text-ink">{positionLabel(p.position)}</span>
+            ) : (
+              <Link
+                to={roleLink(p.position)}
+                className="underline decoration-line underline-offset-2 hover:text-gold-bright hover:decoration-gold-bright"
+              >
+                {positionLabel(p.position)}
+              </Link>
+            )}{' '}
+            {pct(p.share)}
+          </span>
+        ))}
       </p>
     </div>
   )

@@ -290,11 +290,55 @@ test('the tier list says how many picks its games tell apart from even', async (
 
 test('a champion link to a role without games shows the main role and says so', async ({ page }) => {
   const errors = await open(page, '/champions/ahri?position=JUNGLE')
+  // An older link's role moves into the path, where a role now lives.
+  await expect(page).toHaveURL(/\/champions\/ahri\/jungle$/)
   const notice = page.getByRole('status').filter({ hasText: 'has no jungle games' })
   const story = page.getByRole('tab', { name: 'Story', selected: true })
   await expect(notice.or(story)).toBeVisible()
   test.skip(await story.isVisible(), 'The champion numbers need a corpus of matches.')
-  await expect(page.getByRole('button', { name: /^Mid/ })).toHaveAttribute('aria-pressed', 'true')
+  const roles = page.getByRole('group', { name: 'Role' })
+  await expect(roles.getByRole('link', { name: /^Mid/ })).toHaveAttribute('aria-current', 'page')
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('an older link with the role in its query string moves the role into the path', async ({ page }) => {
+  const errors = await open(page, '/champions/ahri?position=UTILITY&tab=story')
+  await expect(page).toHaveURL(/\/champions\/ahri\/support\?tab=story$/)
+  await expect(page.getByRole('tab', { name: 'Story', selected: true })).toBeVisible()
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('a role has its own page, and the main role points at the bare path', async ({ page, request }) => {
+  const manifest = await (await request.get('/api/meta/pages')).json()
+  const roles: { path: string; indexable: boolean }[] = manifest.pages.filter(
+    (p: { kind: string }) => p.kind === 'champion_role',
+  )
+  const own = roles.find((p) => p.indexable)
+  test.skip(!own, 'Role pages need a corpus of matches.')
+  const path = own!.path
+  const html = await (await request.get(path)).text()
+  expect(html).toContain(`rel="canonical" href="https://www.rhasta.space${path}"`)
+  expect(html).not.toContain('name="robots"')
+  const main = roles.find((p) => !p.indexable)
+  if (main) {
+    const bare = main.path.split('/').slice(0, 3).join('/')
+    const mainHtml = await (await request.get(main.path)).text()
+    expect(mainHtml).toContain(`rel="canonical" href="https://www.rhasta.space${bare}"`)
+    expect(mainHtml).toContain('content="noindex, follow"')
+  }
+  const errors = await open(page, path)
+  const current = page.getByRole('group', { name: 'Role' }).locator('a[aria-current="page"]')
+  await expect(current).toHaveCount(1)
+  await expect(page).toHaveURL(new RegExp(`${path}$`))
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('the champion index lists every champion and finds one by name', async ({ page }) => {
+  const errors = await open(page, '/champions')
+  await expect(page.getByRole('heading', { level: 1, name: 'Champions' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Ahri', exact: true })).toBeVisible()
+  await page.getByPlaceholder("Type a champion's name").fill('ahri')
+  await expect(page.getByText(/^1 of \d+ shown$/)).toBeVisible()
   expect(hydrationErrors(errors)).toEqual([])
 })
 
@@ -319,7 +363,7 @@ test('the tier list is one list, with its header art already in the served page'
   const list = page.getByRole('table', { name: 'Champion tier list' })
   await expect(list).toHaveCount(1)
   const drawn = await list.getByRole('row').count()
-  const more = page.getByRole('button', { name: /^Show all d+ picks$/ })
+  const more = page.getByRole('button', { name: /^Show all \d+ picks$/ })
   if (await more.isVisible()) {
     await more.click()
     expect(await list.getByRole('row').count()).toBeGreaterThan(drawn)

@@ -55,6 +55,7 @@ export const queries = {
   items: () => queryOptions({ queryKey: ['items'], queryFn: api.items }),
   item: (ref: string, slice: ItemSlice) =>
     queryOptions({ queryKey: ['item', ref, slice], queryFn: () => api.item(ref, slice) }),
+  championIndex: () => queryOptions({ queryKey: ['champion-index'], queryFn: api.championIndex }),
   champion: (ref: string, slice: SliceQuery) =>
     queryOptions({ queryKey: ['champion', ref, slice], queryFn: () => api.champion(ref, slice) }),
   championProfile: (ref: string) =>

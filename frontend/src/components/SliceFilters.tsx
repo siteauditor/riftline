@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
-import { Chip, ChipGroup } from '@/components/ui/chips'
+import { Chip, ChipGroup, ChipLink } from '@/components/ui/chips'
 
 import PositionIcon from './PositionIcon'
 import SelectField from './SelectField'
@@ -35,6 +35,12 @@ interface Props {
   hideRoles?: boolean
   /** Leave out "Min games", for a page whose floors are its own. */
   hideMinGames?: boolean
+  /**
+   * Where each role's page is, for a page whose roles are pages (a champion's):
+   * the role row is then links rather than buttons, and `onChange` never
+   * carries a role.
+   */
+  roleLink?: (position: string) => string
 }
 
 const QUEUES = [
@@ -62,6 +68,7 @@ export default function SliceFilters({
   hideBracket = false,
   hideRoles = false,
   hideMinGames = false,
+  roleLink,
 }: Props) {
   const { data: corpus } = useQuery({ queryKey: ['corpus'], queryFn: api.corpus })
 
@@ -84,19 +91,24 @@ export default function SliceFilters({
               All
             </Chip>
           )}
-          {roles.map((role) => (
-            <Chip
-              key={role.id}
-              active={value.position === role.id}
-              onClick={() => onChange({ position: role.id })}
-            >
-              <PositionIcon position={role.id} className="size-4" />
-              {role.label}
-              {role.hint && (
-                <span className="tnum ml-0.5 text-xs text-ink-faint">{role.hint}</span>
-              )}
-            </Chip>
-          ))}
+          {roles.map((role) => {
+            const inside = (
+              <>
+                <PositionIcon position={role.id} className="size-4" />
+                {role.label}
+                {role.hint && <span className="tnum ml-0.5 text-xs text-ink-faint">{role.hint}</span>}
+              </>
+            )
+            return roleLink ? (
+              <ChipLink key={role.id} to={roleLink(role.id)} active={value.position === role.id}>
+                {inside}
+              </ChipLink>
+            ) : (
+              <Chip key={role.id} active={value.position === role.id} onClick={() => onChange({ position: role.id })}>
+                {inside}
+              </Chip>
+            )
+          })}
         </ChipGroup>
       )}
 

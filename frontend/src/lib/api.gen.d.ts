@@ -302,6 +302,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/champions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Champion Index
+         * @description Every champion, with the roles it is played in on the default patch.
+         */
+        get: operations["get_champion_index_api_champions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/champions/{champion}": {
         parameters: {
             query?: never;
@@ -987,6 +1007,40 @@ export interface components {
             /** Synergies */
             synergies: components["schemas"]["PairEntry"][];
             pair_model: components["schemas"]["PairModelOut"];
+        };
+        /**
+         * ChampionIndex
+         * @description Every champion Data Dragon knows, A to Z, with where each is played.
+         *
+         *     For the index page: a champion under the tier list's floor, or new and
+         *     without a game, was reachable only by searching for it.
+         */
+        ChampionIndex: {
+            /** Patch */
+            patch: string | null;
+            /**
+             * Queue Id
+             * @default 420
+             */
+            queue_id: number;
+            /**
+             * Role Min Games
+             * @default 20
+             */
+            role_min_games: number;
+            /** Champions */
+            champions: components["schemas"]["ChampionIndexEntry"][];
+        };
+        /** ChampionIndexEntry */
+        ChampionIndexEntry: {
+            champion: components["schemas"]["ChampionRef"];
+            /** Positions */
+            positions: components["schemas"]["PositionShare"][];
+            /**
+             * Games
+             * @default 0
+             */
+            games: number;
         };
         /** ChampionInfo */
         ChampionInfo: {
@@ -5123,6 +5177,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MethodResponse"];
+                };
+            };
+        };
+    };
+    get_champion_index_api_champions_get: {
+        parameters: {
+            query?: {
+                queue_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChampionIndex"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

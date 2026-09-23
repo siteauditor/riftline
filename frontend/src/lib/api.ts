@@ -169,6 +169,11 @@ export type ChampionInfo = S['ChampionInfo']
 
 export type PositionShare = S['PositionShare']
 
+/** Every champion, A to Z, with the roles it is played in on the default patch. */
+export type ChampionIndex = S['ChampionIndex']
+
+export type ChampionIndexEntry = S['ChampionIndexEntry']
+
 /** One thing a champion took: an item set, a rune page, a spell pair. */
 export type FacetEntry = S['FacetEntry']
 
@@ -494,6 +499,8 @@ export const api = {
 
   meta: (opts: SliceQuery = {}) =>
     request<MetaResponse>(`/api/meta/champions?${sliceParams(opts, 20)}`),
+
+  championIndex: () => request<ChampionIndex>('/api/champions'),
 
   /** By slug ("aatrox") or, from older links, by id. */
   champion: (championId: string | number, opts: SliceQuery = {}) =>

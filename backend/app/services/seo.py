@@ -37,6 +37,16 @@ from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
 from app.services.static_data import StaticDataService
 
 INDEX_QUEUE = 420
+
+# A role's own page, as its path word: `/champions/pantheon/support`. The words
+# are the site's role labels, lower case, so a link reads the way the page does.
+ROLE_WORDS: dict[str, str] = {
+    "TOP": "top",
+    "JUNGLE": "jungle",
+    "MIDDLE": "mid",
+    "BOTTOM": "bot",
+    "UTILITY": "support",
+}
 # The newest patch is the index patch once it holds this many ranked solo
 # games. Below that its per-champion samples are a few games each, which
 # would noindex most of the site for the first days of every patch. The same
@@ -58,6 +68,7 @@ _UNSAFE_SEGMENT = re.compile(r'[\x00-\x1f/\\%?#:*"<>|]')
 FIXED_PAGES: tuple[tuple[str, str], ...] = (
     ("/", "daily"),
     ("/tierlist", "daily"),
+    ("/champions", "daily"),
     ("/items", "daily"),
     ("/draft", "weekly"),
     ("/leaderboards", "daily"),
@@ -73,7 +84,7 @@ FIXED_PAGES: tuple[tuple[str, str], ...] = (
 @dataclass(slots=True)
 class Page:
     path: str
-    # fixed, champion, item, explainer, profile.
+    # fixed, champion, champion_role, item, explainer, profile.
     kind: str
     indexable: bool
     lastmod: datetime | None = None
@@ -153,37 +164,40 @@ async def pages(session: AsyncSession, sd: StaticDataService) -> tuple[str | Non
         for path, freq in FIXED_PAGES
     ]
 
-    # Champions: the most games in any lane role on the index patch, and the
-    # newest time those rows were computed.
-    best_games: dict[int, int] = {}
+    # Champions: the games in each lane role on the index patch, and the newest
+    # time those rows were computed.
+    role_games: dict[int, dict[str, int]] = {}
     computed: dict[int, datetime] = {}
     if patch:
         rows = (
             await session.execute(
                 select(
                     ChampionStat.champion_id,
-                    func.max(ChampionStat.games),
-                    func.max(ChampionStat.computed_at),
-                )
-                .where(
+                    ChampionStat.team_position,
+                    ChampionStat.games,
+                    ChampionStat.computed_at,
+                ).where(
                     ChampionStat.patch == patch,
                     ChampionStat.queue_id == INDEX_QUEUE,
                     ChampionStat.rank_bracket == ALL_BRACKETS,
                     ChampionStat.team_position.in_(POSITIONS),
                 )
-                .group_by(ChampionStat.champion_id)
             )
         ).all()
-        for champion_id, games, computed_at in rows:
-            best_games[champion_id] = int(games or 0)
-            if computed_at is not None:
+        for champion_id, position, games, computed_at in rows:
+            role_games.setdefault(champion_id, {})[position] = int(games or 0)
+            if computed_at is not None and (
+                champion_id not in computed or computed_at > computed[champion_id]
+            ):
                 computed[champion_id] = computed_at
+    best_games = {c: max(roles.values()) for c, roles in role_games.items()}
     for champion in sorted(sd.champions_by_id.values(), key=lambda c: c.name):
         games = best_games.get(champion.id, 0)
         enough = games >= TIER_MIN_GAMES
+        slug = sd.champion_slug(champion.id)
         out.append(
             Page(
-                path=f"/champions/{sd.champion_slug(champion.id)}",
+                path=f"/champions/{slug}",
                 kind="champion",
                 indexable=enough,
                 lastmod=computed.get(champion.id),
@@ -191,6 +205,26 @@ async def pages(session: AsyncSession, sd: StaticDataService) -> tuple[str | Non
                 reason=None if enough else f"{games} games on patch {patch}; needs {TIER_MIN_GAMES}",
             )
         )
+        # A page for every role with the tier list's sample, so "Pantheon
+        # support build" has one of its own. The main role's page is the bare
+        # path; its role path is rendered for the links that name it but
+        # points its canonical there and stays out of the index.
+        roles = role_games.get(champion.id, {})
+        main = max(roles, key=roles.get) if roles else None
+        for position in POSITIONS:
+            if roles.get(position, 0) < TIER_MIN_GAMES:
+                continue
+            is_main = position == main
+            out.append(
+                Page(
+                    path=f"/champions/{slug}/{ROLE_WORDS[position]}",
+                    kind="champion_role",
+                    indexable=not is_main,
+                    lastmod=computed.get(champion.id),
+                    changefreq="daily",
+                    reason=f"the main role, whose page is /champions/{slug}" if is_main else None,
+                )
+            )
 
     # Items: buyers on the index patch.
     buyers: dict[int, int] = {}

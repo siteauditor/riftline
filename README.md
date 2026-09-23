@@ -405,9 +405,26 @@ derived rollups for `ingest aggregate` to rebuild. Add Alembic once the schema s
 ## Champion pages
 
 Builds, runes, summoner spells, counters and synergies, at
-`/champions/{id}`. All of it is computed from participant rows we already store,
+`/champions/{slug}`. All of it is computed from participant rows we already store,
 so it costs **no additional Riot API calls**. Rebuild the rollups with
 `python -m scripts.ingest aggregate`.
+
+**A role is a page.** The bare path is the champion's main role, and every
+other role has its own address with the site's role words:
+`/champions/pantheon/support` (`top`, `jungle`, `mid`, `bot`, `support`). A
+role with `TIER_MIN_GAMES` (20) games on the index patch is prerendered and
+indexed under its own title and canonical, so "Pantheon support build" has a
+page to rank. The main role's path is prerendered too, so any link can name a
+role, but its canonical is the bare path and it stays out of the index. An
+older link's `?position=` is moved into the path in one step, with the id
+replaced by the slug and the slice put right in the same move. Every link to
+a champion is built by `championPath` (`frontend/src/lib/searchParams.ts`),
+and `ROLE_WORDS` there and in `app/services/seo.py` must agree.
+
+`/champions` lists every champion Data Dragon knows, A to Z, with the roles
+each is played in (`GET /api/champions`). A champion under the tier list's
+floor, or too new to have a game, could otherwise be reached only by typing
+its name into a search.
 
 Two things are deliberately honest rather than impressive:
 
@@ -814,14 +831,16 @@ than fetching everything again. The head is decided by pure functions in
 `frontend/src/lib/seo.ts`, written by the prerenderer and updated in place by
 the client (`frontend/src/lib/head.ts`), so the document never holds two
 titles and the canonical a crawler read is the one the app keeps. It runs at
-every deploy and every night; on this corpus, about 420 pages in 13 seconds.
+every deploy and every night; on this corpus, 600 pages in about half a minute.
 
 **Indexable means prerendered.** nginx serves the prerendered file when one
 exists and the app shell otherwise, and the shell carries `X-Robots-Tag:
 noindex`. So a URL that has no page (a typo, a profile nobody has opened)
 never enters an index as an empty document, and there is no user-agent branch
 anywhere: everyone gets the same HTML. A page is written for every champion
-and item, but marked `noindex, follow` when the corpus is thin behind it:
+and item, and for every role a champion has 20 games in, but marked
+`noindex, follow` when the corpus is thin behind it (or, for a champion's main
+role, when the bare path is the same page):
 `TIER_MIN_GAMES` (20) in some role for a champion, 30 buyers for an item,
 measured on a patch with at least 500 ranked games so pages do not flip to
 noindex on patch day. The sitemap (`/sitemap.xml`, proxied to `/api/meta/

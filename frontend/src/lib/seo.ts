@@ -1,6 +1,7 @@
 import { PLATFORMS, type ChampionInfo, type ItemDetail } from './api'
 import { canonicalUrl, ORIGIN, SITE_NAME, type PageHead } from './head'
 import { positionLabel, tierLabel } from './format'
+import { championPath } from './searchParams'
 
 const regionLabel = (platform: string) =>
   PLATFORMS.find((p) => p.id === platform)?.label ?? platform.toUpperCase()
@@ -84,21 +85,47 @@ export const heads = {
     }
   },
 
-  champion(info: ChampionInfo, patch?: string | null, position?: string | null, games?: number | null): PageHead {
-    const role = position ? ` ${positionLabel(position).toLowerCase()}` : ''
+  /**
+   * `rolePage` is set on a role's own page (`/champions/pantheon/support`),
+   * which is its own canonical. The main role's path is not: it shows what
+   * the bare path shows, so it points there and the bare path is the one
+   * indexed.
+   */
+  champion(
+    info: ChampionInfo,
+    patch?: string | null,
+    position?: string | null,
+    games?: number | null,
+    rolePage = false,
+  ): PageHead {
+    const role = position ? positionLabel(position).toLowerCase() : null
     const when = patch ? `, patch ${patch}` : ''
     const sample = games ? ` from ${games.toLocaleString('en-US')} ranked games` : ''
+    const bare = championPath(info)
+    const path = rolePage && position ? championPath(info, position) : bare
     return {
-      title: titled(`${info.name}${role} build, runes and win rate${when}`),
+      title: titled(`${info.name}${role ? ` ${role}` : ''} build, runes and win rate${when}`),
       description:
-        `${info.name}${info.title ? `, ${info.title}` : ''}: win rate, pick rate, the builds, runes and ` +
-        `skill order that won${sample}, lane matchups and counters, and how ${info.name}'s games are usually decided.`,
-      path: `/champions/${info.slug ?? info.id}`,
+        `${info.name}${info.title ? `, ${info.title}` : ''}${rolePage && role ? `, in the ${role} role` : ''}: ` +
+        `win rate, pick rate, the builds, runes and skill order that won${sample}, lane matchups and ` +
+        `counters, and how ${info.name}'s games are usually decided.`,
+      path,
       image: info.splash_url ?? info.art_url ?? null,
       jsonLd: breadcrumbs([
-        { name: 'Champions', path: '/tierlist' },
-        { name: info.name, path: `/champions/${info.slug ?? info.id}` },
+        { name: 'Champions', path: '/champions' },
+        { name: info.name, path: bare },
+        ...(path !== bare && role ? [{ name: positionLabel(position ?? ''), path }] : []),
       ]),
+    }
+  },
+
+  champions(patch?: string | null): PageHead {
+    return {
+      title: titled('Champions: every build, rune page and role'),
+      description:
+        `Every League of Legends champion, A to Z, with the roles each is played in${patch ? ` on patch ${patch}` : ''} ` +
+        'and a page for each role: its builds, runes, skill order, lane matchups and win rate.',
+      path: '/champions',
     }
   },
 
