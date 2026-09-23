@@ -51,7 +51,7 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
       {selected ? (
         <div className="flex h-10 items-center gap-2 frame px-2">
           {selected.icon_url && (
-            <img src={selected.icon_url} alt="" className="size-7 rounded-sm" />
+            <img src={selected.icon_url} alt="" className="size-7 rounded-sm" loading="lazy" decoding="async" />
           )}
           <span className="flex-1 truncate text-sm text-ink">{selected.name}</span>
           <button
@@ -90,7 +90,7 @@ export default function ChampionPicker({ value, onChange, label, placeholder }: 
                 className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-ink-dim hover:bg-raised hover:text-ink"
               >
                 {c.icon_url && (
-                  <img src={c.icon_url} alt="" className="size-6 rounded-sm" />
+                  <img src={c.icon_url} alt="" className="size-6 rounded-sm" loading="lazy" decoding="async" />
                 )}
                 {c.name}
               </button>

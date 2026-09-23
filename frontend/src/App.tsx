@@ -54,7 +54,7 @@ export default function App() {
   return (
     <TooltipProvider>
     <div className="flex min-h-screen flex-col">
-      <header className="site-header sticky top-0 z-40 border-b border-line bg-deep/90 backdrop-blur">
+      <header className="site-header glass sticky top-0 z-40 border-b border-white/[0.06]">
         {/* `min-w-0` and a scrollable nav: nothing in this row could shrink,
             so adding a third link pushed the whole document into horizontal
             scroll below about 390px, and the sticky background stopped at the
@@ -69,7 +69,7 @@ export default function App() {
             <span className="text-accent">.</span>
           </Link>
 
-          <nav className="-mb-px flex min-w-0 flex-shrink items-stretch gap-1 overflow-x-auto text-sm">
+          <nav className="flex min-w-0 flex-shrink items-center gap-1 overflow-x-auto text-sm">
             {[
               { to: '/tierlist', label: 'Tier list' },
               { to: '/draft', label: 'Draft' },
@@ -82,10 +82,10 @@ export default function App() {
                 to={item.to}
                 viewTransition
                 className={({ isActive }) =>
-                  `flex h-14 shrink-0 items-center border-b-2 px-2.5 font-display text-[13px] font-600 uppercase tracking-[0.12em] transition-colors ${
+                  `flex h-8 shrink-0 items-center rounded-full px-3 font-display text-[13px] font-600 uppercase tracking-[0.12em] transition-colors ${
                     isActive
-                      ? 'border-accent text-accent-bright'
-                      : 'border-transparent text-ink-dim hover:text-ink'
+                      ? 'bg-accent/12 text-accent-bright'
+                      : 'text-ink-dim hover:bg-white/[0.05] hover:text-ink'
                   }`
                 }
               >
@@ -133,7 +133,7 @@ export default function App() {
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent
           showCloseButton={false}
-          className="top-[15vh] translate-y-0 gap-0 rounded-[2px] border-line bg-deep p-2 sm:max-w-xl"
+          className="glow top-[15vh] translate-y-0 gap-0 rounded-lg border-white/10 bg-deep/95 p-2 backdrop-blur-xl sm:max-w-xl"
         >
           <DialogTitle className="sr-only">Search a player</DialogTitle>
           {searchOpen && <SearchBar size="large" autoFocus onNavigate={() => setSearchOpen(false)} />}

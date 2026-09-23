@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import Head from '../components/Head'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
-import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
+import { EmptyState, ErrorView, Spinner, TableSkeleton } from '../components/StateViews'
 import AbilitiesPanel from '../components/champion/AbilitiesPanel'
 import BuildPanel from '../components/champion/BuildPanel'
 import ChampionTabs from '../components/champion/ChampionTabs'
@@ -140,8 +140,7 @@ export default function Champion() {
             src={info.art_url}
             alt=""
             aria-hidden
-            className="pointer-events-none absolute inset-0 -z-10 size-full object-cover object-[72%_18%] opacity-80"
-          />
+            className="pointer-events-none absolute inset-0 -z-10 size-full object-cover object-[72%_18%] opacity-80" loading="lazy" decoding="async" />
         )}
         <div className="art-scrim absolute inset-0 -z-10" />
 
@@ -243,7 +242,7 @@ export default function Champion() {
         <div key={tab} className="mt-5 animate-in fade-in-0 duration-200">
           {NUMBER_TABS.has(tab) && !d ? (
             query.isLoading ? (
-              <Spinner label="Loading champion statistics" />
+              <TableSkeleton rows={6} />
             ) : (
               <ErrorView error={query.error} onRetry={() => query.refetch()} />
             )

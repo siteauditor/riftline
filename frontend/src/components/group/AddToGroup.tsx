@@ -48,7 +48,7 @@ export default function AddToGroup({
           Add to group
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-64 space-y-2 rounded-[2px] border-line bg-panel p-3 text-xs">
+      <PopoverContent align="start" className="w-64 space-y-2 rounded-md border-white/10 bg-panel/95 p-3 text-xs shadow-[0_20px_50px_-16px_rgb(0_0_0/0.85)] backdrop-blur-md">
         {editable.length === 0 ? (
           <p className="leading-relaxed text-ink-dim">
             No group this browser can edit.{' '}

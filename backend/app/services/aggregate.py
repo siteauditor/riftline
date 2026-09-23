@@ -916,8 +916,18 @@ def patch_sort_key(patch: str) -> tuple[int, ...]:
     return tuple(int(part) if part.isdigit() else -1 for part in patch.split("."))
 
 
+# A patch is settled once it holds this many games in a queue: below that,
+# its per-champion samples are a few games each. Shared with the sitemap's
+# index patch, so what a page shows by default and what is indexed agree.
+SETTLED_MIN_MATCHES = 500
+
+
 async def available_slices(session: AsyncSession) -> list[dict]:
-    """Patch/queue combinations that have enough data to aggregate."""
+    """Patch/queue combinations with stored games, whether aggregated or not.
+
+    For the ingest, which decides what to aggregate from this. A page must
+    not read it: see `aggregated_slices`.
+    """
     stmt = (
         select(Match.patch, Match.queue_id, func.count(Match.match_id).label("n"))
         .where(Match.is_remake.is_(False), Match.patch.is_not(None))
@@ -930,6 +940,36 @@ async def available_slices(session: AsyncSession) -> list[dict]:
     ]
     slices.sort(key=lambda s: (patch_sort_key(s["patch"]), s["matches"]), reverse=True)
     return slices
+
+
+async def aggregated_slices(session: AsyncSession) -> list[dict]:
+    """The slices a page may show: patch/queue pairs that have an aggregate,
+    newest patch first, each with how many games it holds.
+
+    Only aggregated ones, on purpose. The stored games alone put a new patch
+    at the top of the list the moment a visitor's history brought the first
+    game of it in, and every page that defaulted to "the newest patch" then
+    answered 404 with a patch number on it: measured on 2026-09-23, eight
+    16.19 games and no 16.19 aggregate, and the tier list, every champion
+    page and the item guide went blank until the next night's aggregate,
+    which would have left them thin for days more.
+    """
+    # Champion and item aggregates are built by the same stage, but a test,
+    # or a partial run, may hold one without the other: either counts.
+    aggregated = set(
+        (await session.execute(select(ChampionStat.patch, ChampionStat.queue_id).distinct())).all()
+    ) | set((await session.execute(select(ItemStat.patch, ItemStat.queue_id).distinct())).all())
+    return [s for s in await available_slices(session) if (s["patch"], s["queue_id"]) in aggregated]
+
+
+def default_patch(slices: list[dict], queue_id: int) -> str | None:
+    """The patch a page shows when its URL names none: the newest patch in
+    this queue with `SETTLED_MIN_MATCHES` games behind it, else the newest
+    aggregated patch at all, else nothing. `slices` is `aggregated_slices`."""
+    held = [s for s in slices if s["queue_id"] == queue_id]
+    settled = [s for s in held if s["matches"] >= SETTLED_MIN_MATCHES]
+    chosen = settled or held
+    return chosen[0]["patch"] if chosen else None
 
 
 async def available_brackets(session: AsyncSession) -> list[str]:

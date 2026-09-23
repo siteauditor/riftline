@@ -11,7 +11,7 @@ import SelectField from '../components/SelectField'
 import Head from '../components/Head'
 import Pager from '../components/Pager'
 import RankBadge from '../components/RankBadge'
-import { ErrorView, Spinner } from '../components/StateViews'
+import { ErrorView, TableSkeleton } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel } from '../lib/format'
 import { intParam, withParams } from '../lib/searchParams'
 
@@ -257,7 +257,7 @@ export default function Leaderboard() {
         )}
       </div>
 
-      {query.isLoading && <Spinner label="Loading the ladder" />}
+      {query.isLoading && <TableSkeleton rows={10} />}
       {query.isError && (
         <ErrorView error={query.error} onRetry={() => query.refetch()} />
       )}

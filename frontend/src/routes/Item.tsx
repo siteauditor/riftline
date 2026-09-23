@@ -75,8 +75,7 @@ export default function Item() {
             <img
               src={item.icon_url}
               alt=""
-              className="notch size-20 shrink-0 ring-1 ring-line sm:size-24"
-            />
+              className="notch size-20 shrink-0 ring-1 ring-line sm:size-24" loading="lazy" decoding="async" />
           )}
           <div className="min-w-0">
             <p className="eyebrow">{item.group_label ?? (item.on_rift ? 'Item' : 'Other modes')}</p>

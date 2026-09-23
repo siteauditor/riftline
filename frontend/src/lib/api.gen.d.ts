@@ -240,7 +240,7 @@ export interface paths {
         };
         /**
          * Get Corpus
-         * @description What data has actually been ingested. Useful before trusting a tier list.
+         * @description What data has actually been aggregated. Useful before trusting a tier list.
          */
         get: operations["get_corpus_api_meta_corpus_get"];
         put?: never;

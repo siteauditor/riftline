@@ -303,7 +303,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
                 } ${large ? 'text-[15px]' : 'text-sm'}`}
               >
                 {o.iconUrl ? (
-                  <img src={o.iconUrl} alt="" className="size-7 shrink-0 rounded-sm" />
+                  <img src={o.iconUrl} alt="" className="size-7 shrink-0 rounded-sm" loading="lazy" decoding="async" />
                 ) : (
                   <span aria-hidden className="size-7 shrink-0 rounded-sm bg-raised" />
                 )}

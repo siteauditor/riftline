@@ -19,8 +19,9 @@ from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
     TIER_MIN_GAMES,
+    aggregated_slices,
     available_brackets,
-    available_slices,
+    default_patch,
     lobby_rank_mix,
     tier_for,
     wilson_lower_bound,
@@ -134,8 +135,8 @@ def assign_tiers(rows: list[ChampionMetaRow]) -> None:
 
 @router.get("/corpus", response_model=CorpusResponse)
 async def get_corpus(db: DbDep) -> CorpusResponse:
-    """What data has actually been ingested. Useful before trusting a tier list."""
-    slices = await available_slices(db)
+    """What data has actually been aggregated. Useful before trusting a tier list."""
+    slices = await aggregated_slices(db)
     latest_game, latest_ingest = (
         await db.execute(select(func.max(Match.game_creation), func.max(Match.ingested_at)))
     ).one()
@@ -169,15 +170,13 @@ async def get_champion_meta(
             raise HTTPException(400, f"position must be one of {', '.join(POSITIONS)}")
 
     if patch is None:
-        slices = await available_slices(db)
-        matching = [s for s in slices if s["queue_id"] == queue_id]
-        if not matching:
+        patch = default_patch(await aggregated_slices(db), queue_id)
+        if patch is None:
             raise HTTPException(
                 404,
                 "No aggregated data yet. Run `python -m scripts.ingest crawl` to "
                 "collect matches, then `python -m scripts.ingest aggregate`.",
             )
-        patch = matching[0]["patch"]
 
     bracket = (bracket or ALL_BRACKETS).upper()
     stmt = select(ChampionStat).where(

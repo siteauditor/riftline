@@ -26,7 +26,7 @@ export function Spinner({ label }: { label?: string }) {
  */
 export function MatchListSkeleton({ rows = 6 }: { rows?: number }) {
   return (
-    <div className="skeleton-breathing space-y-1.5" aria-hidden>
+    <div className="space-y-1.5" aria-hidden>
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}
@@ -204,6 +204,77 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
     <div className="rounded-sm border border-dashed border-line px-5 py-10 text-center">
       <p className="display text-lg font-600 text-ink">{title}</p>
       <p className="mx-auto mt-1.5 max-w-sm text-sm leading-relaxed text-ink-dim">{body}</p>
+    </div>
+  )
+}
+
+/** Rows of a list or table, traced roughly: a tile, a name, then figures. */
+export function TableSkeleton({ rows = 8 }: { rows?: number }) {
+  return (
+    <div aria-hidden>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 border-b border-line-soft px-3 py-2.5">
+          <Skeleton className="size-10 shrink-0 rounded-md" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-32 max-w-[40%]" />
+            <Skeleton className="h-2.5 w-20" />
+          </div>
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="hidden h-3 w-12 sm:block" />
+          <Skeleton className="hidden h-3 w-12 md:block" />
+          <Skeleton className="hidden h-3 w-12 lg:block" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** A grid of tiles with a label under each: the item guide, a skin board. */
+export function GridSkeleton({ items = 12 }: { items?: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-hidden>
+      {Array.from({ length: items }).map((_, i) => (
+        <div key={i} className="frame flex items-center gap-3 p-3">
+          <Skeleton className="size-10 shrink-0 rounded-md" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-3/4" />
+            <Skeleton className="h-2.5 w-1/2" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * A profile before its first answer: the header band with its icon and
+ * name, the rank card and play style on the rail, and match rows in the
+ * feed, in the places the real ones land.
+ */
+export function ProfileSkeleton() {
+  return (
+    <div aria-hidden>
+      <div className="border-b border-line-soft">
+        <div className="mx-auto flex max-w-[1280px] items-center gap-5 px-4 py-7 sm:py-9">
+          <Skeleton className="size-16 shrink-0 rounded-md" />
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-56 max-w-[60vw]" />
+            <Skeleton className="h-3.5 w-72 max-w-[70vw]" />
+            <Skeleton className="h-3 w-40" />
+          </div>
+        </div>
+      </div>
+      <div className="mx-auto grid max-w-[1280px] gap-5 px-4 pt-6 lg:grid-cols-[280px_1fr]">
+        <div className="space-y-4">
+          <Skeleton className="h-40 rounded-lg" />
+          <Skeleton className="h-56 rounded-lg" />
+        </div>
+        <div className="space-y-4">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-2/3" />
+          <MatchListSkeleton rows={5} />
+        </div>
+      </div>
     </div>
   )
 }

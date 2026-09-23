@@ -1,12 +1,12 @@
 import { cn } from '@/lib/utils'
 
 /**
- * A loading placeholder. No animation of its own: the breathing lives on the
- * container (`.skeleton-breathing`, index.css), so every placeholder in a
- * list changes together rather than rippling down the page.
+ * A loading placeholder with a light passing over it: the `.skeleton` class
+ * in index.css carries the shimmer, so the rule and its keyframes live in
+ * one place and the placeholders in StateViews share it.
  */
 function Skeleton({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="skeleton" className={cn('rounded-[2px] bg-line-soft', className)} {...props} />
+  return <div data-slot="skeleton" className={cn('skeleton', className)} {...props} />
 }
 
 export { Skeleton }

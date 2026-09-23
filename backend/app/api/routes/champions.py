@@ -39,7 +39,8 @@ from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
     TIER_MIN_GAMES,
-    available_slices,
+    aggregated_slices,
+    default_patch,
     tier_for,
     wilson_lower_bound,
     wilson_upper_bound,
@@ -514,15 +515,16 @@ async def get_champion(
 
     # Newest first. Read whether or not a patch was asked for, because the
     # patch before the one shown is where the change figures come from.
-    held = [s["patch"] for s in await available_slices(db) if s["queue_id"] == queue_id]
+    slices = await aggregated_slices(db)
+    held = [s["patch"] for s in slices if s["queue_id"] == queue_id]
     if patch is None:
-        if not held:
+        patch = default_patch(slices, queue_id)
+        if patch is None:
             raise HTTPException(
                 404,
                 "No aggregated data yet. Run `python -m scripts.ingest crawl` then "
                 "`python -m scripts.ingest aggregate`.",
             )
-        patch = held[0]
     previous_patch = held[held.index(patch) + 1] if patch in held[:-1] else None
 
     slice_where = (

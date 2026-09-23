@@ -246,7 +246,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
       <td className="py-2 pr-3">
         <span className="flex items-center gap-2.5">
           {row.champion.icon_url ? (
-            <img src={row.champion.icon_url} alt="" className="size-8 shrink-0 rounded-sm" />
+            <img src={row.champion.icon_url} alt="" className="size-8 shrink-0 rounded-sm" loading="lazy" decoding="async" />
           ) : (
             <span aria-hidden className="size-8 shrink-0 rounded-sm bg-raised" />
           )}

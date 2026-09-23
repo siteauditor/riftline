@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.api.deps import DbDep, StaticDep
 from app.api.schemas import ChampionRef
 from app.db.models import ItemChampionStat, ItemStat
-from app.services.aggregate import ALL_BRACKETS, ITEM_SLOTS, available_slices
+from app.services.aggregate import ALL_BRACKETS, ITEM_SLOTS, aggregated_slices, default_patch
 from app.services.static_data import GUIDE_GROUPS, ItemInfo, StaticDataService, static_data
 
 router = APIRouter(prefix="/api/items", tags=["items"])
@@ -218,8 +218,7 @@ def _stats(info: ItemInfo) -> list[StatLine]:
 
 
 async def _newest_patch(db, queue_id: int) -> str | None:
-    held = [s["patch"] for s in await available_slices(db) if s["queue_id"] == queue_id]
-    return held[0] if held else None
+    return default_patch(await aggregated_slices(db), queue_id)
 
 
 @router.get("", response_model=ItemList)

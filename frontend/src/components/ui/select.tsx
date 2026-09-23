@@ -37,7 +37,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        'flex w-fit cursor-pointer items-center justify-between gap-2 rounded-[2px] border border-line bg-panel px-2.5 text-sm whitespace-nowrap text-ink transition-colors outline-none',
+        'flex w-fit cursor-pointer items-center justify-between gap-2 rounded-md border border-line bg-panel px-2.5 text-sm whitespace-nowrap text-ink transition-colors outline-none',
         'hover:border-[color-mix(in_srgb,var(--color-gold)_45%,var(--color-line))] focus-visible:border-gold data-[state=open]:border-gold',
         'disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-ink-faint',
         'data-[size=default]:h-9 data-[size=sm]:h-8',
@@ -67,7 +67,7 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          'relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-[2px] border border-line bg-raised text-ink shadow-[0_16px_40px_-12px_rgb(0_0_0/0.7)]',
+          'relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border border-white/10 bg-raised/95 text-ink shadow-[0_20px_50px_-16px_rgb(0_0_0/0.85)] backdrop-blur-md',
           'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
           'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2',
           position === 'popper' && 'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
@@ -112,7 +112,7 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        'relative flex w-full cursor-pointer items-center gap-2 rounded-[2px] py-1.5 pr-8 pl-2 text-sm outline-hidden select-none',
+        'relative flex w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-8 pl-2 text-sm outline-hidden select-none',
         'focus:bg-accent focus:text-deep data-[state=checked]:text-gold-bright data-[state=checked]:focus:text-deep',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=size-])]:size-4',

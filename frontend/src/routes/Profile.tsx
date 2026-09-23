@@ -16,7 +16,7 @@ import SelectField from '../components/SelectField'
 import { Button } from '@/components/ui/button'
 import ReviewPanel from '../components/ReviewPanel'
 import StrengthsPanel from '../components/StrengthsPanel'
-import { EmptyState, ErrorView, MatchListSkeleton, Spinner } from '../components/StateViews'
+import { EmptyState, ErrorView, MatchListSkeleton, ProfileSkeleton, Spinner } from '../components/StateViews'
 import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
 import { useNow } from '../lib/clock'
 import { profileSummary } from '../lib/prose'
@@ -179,11 +179,7 @@ export default function Profile() {
     champions.data?.champions.find((c) => c.id === championFilter)?.name ?? 'this champion'
 
   if (profileQuery.isLoading) {
-    return (
-      <div className="mx-auto max-w-[1280px] px-4 py-10">
-        <Spinner label={`Looking up ${name}#${tag}…`} />
-      </div>
-    )
+    return <ProfileSkeleton />
   }
 
   // The stored answer a prerendered page carries outlives a failed live

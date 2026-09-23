@@ -684,7 +684,7 @@
      "meta"
     ],
     "summary": "Get Corpus",
-    "description": "What data has actually been ingested. Useful before trusting a tier list.",
+    "description": "What data has actually been aggregated. Useful before trusting a tier list.",
     "operationId": "get_corpus_api_meta_corpus_get",
     "responses": {
      "200": {

@@ -20,7 +20,9 @@ from app.db.models import (
 )
 from app.services.aggregate import (
     ALL_BRACKETS,
+    aggregated_slices,
     available_slices,
+    default_patch,
     patch_sort_key,
     perk_facets,
     rebuild_champion_stats,
@@ -660,3 +662,52 @@ async def test_a_one_off_pair_is_not_stored():
     items, pairs = await rebuilt(patch)
     assert items[LEGENDARY_A].buyers == MIN_ITEM_CHAMPION_BUYERS - 1
     assert (LEGENDARY_A, 9606) not in pairs
+
+
+def test_the_default_patch_is_the_newest_settled_one():
+    """A patch with eight games is not the one a page opens on."""
+    slices = [
+        {"patch": "16.19", "queue_id": 420, "matches": 8},
+        {"patch": "16.18", "queue_id": 420, "matches": 1437},
+        {"patch": "16.17", "queue_id": 420, "matches": 864},
+        {"patch": "16.18", "queue_id": 440, "matches": 40},
+    ]
+    assert default_patch(slices, 420) == "16.18"
+    # Nothing settled in flex: the newest aggregated patch, rather than nothing.
+    assert default_patch(slices, 440) == "16.18"
+    assert default_patch(slices, 450) is None
+    assert default_patch([], 420) is None
+
+
+async def test_a_patch_with_games_but_no_aggregate_is_not_offered_to_a_page():
+    """Stored games alone put a patch in `available_slices` for the ingest;
+    a page reads `aggregated_slices`, where it appears only once aggregated."""
+    from app.db.models import ChampionStat, Match
+
+    async with SessionLocal() as session:
+        session.add(
+            Match(
+                match_id="TAGG_raw_1", platform_id="EUW1", queue_id=420, patch="AGG.raw",
+                game_creation=1, game_duration=1800, is_remake=False, source_bracket="CHALLENGER",
+                teams=[],
+            )
+        )
+        session.add(
+            Match(
+                match_id="TAGG_agg_1", platform_id="EUW1", queue_id=420, patch="AGG.done",
+                game_creation=1, game_duration=1800, is_remake=False, source_bracket="CHALLENGER",
+                teams=[],
+            )
+        )
+        session.add(
+            ChampionStat(
+                patch="AGG.done", queue_id=420, rank_bracket="ALL", champion_id=1,
+                team_position="TOP", games=1, wins=1, pool_games=1,
+            )
+        )
+        await session.commit()
+        raw = {s["patch"] for s in await available_slices(session)}
+        shown = {s["patch"] for s in await aggregated_slices(session)}
+    assert {"AGG.raw", "AGG.done"} <= raw
+    assert "AGG.done" in shown
+    assert "AGG.raw" not in shown

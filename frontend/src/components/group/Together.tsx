@@ -101,7 +101,7 @@ export default function Together({
                       {g.players.map((p) => (
                         <span key={p.puuid} className="flex min-w-0 items-center gap-1.5">
                           {p.champion.icon_url && (
-                            <img src={p.champion.icon_url} alt="" className="size-5 ring-1 ring-line" />
+                            <img src={p.champion.icon_url} alt="" className="size-5 ring-1 ring-line" loading="lazy" decoding="async" />
                           )}
                           <span className="truncate text-ink">{name(p.puuid)}</span>
                           <span className="tnum text-ink-faint">

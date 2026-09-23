@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
-import { ErrorView, Spinner } from '../components/StateViews'
+import { ErrorView, GridSkeleton } from '../components/StateViews'
 import {
   isStatFilterKey,
   matchesFilter,
@@ -122,7 +122,7 @@ export default function Items() {
 
         {list.isLoading ? (
           <div className="py-10">
-            <Spinner label="Loading items" />
+            <GridSkeleton />
           </div>
         ) : list.isError ? (
           <div className="mt-6">

@@ -9,15 +9,16 @@
 /*
  * Riftline.
  *
- * Broadcast black, after looking at what game sites actually do.
+ * Deep navy in layers, with the game's art carrying the colour.
  *
- * Riot's own League and Valorant pages and the LoL Esports site all work the
- * same way: a near-black ground, sharp-cornered rectangles with hairline
- * outlines, condensed upper-case display type, and the game's own art carrying
- * every bit of colour and atmosphere. Blitz and Lolalytics do the softer,
- * rounded version of it and let dense grids of Riot's item and rune icons be
- * the texture. What none of them do, and what this site used to do, is draw
- * flat 1px panels on a lit ground and put the art in 48px thumbnails.
+ * Riot's own pages and the LoL Esports site put the art in the background
+ * and condensed upper-case display type on top of it; Blitz and Lolalytics
+ * do the softer, rounded version with dense grids of Riot's icons as the
+ * texture. This site takes the art and the type from the first and the
+ * rounded, layered surfaces from the second: a ground with some air in it,
+ * panels a step lighter with a hairline and a soft shadow, a teal that
+ * glows where something is live, and gold only where something was earned.
+ * Loading states shimmer, page changes cross-fade, and nothing pops in.
  *
  * So: the chrome says as little as possible, art is a background layer behind
  * every header, and colour comes from three sources only.
@@ -40,27 +41,29 @@
 
 @theme {
   /*
-   * Broadcast black.
+   * Deep navy, in layers.
    *
-   * The ground is nearly black and very slightly blue, the way an esports
-   * graphics package or Riot's own sites sit: the chrome says almost nothing,
-   * and every colour on screen comes from the game's own art, the rank, or the
-   * one accent. The previous ground was a lit teal-green taken from the Rift's
-   * terrain, which read as a document rather than a game.
+   * The ground is a dark blue-grey rather than near-black, and each surface
+   * above it is a step lighter: page, panel, raised. A hairline on each
+   * panel and a soft shadow under it are what read as depth. The first
+   * version of this site sat on #05070a with square hairline boxes, which
+   * read as a broadcast graphic to some and as a wireframe to its owner
+   * (2026-09-23); this is the same three colour sources, art, rank and
+   * accent, on a ground with some air in it.
    */
-  --color-deep: #05070a;
-  --color-panel: #0a0e14;
-  --color-raised: #121821;
-  --color-line: #1f2836;
-  --color-line-soft: #141b25;
+  --color-deep: #0a0d14;
+  --color-panel: #10151f;
+  --color-raised: #171e2b;
+  --color-line: #232c3b;
+  --color-line-soft: #1a2130;
 
-  --color-ink: #eaf2f8;
-  --color-ink-dim: #9aacbd;
+  --color-ink: #eef3fa;
+  --color-ink-dim: #a1aec2;
   /*
    * 5.6:1 on the ground and 4.7:1 on a raised surface: this is the colour the
    * 11px labels use, and they have to clear the 4.5:1 AA floor on both.
    */
-  --color-ink-faint: #7d90a3;
+  --color-ink-faint: #7f8ca0;
 
   /*
    * Two accents with two jobs, never swapped.
@@ -69,15 +72,18 @@
    * It is League's own teal rather than a generic cyan, which keeps the site off
    * both op.gg's blue and the default "dark UI with electric blue" look.
    */
-  --color-accent: #0ac8b9;
-  --color-accent-bright: #3fe7da;
+  --color-accent: #19d3c5;
+  --color-accent-bright: #6ff2e6;
+  /* The second interface hue, for a gradient or a glow beside the teal and
+     nowhere else: never a text colour, never a border of its own. */
+  --color-violet: #8b7dff;
 
   /*
    * Gold is earned, not decorative: the Riftline score, an MVP, an S tier, the
    * top of a ladder. If everything is gold, nothing is.
    */
-  --color-gold: #c8aa6e;
-  --color-gold-bright: #f0d8a0;
+  --color-gold: #d1b06f;
+  --color-gold-bright: #f3dba3;
 
   /*
    * Blue side and red side, and with them win and loss. Lifted for a near-black
@@ -136,16 +142,16 @@
   --font-sans: 'Barlow', system-ui, sans-serif;
 
   /*
-   * Sharp corners are Riot's own language: their buttons and panels are
-   * rectangles with a hairline outline, and rounding them is what made this
-   * site read as a generic dashboard. One token turns every `rounded-sm` in
-   * the app square, so no component has to be edited to agree.
+   * One radius scale for the whole app. Every `rounded-sm` on a pill or a
+   * tile and every `rounded-lg` on a panel reads these, so the corners agree
+   * everywhere and change in one place.
    */
-  --radius-xs: 0px;
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
-  --radius-xl: 0px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
   --radius-lg: 0px;
   --radius-xl: 0px;
 
@@ -222,10 +228,9 @@
   }
 
   /*
-   * The faintest scanline over the whole page, fixed so it does not travel with
-   * the content: two percent of a light line every three pixels. Invisible as a
-   * pattern, but it stops a near-black ground reading as flat ink, which is
-   * most of the difference between a broadcast graphic and a blank document.
+   * Ambient light at the top of the page: a teal and a violet glow, fixed so
+   * they do not travel with the content. It is what stops the ground reading
+   * as flat paint, and it costs no image.
    */
   body::before {
     content: '';
@@ -233,11 +238,21 @@
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background: repeating-linear-gradient(
-      to bottom,
-      rgb(255 255 255 / 0.02) 0 1px,
-      transparent 1px 3px
-    );
+    background:
+      radial-gradient(60% 45% at 18% -10%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 70%),
+      radial-gradient(50% 40% at 85% -15%, color-mix(in srgb, var(--color-violet) 12%, transparent), transparent 70%);
+  }
+
+  /*
+   * An image that arrives after the page fades in rather than popping. The
+   * starting style only applies to an element inserted after first paint,
+   * so a prerendered page, whose images are in the HTML, shows them at once.
+   */
+  img {
+    transition: opacity 400ms ease;
+    @starting-style {
+      opacity: 0;
+    }
   }
 
   #root {
@@ -308,9 +323,9 @@
    */
   .control {
     appearance: none;
-    background-color: var(--color-panel);
+    background-color: color-mix(in srgb, var(--color-raised) 70%, transparent);
     border: 1px solid var(--color-line);
-    border-radius: 2px;
+    border-radius: var(--radius-md);
     color: var(--color-ink);
     /* Longhand, not the `font` shorthand: the shorthand resets font-variant,
        and these sit next to `.tnum` fields that need tabular figures. */
@@ -332,28 +347,27 @@
    * `*:focus-visible` ring in `base` on every control in the app.
    */
   .control:focus {
-    border-color: var(--color-gold);
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
   }
 
   /*
-   * Loading placeholders.
-   *
-   * One shape, one fill, and the breathing lives on the *container*, so every
-   * placeholder in a list changes together. Per-element `animate-pulse` with a
-   * staggered delay was read, accurately, as water flowing down the page: a
-   * travelling wave draws the eye along it, which is the opposite of what a
-   * placeholder is for. In phase, it reads as a held breath instead.
-   *
+   * Loading placeholders: one shape, with a light passing over it. The sweep
+   * is one gradient moved by its background position, so every placeholder
+   * on the page shines in step and the effect costs no layout.
    * `prefers-reduced-motion` stops it via the global rule at the end of this
    * file, leaving the shapes in place.
    */
   .skeleton {
-    background-color: var(--color-line-soft);
-    border-radius: 2px;
-  }
-
-  .skeleton-breathing {
-    animation: skeleton-breathe 2s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(
+      100deg,
+      var(--color-line-soft) 30%,
+      var(--color-raised) 50%,
+      var(--color-line-soft) 70%
+    );
+    background-size: 220% 100%;
+    animation: shimmer 1.6s linear infinite;
   }
 
   /* The spinner is a third piece of native chrome, and nobody steps a game
@@ -396,9 +410,39 @@
    * hole punched in the page.
    */
   .frame {
-    background: var(--color-panel);
-    border: 1px solid var(--color-line);
-    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / 0.04);
+    background: color-mix(in srgb, var(--color-panel) 94%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-line) 80%, transparent);
+    border-radius: var(--radius-lg);
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.05),
+      0 14px 34px -22px rgb(0 0 0 / 0.9);
+  }
+
+  /* The header's ground: the page showing through frosted glass. */
+  .glass {
+    background: color-mix(in srgb, var(--color-deep) 72%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    backdrop-filter: blur(18px) saturate(140%);
+  }
+
+  /* A surface lit by the accent: the one thing on a page that is live. */
+  .glow {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent),
+      0 14px 44px -14px color-mix(in srgb, var(--color-accent) 55%, transparent);
+  }
+
+  /* Display type filled with light: ink into the accent into gold. */
+  .text-gradient {
+    background-image: linear-gradient(
+      115deg,
+      var(--color-ink) 0%,
+      var(--color-accent-bright) 55%,
+      var(--color-gold-bright) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   /*
@@ -455,14 +499,11 @@
   }
 
   /*
-   * The corner cut, used on hero surfaces only.
-   *
-   * One 14px notch, bottom right, the way a broadcast lower-third or a Riot
-   * panel is cut. It is the site's second motif after `accent-edge` and it
-   * stays rare: on every panel it would be a texture, not a mark.
+   * The hero surface's corner: one step rounder than a panel, so the
+   * biggest shape on the page is also the softest.
    */
   .notch {
-    clip-path: polygon(0 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%);
+    border-radius: var(--radius-xl);
   }
 
   /*
@@ -487,9 +528,11 @@
   }
 
   .lift:hover {
-    transform: translateY(-1px);
-    background-color: color-mix(in srgb, var(--color-raised) 55%, transparent);
-    box-shadow: inset 2px 0 0 0 var(--color-accent);
+    transform: translateY(-2px);
+    background-color: color-mix(in srgb, var(--color-raised) 60%, transparent);
+    box-shadow:
+      inset 2px 0 0 0 var(--color-accent),
+      0 12px 30px -16px color-mix(in srgb, var(--color-accent) 50%, transparent);
   }
 
   /*
@@ -511,13 +554,12 @@
   }
 }
 
-@keyframes skeleton-breathe {
-  0%,
-  100% {
-    opacity: 1;
+@keyframes shimmer {
+  from {
+    background-position: 120% 0;
   }
-  50% {
-    opacity: 0.45;
+  to {
+    background-position: -120% 0;
   }
 }
 

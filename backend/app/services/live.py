@@ -33,7 +33,7 @@ from app.riot.routing import Platform, resolve_platform
 from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
-    available_slices,
+    aggregated_slices,
     patch_sort_key,
     win_as_int,
 )
@@ -443,7 +443,7 @@ class LiveGame:
 def _poolable_patches(held: list[str]) -> tuple[str, ...]:
     """The newest patch, plus the one before it when it is close enough.
 
-    `available_slices` already orders by patch, newest first, so this only has
+    `aggregated_slices` already orders by patch, newest first, so this only has
     to decide whether the second one is near enough to describe the same game.
     """
     newest = held[0]
@@ -1010,7 +1010,7 @@ class LiveGameService:
         touch, so the page can say so.
         """
         banned = banned or []
-        slices = [s for s in await available_slices(self.session) if s["queue_id"] == queue_id]
+        slices = [s for s in await aggregated_slices(self.session) if s["queue_id"] == queue_id]
         if not slices:
             return None, [], {}
         patches = _poolable_patches([s["patch"] for s in slices])

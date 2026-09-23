@@ -82,7 +82,7 @@ export default function Home() {
         <div className="pb-2 pt-6 sm:pt-10">
           {/* Broken by hand. Left to a measure, the rag landed on "read at /
               a glance", which splits the phrase that carries the meaning. */}
-          <h1 className="display text-[clamp(2.7rem,7vw,5rem)] font-800 uppercase leading-[0.92] tracking-[-0.01em] text-ink">
+          <h1 className="display text-gradient text-[clamp(2.7rem,7vw,5rem)] font-800 uppercase leading-[0.92] tracking-[-0.01em]">
             Every game you
             <br />
             have played
@@ -226,10 +226,16 @@ function WhatsHere({ hasBestGames }: { hasBestGames: boolean }) {
   ]
 
   return (
-    <section aria-label="What Riftline shows" className="border-b border-line-soft bg-panel/40">
-      <ul className="mx-auto grid max-w-[1280px] gap-x-10 gap-y-7 px-4 py-9 md:grid-cols-3">
+    <section aria-label="What Riftline shows" className="border-b border-line-soft">
+      <ul className="mx-auto grid max-w-[1280px] gap-4 px-4 py-9 md:grid-cols-3">
         {items.map((item) => (
-          <li key={item.title} className="accent-edge pl-4">
+          <li key={item.title} className="frame lift group relative overflow-hidden p-5">
+            {/* A wash of the accent in the corner, brighter under the pointer:
+                the card answers without a border changing colour. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute -top-16 -right-16 size-40 rounded-full bg-accent/10 blur-2xl transition-opacity duration-300 group-hover:bg-accent/20"
+            />
             <h2 className="display text-xl font-600 text-ink">{item.title}</h2>
             <p className="mt-1.5 max-w-[46ch] text-sm leading-relaxed text-ink-dim">
               {item.body}

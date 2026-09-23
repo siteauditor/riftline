@@ -9,7 +9,7 @@ from app.api.deps import DbDep, PlayerServiceDep, StaticDep
 from app.api.schemas import ChampionRef
 from app.riot.errors import RiotApiError
 from app.riot.routing import UnknownPlatform, resolve_platform
-from app.services.aggregate import ALL_BRACKETS, available_slices
+from app.services.aggregate import ALL_BRACKETS, aggregated_slices, default_patch
 from app.services.draft import (
     ALLY_SHRINKAGE,
     COMFORT_MAX_BONUS,
@@ -135,14 +135,13 @@ async def suggest(
 
     patch = body.patch
     if patch is None:
-        slices = [s for s in await available_slices(db) if s["queue_id"] == body.queue_id]
-        if not slices:
+        patch = default_patch(await aggregated_slices(db), body.queue_id)
+        if patch is None:
             raise HTTPException(
                 404,
                 "No aggregated data yet. Run `python -m scripts.ingest crawl` then "
                 "`python -m scripts.ingest aggregate` to build the corpus this uses.",
             )
-        patch = slices[0]["patch"]
 
     # Personalisation is optional and must never break the core suggestion.
     puuid = None

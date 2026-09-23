@@ -137,7 +137,7 @@ function PlayerCell({ member, cap }: { member: GroupMember; cap: number }) {
   return (
     <span className="flex min-w-0 items-center gap-2.5">
       {member.profile_icon_url ? (
-        <img src={member.profile_icon_url} alt="" className="size-8 shrink-0 ring-1 ring-line" />
+        <img src={member.profile_icon_url} alt="" className="size-8 shrink-0 ring-1 ring-line" loading="lazy" decoding="async" />
       ) : (
         <span className="size-8 shrink-0 bg-raised ring-1 ring-line" aria-hidden />
       )}
@@ -426,7 +426,7 @@ function MemberDetail({ member, group }: { member: GroupMember; group: Group }) 
                 {member.champions.map((c) => (
                   <li key={c.champion.id} className="flex items-center gap-2">
                     {c.champion.icon_url && (
-                      <img src={c.champion.icon_url} alt="" className="size-6 ring-1 ring-line" />
+                      <img src={c.champion.icon_url} alt="" className="size-6 ring-1 ring-line" loading="lazy" decoding="async" />
                     )}
                     <span className="min-w-0 flex-1 truncate text-ink">{c.champion.name}</span>
                     <span className="tnum text-ink-dim">

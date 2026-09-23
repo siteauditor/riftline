@@ -7,7 +7,7 @@ import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import SelectField from '../components/SelectField'
 import SliceFilters, { SliceSummary, type SliceValue } from '../components/SliceFilters'
-import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
+import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
 import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
 import { queries, TIERLIST_MIN_GAMES } from '../lib/queries'
@@ -188,8 +188,8 @@ export default function Tierlist() {
           {meta.data?.lobby_ranks && <LobbyRanks lobby={meta.data.lobby_ranks} />}
 
           {meta.isLoading && (
-            <div className="py-8">
-              <Spinner label="Loading champion statistics…" />
+            <div className="pt-4">
+              <TableSkeleton rows={12} />
             </div>
           )}
 

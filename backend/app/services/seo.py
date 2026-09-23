@@ -32,15 +32,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChampionStat, ItemStat, Match, MatchParticipant, Player
-from app.services.aggregate import ALL_BRACKETS, POSITIONS, TIER_MIN_GAMES
+from app.services.aggregate import ALL_BRACKETS, POSITIONS, SETTLED_MIN_MATCHES, TIER_MIN_GAMES
 from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
 from app.services.static_data import StaticDataService
 
 INDEX_QUEUE = 420
 # The newest patch is the index patch once it holds this many ranked solo
 # games. Below that its per-champion samples are a few games each, which
-# would noindex most of the site for the first days of every patch.
-INDEX_PATCH_MIN_MATCHES = 500
+# would noindex most of the site for the first days of every patch. The same
+# floor decides which patch a page shows by default (`default_patch`).
+INDEX_PATCH_MIN_MATCHES = SETTLED_MIN_MATCHES
 # An item page compares the item with its slot; that figure needs this many
 # purchases (SLOT_MIN_GAMES on the item route), and a page without its main
 # figure is not one to send a crawler to.

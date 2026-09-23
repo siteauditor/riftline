@@ -29,7 +29,7 @@ export default function StatusBand({
           its own line instead of squeezing the title into four words tall. */}
       <div className="flex min-w-[14rem] flex-1 items-center gap-4">
         {iconUrl && (
-          <img src={iconUrl} alt="" className="size-10 shrink-0 ring-1 ring-line" />
+          <img src={iconUrl} alt="" className="size-10 shrink-0 ring-1 ring-line" loading="lazy" decoding="async" />
         )}
         <div className="min-w-0">
           <p className="display text-lg font-700 leading-tight text-ink">{title}</p>

@@ -670,7 +670,7 @@ async def test_corpus_records_follow_the_champion_page_floor(monkeypatch):
     async def one_slice(_session):
         return [{"patch": patch, "queue_id": queue, "matches": 1}]
 
-    monkeypatch.setattr("app.services.live.available_slices", one_slice)
+    monkeypatch.setattr("app.services.live.aggregated_slices", one_slice)
 
     def stat(champion, role, games, wins):
         return ChampionStat(
@@ -780,7 +780,7 @@ async def _fallback_lobby(monkeypatch, rows, *, queue: int, patches: list[str]):
     async def slices(_session):
         return [{"patch": patch, "queue_id": queue, "matches": 10} for patch in patches]
 
-    monkeypatch.setattr("app.services.live.available_slices", slices)
+    monkeypatch.setattr("app.services.live.aggregated_slices", slices)
 
     async with SessionLocal() as session:
         session.add_all(rows)
@@ -814,7 +814,7 @@ async def test_a_ban_rate_cannot_exceed_one(monkeypatch):
     async def slices(_session):
         return [{"patch": patch, "queue_id": queue, "matches": 10}]
 
-    monkeypatch.setattr("app.services.live.available_slices", slices)
+    monkeypatch.setattr("app.services.live.aggregated_slices", slices)
 
     banned_champion = 157
     async with SessionLocal() as session:

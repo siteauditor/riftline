@@ -73,7 +73,7 @@ export default function ChampionDetail({
             style={{ boxShadow: `inset 0 0 0 2px ${step.color}` }}
           >
             {champion.iconUrl ? (
-              <img src={champion.iconUrl} alt="" className="size-full object-cover" />
+              <img src={champion.iconUrl} alt="" className="size-full object-cover" loading="lazy" decoding="async" />
             ) : (
               <span className="grid size-full place-items-center bg-raised text-ink-faint">?</span>
             )}
