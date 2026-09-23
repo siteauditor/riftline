@@ -85,6 +85,13 @@ ADDITIVE: dict[str, list[tuple[str, str]]] = {
         ("performance_rank", "INTEGER"),
         ("performance_detail", "TEXT"),
         ("performance_scored_at", "DATETIME"),
+        # Damage to champions by type, lifted from `matches.raw`, for the draft's
+        # team damage mix. Added here one deploy before the model declares them:
+        # deploy.sh starts the new API before the migration runs, and an ORM
+        # load of a column the table does not have yet fails every request.
+        ("physical_damage_to_champions", "INTEGER"),
+        ("magic_damage_to_champions", "INTEGER"),
+        ("true_damage_to_champions", "INTEGER"),
     ],
 }
 
