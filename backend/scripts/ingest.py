@@ -479,6 +479,42 @@ async def cmd_audit(args) -> int:
     return 0
 
 
+async def cmd_draft_priors(args) -> int:
+    """What the draft's evidence strengths should be on the corpus now. No Riot call."""
+    from app.services.draft_priors import measure
+
+    await init_db()
+    async with SessionLocal() as session:
+        report = await measure(session, args.queue)
+    if report.newer is None:
+        print(f"draft priors: nothing aggregated for queue {report.queue_id}")
+        return 0
+    against = f"against {report.older}" if report.older else "(no earlier patch close enough)"
+    print(f"draft priors, queue {report.queue_id}: {report.newer} {against}")
+
+    def games(value):
+        return "no effect" if value is None else f"{value:,.0f} games"
+
+    for scope in report.scopes:
+        print(f"  {scope.scope} (in use: {scope.strength_in_use:,.0f} games)")
+        for r in scope.repeatability:
+            print(
+                f"    repeats, {r.min_games}+ games on both: {r.pairs:,} pairs, typical {r.typical_games:.1f} "
+                f"games, r {r.r:+.3f} ({r.r_low:+.3f} to {r.r_high:+.3f}): {games(r.strength)} "
+                f"(plausible {games(r.strength_low)} to {games(r.strength_high)})"
+            )
+        print(
+            f"    spread within {report.newer}: {scope.within_pairs:,} pairs with 5+ games, "
+            f"{games(scope.within_strength)}"
+        )
+        if scope.split_slope is not None:
+            print(
+                f"    time split at the strength in use: slope {scope.split_slope:.2f} over "
+                f"{scope.split_pairs:,} pairs (1 is right; above 1 the prior is too strong)"
+            )
+    return 0
+
+
 async def cmd_groups(args) -> int:
     """Fill in every group's players from Riot, most recently viewed first."""
     settings = get_settings()
@@ -598,6 +634,12 @@ def main() -> int:
         help="Bring stored timeline extracts up to date. Reads local storage only.",
     )
 
+    dp = sub.add_parser(
+        "draftpriors",
+        help="Re-measure the draft's evidence strengths. Reads local storage only.",
+    )
+    dp.add_argument("--queue", type=int, default=420)
+
     gr = sub.add_parser(
         "groups",
         help="Fetch what groups' players still lack: ranks, new games, older history.",
@@ -657,6 +699,8 @@ def main() -> int:
         return asyncio.run(cmd_win_model(args))
     if args.command == "reviews":
         return asyncio.run(cmd_reviews(args))
+    if args.command == "draftpriors":
+        return asyncio.run(cmd_draft_priors(args))
     if args.command == "audit":
         return asyncio.run(cmd_audit(args))
     if args.command == "groups":

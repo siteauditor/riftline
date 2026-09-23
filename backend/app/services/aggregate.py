@@ -916,6 +916,51 @@ def patch_sort_key(patch: str) -> tuple[int, ...]:
     return tuple(int(part) if part.isdigit() else -1 for part in patch.split("."))
 
 
+# How far a record may reach back when one patch holds too few games: the
+# patch asked for and one before it. Measured 2026-09-21 over the lanes of forty
+# real lobbies: 26% have a five-game lane record on the current patch alone and
+# 34% once the previous patch is pooled; pooling 16.17 into 16.18 doubles the
+# lane pairs with ten or more games, 120 to 244 (2026-09-24). A third patch was
+# never measured, so it is not assumed.
+MAX_POOLED_PATCHES = 2
+# And only a patch close enough to still describe the same game. Judgement
+# rather than a measurement: the corpus is crawled rather than exhaustive, so
+# the next patch held can be a number or two down, but past that the items and
+# the kits have moved and pooling would be a different claim.
+POOL_MAX_MINOR_GAP = 2
+
+
+def poolable_patches(held: list[str] | tuple[str, ...], anchor: str) -> tuple[str, ...]:
+    """The anchor patch and, when it is close enough, the one held before it.
+
+    Close means the same season (the part before the first dot is the same) and
+    at most `POOL_MAX_MINOR_GAP` minor versions older. A patch whose minor part
+    is not a number is never pooled: a fixture patch named "AGG.done" sorted as
+    one minor below "D29.00" and was pooled with it. Shared by the draft, which
+    anchors on the settled default patch, and the live page, which anchors on
+    the newest patch held.
+    """
+
+    def split(patch: str) -> tuple[str, int | None]:
+        season, _, rest = patch.partition(".")
+        minor = rest.split(".")[0]
+        return season, int(minor) if minor.isdigit() else None
+
+    season, minor = split(anchor)
+    if minor is None:
+        return (anchor,)
+    older: list[tuple[int, str]] = []
+    for patch in set(held):
+        s, m = split(patch)
+        if patch == anchor or s != season or m is None or m >= minor:
+            continue
+        if minor - m <= POOL_MAX_MINOR_GAP:
+            older.append((m, patch))
+    older.sort(reverse=True)
+    pool = [anchor, *(patch for _, patch in older)][:MAX_POOLED_PATCHES]
+    return tuple(pool)
+
+
 # A patch is settled once it holds this many games in a queue: below that,
 # its per-champion samples are a few games each. Shared with the sitemap's
 # index patch, so what a page shows by default and what is indexed agree.
