@@ -57,7 +57,9 @@ from app.services.evidence import (
     LANE_STRENGTH,
     TEAM_STRENGTH,
     Call,
+    OwnRates,
     RecordPart,
+    parts_by_patch,
     read_records,
 )
 from app.services.roles import assign_partial, load_priors, usual_share
@@ -272,9 +274,6 @@ def recency(days: float | None) -> float:
         return 0.5 - 0.25 * (days - COMFORT_HALF_DAYS) / (COMFORT_FLOOR_DAYS - COMFORT_HALF_DAYS)
     return 0.25
 
-
-# Own rates keyed (champion, position, patch).
-OwnRates = dict[tuple[int, str, str], float]
 
 
 class DraftAdvisor:
@@ -565,22 +564,6 @@ class DraftAdvisor:
         )
         return {(c, pos, patch): w / g for c, pos, patch, w, g in rows.all()}
 
-    @staticmethod
-    def _parts(rows, own: OwnRates, champion: int, position: str) -> tuple[list[RecordPart], tuple[str, ...]]:
-        """A record's rows as parts centred per patch; rows without a reference are dropped."""
-        by_patch: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-        for patch, wins, games in rows:
-            by_patch[patch][0] += wins
-            by_patch[patch][1] += games
-        parts, patches = [], []
-        for patch, (wins, games) in by_patch.items():
-            rate = own.get((champion, position, patch))
-            if rate is None or games <= 0:
-                continue
-            parts.append(RecordPart(wins, games, rate))
-            patches.append(patch)
-        return parts, tuple(sorted(patches, reverse=True))
-
     def _evidence(
         self, kind: EvidenceKind, other: int, parts: list[RecordPart], patches: tuple[str, ...],
         strength: float, scored: bool,
@@ -629,7 +612,7 @@ class DraftAdvisor:
 
         out: dict[int, list[Evidence]] = defaultdict(list)
         for (champion, enemy), group in by_pair.items():
-            parts, patches = self._parts(
+            parts, patches = parts_by_patch(
                 [(r.patch, r.wins, r.games) for r in group], own, champion, ctx.position
             )
             evidence = self._evidence("lane", enemy, parts, patches, LANE_STRENGTH, True)
@@ -704,7 +687,7 @@ class DraftAdvisor:
             by_pair[(champion, enemy)].append((patch, wins, games))
         risks: dict[int, list[Evidence]] = defaultdict(list)
         for (champion, enemy), group in by_pair.items():
-            parts, patches = self._parts(group, own, champion, ctx.position)
+            parts, patches = parts_by_patch(group, own, champion, ctx.position)
             evidence = self._evidence("lane", enemy, parts, patches, LANE_STRENGTH, False)
             if evidence is None or evidence.call != "unfavoured" or enemy in ctx.unavailable:
                 continue
@@ -781,7 +764,7 @@ class DraftAdvisor:
             by_pair[(champion, other)].append((patch, wins, games))
         out: dict[int, list[Evidence]] = defaultdict(list)
         for (champion, other), group in by_pair.items():
-            parts, patches = self._parts(group, own, champion, position)
+            parts, patches = parts_by_patch(group, own, champion, position)
             evidence = self._evidence(kind, other, parts, patches, strength, False)
             if evidence is not None:
                 out[champion].append(evidence)
@@ -818,7 +801,7 @@ class DraftAdvisor:
             by_pair[(champion, ally)].append((patch, wins, games))
         out: dict[int, list[Evidence]] = defaultdict(list)
         for (champion, ally), group in by_pair.items():
-            parts, patches = self._parts(group, own, champion, roles[champion])
+            parts, patches = parts_by_patch(group, own, champion, roles[champion])
             evidence = self._evidence("ally", ally, parts, patches, TEAM_STRENGTH, False)
             if evidence is not None:
                 out[champion].append(evidence)

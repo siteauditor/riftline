@@ -1,4 +1,5 @@
-"""What one record says about a pick: the arithmetic the draft and the live page share.
+"""What one record says about a pick: the arithmetic the draft, the live page and
+the champion page's counters and allies share.
 
 A record is a champion's wins and games in one context (against one lane
 opponent, against one enemy anywhere on the map, beside one ally), possibly
@@ -37,7 +38,8 @@ fifth to fourth (both measured 2026-09-24).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -100,6 +102,35 @@ def read_records(parts: Sequence[RecordPart], strength: float) -> RecordRead:
     return RecordRead(games=games, wins=wins, own_rate=own, lift=lift, z=z, call=call)
 
 
+# A champion's own rate keyed (champion, position, patch): each patch of a record
+# is read against the rate on that patch.
+OwnRates = dict[tuple[int, str, str], float]
+
+
+def parts_by_patch(
+    rows: Iterable[tuple[str, int, int]], own: OwnRates, champion: int, position: str
+) -> tuple[list[RecordPart], tuple[str, ...]]:
+    """A record's (patch, wins, games) rows as parts, one per patch, newest first.
+
+    Rows of the same patch are summed (an ally seen in two roles is one record).
+    A patch without the champion's own rate on it has no reference and is left
+    out, as is one without games.
+    """
+    by_patch: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    for patch, wins, games in rows:
+        by_patch[patch][0] += wins
+        by_patch[patch][1] += games
+    parts: list[RecordPart] = []
+    patches: list[str] = []
+    for patch, (wins, games) in by_patch.items():
+        rate = own.get((champion, position, patch))
+        if rate is None or games <= 0:
+            continue
+        parts.append(RecordPart(wins, games, rate))
+        patches.append(patch)
+    return parts, tuple(sorted(patches, reverse=True))
+
+
 __all__ = [
     "ALLY_STRENGTH",
     "CALL_Z",
@@ -107,6 +138,8 @@ __all__ = [
     "TEAM_STRENGTH",
     "Call",
     "RecordPart",
+    "OwnRates",
     "RecordRead",
+    "parts_by_patch",
     "read_records",
 ]

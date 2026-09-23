@@ -102,13 +102,16 @@ async def test_builds_are_declared_as_final_inventories(client, corpus):
     builds = body["builds"]
 
     assert builds["basis"] == "final_inventory"
-    complete = builds["complete"][0]
-    # Sorted ids, so the same two items in any slot order are one entry.
-    assert complete["ids"] == sorted([LEGENDARY_A, LEGENDARY_B])
-    assert complete["games"] == 12
-    assert [i["name"] for i in complete["items"]] == ["Infinity Edge", "Runaan's Hurricane"]
+    # Two finished items is a game that ended early, not a completed build:
+    # most listed "builds" were one or two items under a label that said "the
+    # full set".
+    assert builds["complete"] == []
     assert {b["ids"][0] for b in builds["boots"]} == {BOOTS}
     assert {i["ids"][0] for i in builds["items"]} == {LEGENDARY_A, LEGENDARY_B}
+    assert {i["items"][0]["name"] for i in builds["items"]} == {"Infinity Edge", "Runaan's Hurricane"}
+    # Every facet carries the range its sample supports.
+    item = builds["items"][0]
+    assert item["range_low"] <= item["win_rate"] <= item["range_high"]
 
 
 async def test_runes_and_spells_are_resolved_for_rendering(client, corpus):
@@ -117,10 +120,16 @@ async def test_runes_and_spells_are_resolved_for_rendering(client, corpus):
     keystone = body["runes"]["keystones"][0]
     assert keystone["ids"] == [8005]
     assert keystone["runes"][0]["icon_url"], "keystone must carry an icon"
+    assert keystone["runes"][0]["name"] == "Press the Attack"
 
     page = body["runes"]["pages"][0]
     # style + 4 primary + style + 2 sub + 3 shards
     assert len(page["ids"]) == 11
+    # The shards are named and drawn too: they were grey dots with no name.
+    shards = page["runes"][-3:]
+    assert [s["name"] for s in shards] == ["Adaptive Force", "Move Speed", "Health Scaling"]
+    assert all(s["icon_url"] for s in shards)
+    assert all(r["name"] for r in page["runes"])
 
     spells = body["spells"][0]
     assert [s["name"] for s in spells["spells"]] == ["Flash", "Teleport"]
@@ -136,20 +145,20 @@ async def test_lane_and_team_counters_answer_different_questions(client, corpus)
     assert lane == {enemy_mid}
     # ...while the whole enemy team is what decides the game.
     assert team == set(RED)
-    # Worst first: "weak against" is the question people arrive with, read
-    # from the middle of each range.
-    middles = [p["confidence_win_rate"] + p["confidence_high"] for p in body["counters"]["team"]]
-    assert middles == sorted(middles)
-    assert all(p["confidence_win_rate"] <= p["win_rate"] <= p["confidence_high"]
-               for p in body["counters"]["team"])
+    # Worst first: "weak against" is the question people arrive with, read as
+    # the gap from Ahri's own rate at the team strength.
+    lifts = [p["lift"] for p in body["counters"]["team"]]
+    assert lifts == sorted(lifts)
+    assert all(p["own_rate"] == pytest.approx(0.5) for p in body["counters"]["team"])
 
 
-async def test_hardest_matchups_are_ranked_by_the_middle_of_the_range(client):
-    """Measured on the live Jinx page: Viktor at 3-3 was the 4th hardest lane
-    and Samira at 3-2 the 6th, because the bottom of a six-game range is low
-    whatever the record. A 14-26 matchup is the hard one, and a 31-29 one is
-    not, however many games back it. And the list is not cut at 15, or most
-    opponents could not be looked up."""
+async def test_matchups_are_read_against_the_champions_own_rate_as_the_draft_reads_them(client):
+    """Ordered by the gap from the champion's own rate, pulled toward it by the
+    lane prior: a 14-26 record is the hard one, a 3-3 sits at the champion's
+    rate whatever its range, and a 31-29 is not hard however many games back
+    it. The list is not cut at 15, or most opponents could not be looked up.
+    Ranked by the raw record, the hardest five on each of the 31 busiest local
+    pages were all level by this reading (2026-09-24)."""
     from sqlalchemy import func, select
 
     from app.db.models import Match, MatchupStat
@@ -184,11 +193,16 @@ async def test_hardest_matchups_are_ranked_by_the_middle_of_the_range(client):
     order = [p["champion"]["id"] for p in lane]
 
     assert len(lane) == 20, "every matchup over the floor, not the first 15"
-    # By the bottom of the range the 3-3 came first.
     assert order[0] == 7, "14-26 is the hardest matchup"
-    # By the top of the range the 31-29 came before the 3-3, only because
-    # more games made its range narrower.
     assert order.index(112) < order.index(99)
+    by_id = {p["champion"]["id"]: p for p in lane}
+    hardest = by_id[7]
+    assert hardest["own_rate"] == pytest.approx(0.5)
+    assert hardest["lift"] == pytest.approx((14 - 40 * 0.5) / (40 + 100))
+    assert hardest["patches"] == [patch]
+    # A 3-3 at the champion's own rate moves nothing and calls nothing.
+    assert (by_id[112]["lift"], by_id[112]["call"]) == (0.0, "level")
+    assert [p["lift"] for p in lane] == sorted(p["lift"] for p in lane)
 
 
 async def test_synergies_list_allies_best_first(client, corpus):
@@ -197,10 +211,41 @@ async def test_synergies_list_allies_best_first(client, corpus):
 
     assert allies == set(BLUE) - {SUBJECT}
     assert SUBJECT not in allies
-    # Each synergy says which lane the ally was in.
+    # Each ally says the lane it was in most, and is read like the draft's.
     assert all(p["position"] for p in body["synergies"])
-    rates = [p["confidence_win_rate"] for p in body["synergies"]]
-    assert rates == sorted(rates, reverse=True)
+    assert all(p["call"] == "level" for p in body["synergies"]), "a dozen games calls nothing at 500"
+    lifts = [p["lift"] for p in body["synergies"]]
+    assert lifts == sorted(lifts, reverse=True)
+
+
+async def test_an_ally_seen_in_two_roles_is_one_record_on_the_page(client):
+    """Listed per role, one ally's games split into thin halves; the draft
+    reads an ally once, and so does the page, under the role it played most."""
+    from app.db.models import ChampionStat, Match, SynergyStat
+
+    patch, champion, ally = "C1.70", 9711, 9712
+    async with SessionLocal() as session:
+        if not await session.get(Match, "ALLY_TWO_ROLES"):
+            session.add(Match(
+                match_id="ALLY_TWO_ROLES", platform_id="EUW1", queue_id=420, patch=patch,
+                game_creation=1, game_duration=1800, is_remake=False, teams=[],
+            ))
+            session.add(ChampionStat(
+                patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS, champion_id=champion,
+                team_position="MIDDLE", games=60, wins=30, bans=0, pool_games=100,
+            ))
+            for role, games, wins in (("JUNGLE", 8, 6), ("TOP", 5, 4)):
+                session.add(SynergyStat(
+                    patch=patch, queue_id=420, rank_bracket=ALL_BRACKETS, team_position="MIDDLE",
+                    champion_id=champion, ally_position=role, ally_champion_id=ally,
+                    games=games, wins=wins,
+                ))
+            await session.commit()
+
+    body = (await client.get(f"/api/champions/{champion}?patch={patch}&min_games=10")).json()
+
+    (entry,) = [p for p in body["synergies"] if p["champion"]["id"] == ally]
+    assert (entry["games"], entry["wins"], entry["position"]) == (13, 10, "JUNGLE")
 
 
 async def test_a_role_without_games_serves_the_main_role_and_says_so(client, corpus):
@@ -686,3 +731,60 @@ async def test_thin_timeline_figures_are_withheld(client):
     body = await page(MIN_LANING_TIMELINES)
     assert (body["laning"]["avg_score"], body["laning"]["avg_gold_diff"]) == (0.55, 310.0)
 
+
+
+async def test_a_few_good_games_do_not_top_a_long_record(client):
+    """Ranked on the raw average, 13 of the 15 best Lee Sin players had under
+    ten games. Pulled toward the champion's average by nine games, a 6.2 over
+    twenty games ranks above a 6.5 over five."""
+    champion = 9730
+
+    def games(name: str, n: int, score: float):
+        return [
+            [participant(champion, "MIDDLE", 100, True, puuid=_puuid(f"shrink-{name}"),
+                         performance_score=score, riot_id_game_name=name, riot_id_tagline="EUW")]
+            for _ in range(n)
+        ]
+
+    from sqlalchemy import func, select
+
+    from app.db.models import MatchParticipant
+
+    async with SessionLocal() as session:
+        seeded = await session.scalar(select(func.count()).where(MatchParticipant.champion_id == champion))
+    if not seeded:
+        await seed("BOARD_SHRINK", games("few", 5, 6.5) + games("many", 20, 6.2) + games("low", 10, 4.0))
+
+    body = (await client.get(f"/api/champions/{champion}/players")).json()
+
+    order = [r["game_name"] for r in body["players"]]
+    assert order.index("many") < order.index("few")
+    assert body["score_strength"] == 9
+    assert body["champion_score"] == pytest.approx((5 * 6.5 + 20 * 6.2 + 10 * 4.0) / 35)
+    few = next(r for r in body["players"] if r["game_name"] == "few")
+    assert few["avg_score"] == pytest.approx(6.5)
+    assert few["ranked_score"] < few["avg_score"]
+
+
+async def test_an_item_is_set_against_its_slot_once_the_item_guide_has_the_buyers(client, corpus):
+    """A final inventory favours winners, so an item's own win rate ran 2.3
+    points above its champion. The item guide's figure against the same
+    champion's other items in the slot is the one worth reading."""
+    from app.db.models import ItemChampionStat
+
+    async with SessionLocal() as session:
+        for item, buyers, wins, expected in ((LEGENDARY_A, 25, 15, 12.5), (LEGENDARY_B, 12, 8, 6.0)):
+            session.add(ItemChampionStat(
+                patch=PATCH, queue_id=420, rank_bracket=ALL_BRACKETS, item_id=item,
+                champion_id=SUBJECT, champion_players=40, buyers=buyers, buyer_wins=wins,
+                expected_wins=expected, slot_games=[0, buyers, 0, 0],
+            ))
+        await session.commit()
+
+    body = (await client.get(f"/api/champions/{SUBJECT}?patch={PATCH}&min_games=1")).json()
+
+    by_item = {i["ids"][0]: i for i in body["builds"]["items"]}
+    assert by_item[LEGENDARY_A]["slot_delta"] == pytest.approx((15 - 12.5) / 25)
+    assert by_item[LEGENDARY_A]["slot_buyers"] == 25
+    # Twelve buyers is under the item guide's floor of twenty: said, not shown.
+    assert (by_item[LEGENDARY_B]["slot_delta"], by_item[LEGENDARY_B]["slot_buyers"]) == (None, 12)

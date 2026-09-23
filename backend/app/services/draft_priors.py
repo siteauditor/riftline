@@ -22,6 +22,13 @@ It also reports how teams fared by how one-sided their damage was, read from
 their champions' usual profiles (`damage`), which is what a draft knows. The
 draft shows the mix and does not score it; this is the measurement that would
 have to say otherwise first.
+
+Two more priors the pages use are measured here too. The spread of champion
+win rates in a role, which says how many games a champion's own record needs
+before it is half signal (about 950 on 16.18) and how well the tier list's
+order on one patch predicts the next. And the spread of players' average
+scores on a champion, which sets how far the best-players board pulls a short
+record toward the champion's average (`PLAYER_SCORE_STRENGTH`).
 """
 
 from __future__ import annotations
@@ -33,7 +40,15 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChampionStat, Match, MatchParticipant, MatchupStat, SynergyStat
-from app.services.aggregate import ALL_BRACKETS, aggregated_slices, poolable_patches
+from app.services.aggregate import (
+    ALL_BRACKETS,
+    POSITIONS,
+    TIER_MIN_GAMES,
+    aggregated_slices,
+    poolable_patches,
+    wilson_lower_bound,
+    wilson_upper_bound,
+)
 from app.services.damage import load_profiles, team_mix
 from app.services.evidence import ALLY_STRENGTH, LANE_STRENGTH, TEAM_STRENGTH
 
@@ -89,12 +104,146 @@ class DamageMixReport:
 
 
 @dataclass(slots=True)
+class ChampionRateReport:
+    """How far champion win rates in a role truly differ, and what that means."""
+
+    # Champion and role rows with `TIER_MIN_GAMES` or more on the newer patch.
+    rows: int
+    # The true spread of their win rates, beyond binomial noise, and the prior
+    # strength in games it implies: a record of that many games is half signal.
+    spread: float | None
+    strength: float | None
+    # Rows whose whole range sits above 50%, and below it.
+    separated_above: int
+    separated_below: int
+    # The older patch's top and bottom tenth by the tier list's order (the
+    # range's low end), and the win rate each group had on the newer patch.
+    split_rows: int = 0
+    top_next: float | None = None
+    bottom_next: float | None = None
+
+
+@dataclass(slots=True)
+class PlayerScoreReport:
+    """How far players' average scores on a champion truly differ."""
+
+    # Player and champion pairs with `min_scored` or more scored games.
+    pairs: int
+    min_scored: int
+    # A game's score around the player's own average, and players' true
+    # averages around each other: their ratio of variances is the strength.
+    within_sd: float | None
+    between_sd: float | None
+    strength: float | None
+
+
+@dataclass(slots=True)
 class PriorsReport:
     queue_id: int
     newer: str | None
     older: str | None
     scopes: list[ScopeReport]
     damage: DamageMixReport | None = None
+    champion_rates: ChampionRateReport | None = None
+    player_scores: PlayerScoreReport | None = None
+
+
+def rate_spread(rows: list[tuple[int, int]]) -> tuple[float | None, float | None]:
+    """(wins, games) rows: the true spread of their rates, and its prior strength.
+
+    Games-weighted method of moments: the rows' spread around the pooled rate,
+    less what binomial noise alone produces. None where the noise explains it all.
+    """
+    games = sum(g for _, g in rows)
+    if not rows or not games:
+        return None, None
+    pooled = sum(w for w, _ in rows) / games
+    spread = sum(g * (w / g - pooled) ** 2 for w, g in rows)
+    noise = sum((w / g) * (1 - w / g) for w, g in rows)
+    tau2 = (spread - noise) / games
+    if tau2 <= 0:
+        return None, None
+    return math.sqrt(tau2), pooled * (1 - pooled) / tau2
+
+
+def score_prior(groups: list[list[float]]) -> tuple[float | None, float | None, float | None]:
+    """Scores grouped by player: (within sd, between sd, prior strength in games)."""
+    groups = [g for g in groups if len(g) >= 2]
+    if len(groups) < 2:
+        return None, None, None
+    within = sum(
+        sum((x - sum(g) / len(g)) ** 2 for x in g) / (len(g) - 1) for g in groups
+    ) / len(groups)
+    means = [sum(g) / len(g) for g in groups]
+    grand = sum(means) / len(means)
+    between = sum((m - grand) ** 2 for m in means) / len(means) - sum(
+        within / len(g) for g in groups
+    ) / len(groups)
+    if between <= 0:
+        return math.sqrt(within), None, None
+    return math.sqrt(within), math.sqrt(between), within / between
+
+
+async def _role_rates(session: AsyncSession, patch: str, queue_id: int) -> dict[tuple[int, str], tuple[int, int]]:
+    rows = await session.execute(
+        select(ChampionStat.champion_id, ChampionStat.team_position, ChampionStat.wins, ChampionStat.games).where(
+            ChampionStat.patch == patch,
+            ChampionStat.queue_id == queue_id,
+            ChampionStat.rank_bracket == ALL_BRACKETS,
+            ChampionStat.team_position.in_(POSITIONS),
+            ChampionStat.games >= TIER_MIN_GAMES,
+        )
+    )
+    return {(c, pos): (w, g) for c, pos, w, g in rows.all()}
+
+
+async def champion_rates(
+    session: AsyncSession, queue_id: int, newer: str, older: str | None
+) -> ChampionRateReport:
+    new = await _role_rates(session, newer, queue_id)
+    spread, strength = rate_spread(list(new.values()))
+    report = ChampionRateReport(
+        rows=len(new),
+        spread=spread,
+        strength=strength,
+        separated_above=sum(1 for w, g in new.values() if wilson_lower_bound(w, g) >= 0.5),
+        separated_below=sum(1 for w, g in new.values() if wilson_upper_bound(w, g) <= 0.5),
+    )
+    if older is None:
+        return report
+    old = await _role_rates(session, older, queue_id)
+    both = sorted(
+        (k for k in old if k in new), key=lambda k: wilson_lower_bound(*old[k]), reverse=True
+    )
+    tenth = len(both) // 10
+    report.split_rows = len(both)
+    if tenth:
+        def next_rate(keys: list) -> float:
+            return sum(new[k][0] for k in keys) / sum(new[k][1] for k in keys)
+
+        report.top_next = next_rate(both[:tenth])
+        report.bottom_next = next_rate(both[-tenth:])
+    return report
+
+
+async def player_scores(session: AsyncSession, min_scored: int = 5) -> PlayerScoreReport:
+    rows = await session.execute(
+        select(MatchParticipant.champion_id, MatchParticipant.puuid, MatchParticipant.performance_score)
+        .join(Match, Match.match_id == MatchParticipant.match_id)
+        .where(
+            Match.is_remake.is_(False),
+            MatchParticipant.team_position.in_(POSITIONS),
+            MatchParticipant.performance_score.is_not(None),
+        )
+    )
+    grouped: dict[tuple[int, str], list[float]] = {}
+    for champion, puuid, score in rows.all():
+        grouped.setdefault((champion, puuid), []).append(float(score))
+    groups = [g for g in grouped.values() if len(g) >= min_scored]
+    within, between, strength = score_prior(groups)
+    return PlayerScoreReport(
+        pairs=len(groups), min_scored=min_scored, within_sd=within, between_sd=between, strength=strength
+    )
 
 
 def _strength(r: float, noise: float) -> float | None:
@@ -276,4 +425,12 @@ async def measure(session: AsyncSession, queue_id: int = 420) -> PriorsReport:
                 split_slope=split_num / split_den if split_den else None,
             )
         )
-    return PriorsReport(queue_id, newer, older, scopes, await _damage_mix(session, queue_id, pool))
+    return PriorsReport(
+        queue_id,
+        newer,
+        older,
+        scopes,
+        await _damage_mix(session, queue_id, pool),
+        await champion_rates(session, queue_id, newer, older),
+        await player_scores(session),
+    )

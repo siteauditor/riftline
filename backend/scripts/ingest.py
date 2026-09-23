@@ -512,6 +512,27 @@ async def cmd_draft_priors(args) -> int:
                 f"    time split at the strength in use: slope {scope.split_slope:.2f} over "
                 f"{scope.split_pairs:,} pairs (1 is right; above 1 the prior is too strong)"
             )
+    rates = report.champion_rates
+    if rates is not None:
+        spread ="within noise" if rates.spread is None else f"sd {rates.spread * 100:.1f} points"
+        print(
+            f"  champion win rates, {rates.rows:,} role rows with 20+ games on {report.newer}: "
+            f"true spread {spread}, prior {games(rates.strength)}; "
+            f"{rates.separated_above} clearly above 50%, {rates.separated_below} clearly below"
+        )
+        if rates.top_next is not None and rates.bottom_next is not None:
+            print(
+                f"    the tier list's top and bottom tenth of {report.older} ({rates.split_rows:,} rows "
+                f"on both) won {rates.top_next:.1%} and {rates.bottom_next:.1%} on {report.newer}"
+            )
+    scores = report.player_scores
+    if scores is not None and scores.within_sd is not None:
+        between = "within noise" if scores.between_sd is None else f"{scores.between_sd:.2f}"
+        strength = "none" if scores.strength is None else f"{scores.strength:.1f} games"
+        print(
+            f"  player scores on a champion, {scores.pairs:,} pairs with {scores.min_scored}+ scored "
+            f"games: a game varies by {scores.within_sd:.2f}, players by {between}, prior {strength}"
+        )
     if report.damage is not None:
         from app.services.aggregate import wilson_lower_bound, wilson_upper_bound
 

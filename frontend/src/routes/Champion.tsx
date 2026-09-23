@@ -17,6 +17,7 @@ import { parseTab, type ChampionTab } from '../components/champion/tabs'
 import { POSITIONS, type ChampionDetail, type ChampionRef, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
 import { championSummary } from '../lib/prose'
+import { calledCount, pairPatches } from '../lib/pairs'
 import { CHAMPION_MIN_GAMES, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import {
@@ -295,26 +296,33 @@ export default function Champion() {
               />
               <div className="grid gap-5 lg:grid-cols-2">
                 <PairTable
-                  title={pairOrder === 'best' ? 'Easiest lane matchups' : 'Hardest lane matchups'}
-                  hint={`${info.name} against the enemy ${positionLabel(d.position)}, ${
-                    pairOrder === 'best' ? 'best' : 'worst'
-                  } first.`}
+                  title="Lane matchups"
+                  hint={
+                    `${info.name} against the enemy ${positionLabel(d.position).toLowerCase()} on patch ` +
+                    `${pairPatches(d.counters.lane) || d.patch}, each record read against ${info.name}'s usual ` +
+                    `win rate. ${calledCount(d.counters.lane)} of ${d.counters.lane.length} are strong enough ` +
+                    'to call; the rest are ordered by what their records suggest, which a few more games can change.'
+                  }
                   rows={d.counters.lane}
                   order={pairOrder ?? 'worst'}
                   query={pairQuery}
+                  championName={info.name}
+                  strength={d.pair_model.lane_strength}
                   showGold
                   linkFor={(row) => pairLink(row.champion, d.position)}
                 />
                 <PairTable
-                  title={
-                    pairOrder === 'best'
-                      ? 'Easiest against the whole team'
-                      : 'Hardest against the whole team'
+                  title="Against the whole team"
+                  hint={
+                    'Every enemy, not just the laner. Measured on these games, records against the whole team ' +
+                    'repeat from one patch to the next no more than chance does, so read them as what happened, ' +
+                    'not as a prediction.'
                   }
-                  hint="Every enemy, not just the laner. A pick can be fine in lane and hopeless into the composition."
                   rows={d.counters.team}
                   order={pairOrder ?? 'worst'}
                   query={pairQuery}
+                  championName={info.name}
+                  strength={d.pair_model.team_strength}
                   linkFor={(row) => pairLink(row.champion, null)}
                 />
               </div>
@@ -332,13 +340,17 @@ export default function Champion() {
                 placeholder="Find an ally"
               />
               <PairTable
-                title={pairOrder === 'worst' ? 'Worst allies' : 'Best allies'}
-                hint={`Teammates this champion wins alongside ${
-                  pairOrder === 'worst' ? 'least' : 'most'
-                } often, ${pairOrder === 'worst' ? 'worst' : 'best'} first.`}
+                title="Allies"
+                hint={
+                  `Teammates ${info.name} played beside on patch ${pairPatches(d.synergies) || d.patch}, in ` +
+                  'whichever role, each read against the usual win rate. Measured on these games, ally records ' +
+                  'repeat no more than chance does, so read them as what happened, not as a prediction.'
+                }
                 rows={d.synergies}
                 order={pairOrder ?? 'best'}
                 query={pairQuery}
+                championName={info.name}
+                strength={d.pair_model.ally_strength}
                 showPosition
                 linkFor={(row) => pairLink(row.champion, row.position)}
               />

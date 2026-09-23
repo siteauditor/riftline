@@ -35,6 +35,27 @@ DDRAGON = "https://ddragon.leagueoflegends.com"
 # Community Dragon serves the centred splash crop and square tiles that Data
 # Dragon does not. Verified reachable 2026-09-17.
 CDRAGON = "https://cdn.communitydragon.org/latest"
+
+# Stat shards, which Data Dragon's runesReforged.json leaves out: named and
+# drawn from Community Dragon's perks.json (read 2026-09-24). They change
+# rarely, so a table rather than another download. Without it a rune page's
+# three shards were grey dots with no name.
+_SHARD_ICONS = (
+    "https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data"
+    "/global/default/v1/perk-images/statmods"
+)
+STAT_SHARDS: dict[int, tuple[str, str]] = {
+    5001: ("Health Scaling", "statmodshealthplusicon"),
+    5002: ("Armor", "statmodsarmoricon"),
+    5003: ("Magic Resist", "statmodsmagicresicon"),
+    5005: ("Attack Speed", "statmodsattackspeedicon"),
+    5007: ("Ability Haste", "statmodscdrscalingicon"),
+    5008: ("Adaptive Force", "statmodsadaptiveforceicon"),
+    5010: ("Move Speed", "statmodsmovementspeedicon"),
+    5011: ("Health", "statmodshealthscalingicon"),
+    5012: ("Resist Scaling", "statmodsadaptiveforcescalingicon"),
+    5013: ("Tenacity and Slow Resist", "statmodstenacityicon"),
+}
 QUEUES_URL = "https://static.developer.riotgames.com/docs/lol/queues.json"
 # Riot's own queues.json stopped being updated years ago: it has nothing for
 # Swiftplay (480), Bravery Arena (1740) or Arena 3x6 (1750), so those games read
@@ -919,9 +940,24 @@ class StaticDataService:
         return spell.get("name") if spell else None
 
     def rune_icon(self, rune_id: int | None) -> str | None:
-        rune = self.rune_index.get(int(rune_id)) if rune_id else None
-        # Rune icon paths are version-independent and live at the CDN root.
-        return f"{DDRAGON}/cdn/img/{rune['icon']}" if rune and rune.get("icon") else None
+        if not rune_id:
+            return None
+        rune = self.rune_index.get(int(rune_id))
+        if rune and rune.get("icon"):
+            # Rune icon paths are version-independent and live at the CDN root.
+            return f"{DDRAGON}/cdn/img/{rune['icon']}"
+        shard = STAT_SHARDS.get(int(rune_id))
+        return f"{_SHARD_ICONS}/{shard[1]}.png" if shard else None
+
+    def rune_name(self, rune_id: int | None) -> str | None:
+        """A rune's, a tree's or a stat shard's name."""
+        if not rune_id:
+            return None
+        rune = self.rune_index.get(int(rune_id))
+        if rune and rune.get("name"):
+            return rune["name"]
+        shard = STAT_SHARDS.get(int(rune_id))
+        return shard[0] if shard else None
 
     def profile_icon(self, icon_id: int | None) -> str | None:
         return f"{self.cdn}/img/profileicon/{icon_id}.png" if icon_id is not None else None

@@ -433,13 +433,26 @@ Counters come in two scopes. `LANE` is the opponent in your lane, which is what
 "counters" usually means. `TEAM` is the champion against all five enemies, which
 is what actually decides games and what the draft assistant was missing.
 
-Matchups are ordered by the **middle** of the Wilson interval, which is the record
-pulled toward 50% by about four games, and read either way (hardest or easiest
-first). Both ends were tried and both failed on the live Jinx page: by the bottom,
-Viktor at 3-3 was the 4th hardest lane, because a six-game range reaches low
-whatever the record; by the top, Yunara at 10-9 (52.6%) came 2nd, because more
-games made its range the narrowest. Every matchup above the floor is returned,
-not the first 15, so any opponent can be searched for.
+**The champion page reads matchups and allies the way the draft does.** Each record
+is read against the champion's own win rate, over the patch shown and the close one
+before it, and ordered by that gap pulled toward it by the measured prior; it is
+called favoured or unfavoured only when that is 90% likely. Ordered by the raw
+record instead (the middle of its Wilson interval, the rule before 2026-09-24), the
+hardest five lanes on each of the 31 busiest local pages were all level by this
+reading, and 22 of those 155 sat at or above the champion's own rate. Most records
+are too thin to call, and the page says how many can be. Records against the whole
+team and beside allies are listed with the note that, on these games, they repeat
+no more than chance does. Every matchup above the floor is returned, not the first
+15, so any opponent can be searched for.
+
+Other figures on the champion page follow the site's floors: a lane's gold at 14
+needs five games with a timeline and the champion's laning figures ten, builds,
+runes and skills carry their range, and an item shows how its buyers did against
+the other items the champion bought in the same slot rather than its final-
+inventory win rate, which ran 2.3 points high because winners finish more items.
+The best-players board pulls each average toward the champion's by nine games,
+measured (a game's score varies by 1.66 around a player's average, players by
+0.55), so five good games no longer top a twenty-game record.
 
 Every list keeps its filters, sort, search and page in the URL, so a reload, a
 shared link or the back button returns the same view (the tier list used to fall

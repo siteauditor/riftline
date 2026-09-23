@@ -2867,6 +2867,9 @@
       },
       "type": "array",
       "title": "Synergies"
+     },
+     "pair_model": {
+      "$ref": "#/components/schemas/PairModelOut"
      }
     },
     "type": "object",
@@ -3357,6 +3360,11 @@
       "type": "integer",
       "title": "Scored Games"
      },
+     "ranked_score": {
+      "type": "number",
+      "title": "Ranked Score",
+      "default": 0.0
+     },
      "tier": {
       "anyOf": [
        {
@@ -3418,6 +3426,22 @@
       "type": "integer",
       "title": "Min Scored",
       "default": 3
+     },
+     "score_strength": {
+      "type": "integer",
+      "title": "Score Strength",
+      "default": 9
+     },
+     "champion_score": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Champion Score"
      },
      "qualified": {
       "type": "integer",
@@ -4574,6 +4598,32 @@
      "pick_rate": {
       "type": "number",
       "title": "Pick Rate"
+     },
+     "range_low": {
+      "type": "number",
+      "title": "Range Low",
+      "default": 0.0
+     },
+     "range_high": {
+      "type": "number",
+      "title": "Range High",
+      "default": 1.0
+     },
+     "slot_delta": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Slot Delta"
+     },
+     "slot_buyers": {
+      "type": "integer",
+      "title": "Slot Buyers",
+      "default": 0
      },
      "items": {
       "items": {
@@ -8515,6 +8565,33 @@
       "type": "number",
       "title": "Win Rate"
      },
+     "own_rate": {
+      "type": "number",
+      "title": "Own Rate",
+      "default": 0.0
+     },
+     "lift": {
+      "type": "number",
+      "title": "Lift",
+      "default": 0.0
+     },
+     "call": {
+      "type": "string",
+      "enum": [
+       "favoured",
+       "unfavoured",
+       "level"
+      ],
+      "title": "Call",
+      "default": "level"
+     },
+     "patches": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Patches"
+     },
      "confidence_win_rate": {
       "type": "number",
       "title": "Confidence Win Rate"
@@ -8571,7 +8648,30 @@
      "win_rate",
      "confidence_win_rate"
     ],
-    "title": "PairEntry"
+    "title": "PairEntry",
+    "description": "One record against an opponent or beside an ally, read as the draft reads it.\n\nOver the patch shown and the close one before it, each patch against the\nchampion's own rate on that patch. Ranked by the raw record, the hardest\nfive lanes on each of the 31 busiest local pages were all level by this\nreading, and 22 of 155 sat at or above the champion's own rate\n(2026-09-24)."
+   },
+   "PairModelOut": {
+    "properties": {
+     "lane_strength": {
+      "type": "number",
+      "title": "Lane Strength",
+      "default": 100.0
+     },
+     "team_strength": {
+      "type": "number",
+      "title": "Team Strength",
+      "default": 500.0
+     },
+     "ally_strength": {
+      "type": "number",
+      "title": "Ally Strength",
+      "default": 500.0
+     }
+    },
+    "type": "object",
+    "title": "PairModelOut",
+    "description": "The prior each kind of record is read with, in games, so the page can say\nit: a record of that many games counts for half."
    },
    "ParticipantBrief": {
     "properties": {
@@ -10007,6 +10107,17 @@
        }
       ],
       "title": "Id"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
      },
      "icon_url": {
       "anyOf": [

@@ -986,6 +986,7 @@ export interface components {
             counters: components["schemas"]["CounterSection"];
             /** Synergies */
             synergies: components["schemas"]["PairEntry"][];
+            pair_model: components["schemas"]["PairModelOut"];
         };
         /** ChampionInfo */
         ChampionInfo: {
@@ -1161,6 +1162,11 @@ export interface components {
             avg_score: number;
             /** Scored Games */
             scored_games: number;
+            /**
+             * Ranked Score
+             * @default 0
+             */
+            ranked_score: number;
             /** Tier */
             tier: string | null;
             /** Division */
@@ -1182,6 +1188,13 @@ export interface components {
              * @default 3
              */
             min_scored: number;
+            /**
+             * Score Strength
+             * @default 9
+             */
+            score_strength: number;
+            /** Champion Score */
+            champion_score: number | null;
             /**
              * Qualified
              * @default 0
@@ -1653,6 +1666,23 @@ export interface components {
             win_rate: number;
             /** Pick Rate */
             pick_rate: number;
+            /**
+             * Range Low
+             * @default 0
+             */
+            range_low: number;
+            /**
+             * Range High
+             * @default 1
+             */
+            range_high: number;
+            /** Slot Delta */
+            slot_delta: number | null;
+            /**
+             * Slot Buyers
+             * @default 0
+             */
+            slot_buyers: number;
             /** Items */
             items: components["schemas"]["ItemRef"][];
             /** Spells */
@@ -3159,7 +3189,16 @@ export interface components {
             /** Pages */
             pages: components["schemas"]["PageOut"][];
         };
-        /** PairEntry */
+        /**
+         * PairEntry
+         * @description One record against an opponent or beside an ally, read as the draft reads it.
+         *
+         *     Over the patch shown and the close one before it, each patch against the
+         *     champion's own rate on that patch. Ranked by the raw record, the hardest
+         *     five lanes on each of the 31 busiest local pages were all level by this
+         *     reading, and 22 of 155 sat at or above the champion's own rate
+         *     (2026-09-24).
+         */
         PairEntry: {
             champion: components["schemas"]["ChampionRef"];
             /** Games */
@@ -3168,6 +3207,24 @@ export interface components {
             wins: number;
             /** Win Rate */
             win_rate: number;
+            /**
+             * Own Rate
+             * @default 0
+             */
+            own_rate: number;
+            /**
+             * Lift
+             * @default 0
+             */
+            lift: number;
+            /**
+             * Call
+             * @default level
+             * @enum {string}
+             */
+            call: "favoured" | "unfavoured" | "level";
+            /** Patches */
+            patches: string[];
             /** Confidence Win Rate */
             confidence_win_rate: number;
             /**
@@ -3186,6 +3243,28 @@ export interface components {
              * @default 0
              */
             timeline_games: number;
+        };
+        /**
+         * PairModelOut
+         * @description The prior each kind of record is read with, in games, so the page can say
+         *     it: a record of that many games counts for half.
+         */
+        PairModelOut: {
+            /**
+             * Lane Strength
+             * @default 100
+             */
+            lane_strength: number;
+            /**
+             * Team Strength
+             * @default 500
+             */
+            team_strength: number;
+            /**
+             * Ally Strength
+             * @default 500
+             */
+            ally_strength: number;
         };
         /** ParticipantBrief */
         ParticipantBrief: {
@@ -3848,6 +3927,8 @@ export interface components {
         RuneRef: {
             /** Id */
             id: number | null;
+            /** Name */
+            name: string | null;
             /** Icon Url */
             icon_url: string | null;
         };

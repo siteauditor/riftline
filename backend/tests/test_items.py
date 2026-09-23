@@ -81,8 +81,8 @@ async def test_an_item_page_scores_each_slot_against_the_same_champion(client, c
     assert figures["buyers"] == 36
     (second,) = figures["slots"]
     assert (second["slot"], second["games"]) == (2, 36)
-    # The champion's 2nd items win 27 of 48; Infinity Edge wins 24 of 36.
-    assert second["delta"] == pytest.approx(24 / 36 - 27 / 48)
+    # Infinity Edge wins 24 of 36; the champion's other 2nd item, Kraken, 3 of 12.
+    assert second["delta"] == pytest.approx(24 / 36 - 3 / 12)
     assert figures["delta"] == pytest.approx(second["delta"])
     assert figures["minute_p50"] == pytest.approx(18.0)
 

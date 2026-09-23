@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import type { ChampionDetail, FacetEntry } from '../../lib/api'
 import ItemIcon from '../items/ItemIcon'
 import { EmptyState } from '../StateViews'
-import { compact, pct, winRateColor } from '../../lib/format'
+import FacetRate from './FacetRate'
+import { compact, pct } from '../../lib/format'
 
 interface Props {
   builds: ChampionDetail['builds']
@@ -13,13 +14,12 @@ interface Props {
 }
 
 /**
- * Completed builds, individual items, boots and summoner spells.
+ * The build path, items, boots and summoner spells.
  *
- * The caveat at the top is not boilerplate. Riot's match data records a
- * player's *final inventory*, with items sitting wherever they were left, so
- * there is no purchase order in it to report. Every other site shows an ordered
- * build path because it reads match timelines, which we do not fetch yet.
- * Presenting these as a path would be inventing data.
+ * When a slice's games have timelines, the path is the first three items in
+ * the order they were bought. Without them Riot's match data holds only the
+ * final inventory, with items wherever they were left, so the panel says the
+ * lists are what games ended with rather than inventing an order.
  */
 export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
   const empty =
@@ -64,17 +64,25 @@ export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
       )}
 
       {builds.items.length > 0 && (
-        <Section title="Most built items" hint="Counted individually, so this survives a small sample best.">
-          <div className="grid grid-cols-2 border-t border-line-soft sm:grid-cols-3 lg:grid-cols-4">
+        <Section
+          title="Most built items"
+          hint="How often each item is finished, and how its buyers did against the other items this champion bought in the same slot, over every role. A finished inventory favours winners, who finish more items, so its own win rate is left out."
+        >
+          <ul className="grid border-t border-line-soft sm:grid-cols-2 lg:grid-cols-3">
             {builds.items.map((entry) => (
-              <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
+              <li key={entry.ids.join()}>
+                <ItemRow itemSearch={itemSearch} entry={entry} />
+              </li>
             ))}
-          </div>
+          </ul>
         </Section>
       )}
 
       {builds.complete.length > 0 && (
-        <Section title="Completed builds" hint="The full set of finished items, most common first.">
+        <Section
+          title="Finished with three or more items"
+          hint="Final inventories of games long enough to finish three items, most common first. Long games favour some items, so read the win rates with care."
+        >
           <ul className="border-t border-line-soft">
             {builds.complete.map((entry) => (
               <li key={entry.ids.join()}>
@@ -90,7 +98,7 @@ export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
           <Section title="Boots">
             <div className="border-t border-line-soft">
               {builds.boots.map((entry) => (
-                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
+                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} wide />
               ))}
             </div>
           </Section>
@@ -100,7 +108,7 @@ export default function BuildPanel({ builds, spells, itemSearch = '' }: Props) {
           <Section title="Summoner spells">
             <div className="border-t border-line-soft">
               {spells.map((entry) => (
-                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} />
+                <FacetRow itemSearch={itemSearch} key={entry.ids.join()} entry={entry} wide />
               ))}
             </div>
           </Section>
@@ -123,7 +131,7 @@ function Section({
     <section>
       <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
         <h3 className="display text-base font-600 text-ink">{title}</h3>
-        {hint && <p className="text-xs text-ink-faint">{hint}</p>}
+        {hint && <p className="max-w-prose text-xs text-ink-faint">{hint}</p>}
       </div>
       {children}
     </section>
@@ -148,6 +156,7 @@ function FacetRow({
     ...entry.items.map((ref) => ({ ref, item: true })),
     ...entry.spells.map((ref) => ({ ref, item: false })),
   ]
+  const names = [...entry.items, ...entry.spells].map((r) => r.name).filter(Boolean)
   return (
     <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
       <div className="flex shrink-0 gap-1">
@@ -161,13 +170,8 @@ function FacetRow({
             {item ? (
               <ItemIcon item={ref} size={28} className="rounded-sm bg-raised" search={itemSearch} />
             ) : (
-              <span
-                className="size-7 overflow-hidden rounded-sm bg-raised"
-                title={ref.name ?? ''}
-              >
-                {ref.icon_url && (
-                  <img src={ref.icon_url} alt={ref.name ?? ''} loading="lazy" />
-                )}
+              <span className="size-7 overflow-hidden rounded-sm bg-raised">
+                {ref.icon_url && <img src={ref.icon_url} alt={ref.name ?? ''} loading="lazy" />}
               </span>
             )}
           </span>
@@ -177,20 +181,49 @@ function FacetRow({
         <span className="min-w-0 flex-1 truncate text-xs text-ink-dim">
           {/* A path and a completed build can contain the same three items, so
               the separator is the only thing distinguishing them in text. */}
-          {entry.items
-            .map((i) => i.name)
-            .filter(Boolean)
-            .join(ordered ? ' › ' : ', ')}
+          {names.join(ordered ? ' › ' : ', ')}
         </span>
       )}
-      <div className="ml-auto shrink-0 text-right">
-        <p className="tnum text-sm font-600" style={{ color: winRateColor(entry.win_rate) }}>
-          {pct(entry.win_rate, 1)}
-        </p>
+      <FacetRate entry={entry} />
+    </div>
+  )
+}
+
+/**
+ * One item: how often it is finished, and how its buyers did against the
+ * other items the champion bought in the same slot. The final inventory's own
+ * win rate is not shown: winners finish more items, and on 16.18 items ran 2.3
+ * points above their champion's own rate for that reason alone.
+ */
+function ItemRow({ entry, itemSearch }: { entry: FacetEntry; itemSearch: string }) {
+  const item = entry.items[0]
+  const delta = entry.slot_delta
+  return (
+    <div className="flex items-center gap-2.5 border-b border-line-soft px-2 py-2 lift">
+      {item && <ItemIcon item={item} size={28} className="shrink-0 rounded-sm bg-raised" search={itemSearch} />}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm text-ink">{item?.name ?? 'Unknown item'}</p>
         <p className="tnum text-xs text-ink-faint">
-          {compact(entry.games)} games, {pct(entry.pick_rate)}
+          In {pct(entry.pick_rate)} of games, {compact(entry.games)} in all
         </p>
       </div>
+      <p className="tnum shrink-0 text-right text-xs">
+        {delta !== null ? (
+          <>
+            <span className={`block text-sm font-600 ${delta >= 0 ? 'text-win' : 'text-loss'}`}>
+              {delta >= 0 ? '+' : ''}
+              {(delta * 100).toFixed(1)}
+            </span>
+            <span className="block text-ink-faint">vs its slot, {compact(entry.slot_buyers)} buyers</span>
+          </>
+        ) : (
+          <span className="block max-w-[9rem] text-ink-faint">
+            {entry.slot_buyers > 0
+              ? `${entry.slot_buyers} buyers with a purchase order, too few to set against its slot`
+              : 'No purchase order yet to set against its slot'}
+          </span>
+        )}
+      </p>
     </div>
   )
 }

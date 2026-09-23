@@ -851,9 +851,12 @@ async def rebuild_item_stats(
                 completions.append((champion_id, min(slot, ITEM_SLOTS), item, won))
 
     baseline: dict[tuple[int, int], list[int]] = defaultdict(lambda: [0, 0])
-    for champion_id, slot, _, won in completions:
+    own_slot: dict[tuple[int, int, int], list[int]] = defaultdict(lambda: [0, 0])
+    for champion_id, slot, item, won in completions:
         baseline[(champion_id, slot)][0] += 1
         baseline[(champion_id, slot)][1] += won
+        own_slot[(champion_id, slot, item)][0] += 1
+        own_slot[(champion_id, slot, item)][1] += won
 
     slot_games: dict[int, list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
     slot_wins: dict[int, list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
@@ -862,7 +865,14 @@ async def rebuild_item_stats(
     pair_slots: dict[tuple[int, int], list[int]] = defaultdict(lambda: [0] * ITEM_SLOTS)
     for champion_id, slot, item, won in completions:
         games, wins = baseline[(champion_id, slot)]
-        expected = wins / games
+        own_games, own_wins = own_slot[(champion_id, slot, item)]
+        # Against the other items the champion bought in that slot, as the item
+        # page says. With the item's own purchases in its baseline, an item
+        # bought in most of a slot was compared largely with itself and its
+        # figure shrank toward zero. With nothing else bought in the slot there
+        # is nothing to compare with, and the purchase counts as even.
+        others = games - own_games
+        expected = (wins - own_wins) / others if others > 0 else won
         slot_games[item][slot - 1] += 1
         slot_wins[item][slot - 1] += won
         slot_expected[item][slot - 1] += expected

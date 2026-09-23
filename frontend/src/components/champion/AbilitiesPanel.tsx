@@ -1,5 +1,6 @@
 import type { ChampionAbility, ChampionDetail, FacetEntry } from '../../lib/api'
 import { compact, pct, positionLabel } from '../../lib/format'
+import FacetRate from './FacetRate'
 import { SLOT_KEY } from './tabs'
 
 interface Props {
@@ -219,24 +220,7 @@ function SkillRow({
           )
         })}
       </div>
-      <div className="ml-auto shrink-0 text-right">
-        <p
-          className="tnum text-sm font-600"
-          style={{
-            color:
-              entry.win_rate >= 0.55
-                ? 'var(--color-gold-bright)'
-                : entry.win_rate >= 0.5
-                  ? 'var(--color-win)'
-                  : 'var(--color-ink-dim)',
-          }}
-        >
-          {pct(entry.win_rate, 1)}
-        </p>
-        <p className="tnum text-xs text-ink-faint">
-          {compact(entry.games)} games, {pct(entry.pick_rate)}
-        </p>
-      </div>
+      <FacetRate entry={entry} />
     </div>
   )
 }

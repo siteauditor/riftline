@@ -298,6 +298,18 @@ test('a champion link to a role without games shows the main role and says so', 
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test('the runes tab names every rune it draws, stat shards included', async ({ page }) => {
+  const corpus = await (await page.request.get('/api/meta/corpus')).json()
+  test.skip(!corpus.total_matches, 'The champion numbers need a corpus of matches.')
+  const errors = await open(page, '/champions/ahri?tab=runes')
+  await expect(page.getByRole('heading', { name: 'Keystones' })).toBeVisible()
+  const images = page.locator('#champion-tabpanel img')
+  const alts = await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt') ?? ''))
+  expect(alts.length).toBeGreaterThan(0)
+  expect(alts.filter((alt) => alt.trim() === '')).toEqual([])
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
 test('an unknown path is the app saying not found, not a blank shell', async ({ page }) => {
   await open(page, '/no-such-page')
   await expect(page.getByText('404')).toBeVisible()

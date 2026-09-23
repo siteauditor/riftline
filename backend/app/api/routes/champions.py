@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.api.deps import DbDep, StaticDep
+from app.api.routes.items import CHAMPION_MIN_BUYERS
 from app.api.schemas import (
     ChampionRef,
     ItemRef,
@@ -34,10 +35,12 @@ from app.api.schemas import (
     RuneRef,
     SpellRef,
     lobby_ranks_out,
+    rune_ref,
 )
 from app.db.models import (
     ChampionFacetStat,
     ChampionStat,
+    ItemChampionStat,
     Match,
     MatchParticipant,
     MatchupStat,
@@ -53,10 +56,20 @@ from app.services.aggregate import (
     aggregated_slices,
     cached_lobby_rank_mix,
     default_patch,
+    poolable_patches,
     tier_for,
     wilson_lower_bound,
     wilson_upper_bound,
     win_as_int,
+)
+from app.services.evidence import (
+    ALLY_STRENGTH,
+    LANE_STRENGTH,
+    TEAM_STRENGTH,
+    Call,
+    OwnRates,
+    parts_by_patch,
+    read_records,
 )
 from app.services.skins import MIN_CHAMPION_SIGHTINGS, champion_skin_counts
 from app.services.static_data import Ability, StaticDataService
@@ -97,6 +110,18 @@ class FacetEntry(BaseModel):
     win_rate: float
     # Share of this champion's games in the slice, not of all games.
     pick_rate: float
+    # The Wilson range of the win rate. Facets are listed by how often they were
+    # taken, and a rate over five games, coloured gold from 55%, said more than
+    # its sample could.
+    range_low: float = 0.0
+    range_high: float = 1.0
+    # Items only: the win rate against the other items this champion bought in
+    # the same slot, from the item guide's rollup (every role, games with a
+    # timeline), and the buyers it stands on; null under the item guide's floor.
+    # The final inventory favours winners, who finish more items: items ran 2.3
+    # points above their champion's own rate on 16.18 (2026-09-24).
+    slot_delta: float | None = None
+    slot_buyers: int = 0
     items: list[ItemRef] = Field(default_factory=list)
     spells: list[SpellRef] = Field(default_factory=list)
     runes: list[RuneRef] = Field(default_factory=list)
@@ -145,14 +170,30 @@ class RuneSection(BaseModel):
 
 
 class PairEntry(BaseModel):
+    """One record against an opponent or beside an ally, read as the draft reads it.
+
+    Over the patch shown and the close one before it, each patch against the
+    champion's own rate on that patch. Ranked by the raw record, the hardest
+    five lanes on each of the 31 busiest local pages were all level by this
+    reading, and 22 of 155 sat at or above the champion's own rate
+    (2026-09-24).
+    """
+
     champion: ChampionRef
     games: int
     wins: int
     win_rate: float
+    # The champion's own rate over the same patches: what the record is read against.
+    own_rate: float = 0.0
+    # The posterior gap from `own_rate`, as a fraction, and whether it is far
+    # enough from even to call (90% on one side). Pairs are ordered by `lift`.
+    lift: float = 0.0
+    call: Call = "level"
+    patches: list[str] = Field(default_factory=list)
+    # The Wilson range of the raw record, kept one release for open pages.
     confidence_win_rate: float
-    # The top of the same range. Pairs are ordered by the middle of the two.
     confidence_high: float = 1.0
-    # Only set for synergies: which lane the ally was in.
+    # Only set for allies: the lane the ally was in most often.
     position: str | None = None
     # From timelines, so null until the matchup's games have been backfilled,
     # and under `MIN_LANE_TIMELINES` of them.
@@ -165,6 +206,15 @@ class PairEntry(BaseModel):
 class CounterSection(BaseModel):
     lane: list[PairEntry] = Field(default_factory=list)
     team: list[PairEntry] = Field(default_factory=list)
+
+
+class PairModelOut(BaseModel):
+    """The prior each kind of record is read with, in games, so the page can say
+    it: a record of that many games counts for half."""
+
+    lane_strength: float = LANE_STRENGTH
+    team_strength: float = TEAM_STRENGTH
+    ally_strength: float = ALLY_STRENGTH
 
 
 class PatchChange(BaseModel):
@@ -234,6 +284,7 @@ class ChampionDetail(BaseModel):
     spells: list[FacetEntry] = Field(default_factory=list)
     counters: CounterSection
     synergies: list[PairEntry] = Field(default_factory=list)
+    pair_model: PairModelOut = Field(default_factory=PairModelOut)
 
 
 # --- profile: who the champion is ---------------------------------------------
@@ -319,6 +370,15 @@ class ChampionProfile(BaseModel):
 # 612 of them are fully scored, so the second floor rarely bites; it is there
 # for the games scored before the score existed.
 PLAYER_MIN_GAMES = 5
+
+# How far a player's average is pulled toward the champion's, in games: a
+# player's score is (their score sum + this many games at the champion's mean)
+# over (their scored games + this many). Measured 2026-09-24 over 830 player
+# and champion pairs with five or more scored games: a game's score varies by
+# 1.66 around the player's own average, and players' true averages by 0.55, so
+# nine games make an average half signal. Ranked on the raw average, 13 of the
+# 15 best Lee Sin players had fewer than ten games.
+PLAYER_SCORE_STRENGTH = 9
 PLAYER_MIN_SCORED = 3
 # Fewer than this and a board is a list of whoever was crawled, not a ranking.
 PLAYER_MIN_ROWS = 3
@@ -336,6 +396,9 @@ class ChampionPlayer(BaseModel):
     win_rate: float
     avg_score: float
     scored_games: int
+    # What the board is ordered by: the average pulled toward the champion's
+    # by `PLAYER_SCORE_STRENGTH` games.
+    ranked_score: float = 0.0
     tier: str | None = None
     division: str | None = None
     league_points: int | None = None
@@ -345,6 +408,9 @@ class ChampionPlayers(BaseModel):
     champion_id: int
     min_games: int = PLAYER_MIN_GAMES
     min_scored: int = PLAYER_MIN_SCORED
+    # The pull toward the champion's average, and that average.
+    score_strength: int = PLAYER_SCORE_STRENGTH
+    champion_score: float | None = None
     # How many players cleared the floors, whether or not the list is shown.
     qualified: int = 0
     players: list[ChampionPlayer] = Field(default_factory=list)
@@ -461,6 +527,8 @@ def _facet_entry(row: ChampionFacetStat, sd, kind: str) -> FacetEntry:
         wins=row.wins,
         win_rate=row.win_rate,
         pick_rate=row.pick_rate,
+        range_low=wilson_lower_bound(row.wins, row.games),
+        range_high=wilson_upper_bound(row.wins, row.games),
     )
     if kind in ("build", "item", "boots", "build_path"):
         entry.items = [
@@ -471,45 +539,77 @@ def _facet_entry(row: ChampionFacetStat, sd, kind: str) -> FacetEntry:
             SpellRef(id=s, name=sd.spell_name(s), icon_url=sd.spell_icon(s)) for s in ids
         ]
     elif kind in ("keystone", "rune_page"):
-        # Stat shards are not in runesReforged.json, so rune_icon returns None
-        # for them and the client renders a placeholder rather than a broken img.
-        entry.runes = [RuneRef(id=r, icon_url=sd.rune_icon(r)) for r in ids]
+        # Named, shards included (from a table: Data Dragon has no shards).
+        entry.runes = [rune_ref(r, sd) for r in ids]
     # Skill facets carry ability slots 1-4, which are not items, spells or runes.
     # They render from `ids` alone as Q/W/E/R, so they intentionally decorate
     # nothing here: an earlier catch-all `else` handed them rune icons.
     return entry
 
 
-def _pair_entry(
+def _read_pairs(
+    rows,
+    own: OwnRates,
     champion_id: int,
-    games: int,
-    wins: int,
+    position: str,
+    strength: float,
+    min_games: int,
     sd,
-    position: str | None = None,
     *,
-    avg_laning_score: float | None = None,
-    avg_gold_diff_14: float | None = None,
-    timeline_games: int = 0,
-) -> PairEntry:
-    # Under the floor one stomp is the average: 88 of 504 lane rows showed a
-    # gold figure from one to four games before this (2026-09-24).
-    measured = timeline_games >= MIN_LANE_TIMELINES
-    return PairEntry(
-        champion=ChampionRef(
-            id=champion_id,
-            name=sd.champion_name(champion_id),
-            icon_url=sd.champion_icon(champion_id),
-        ),
-        games=games,
-        wins=wins,
-        win_rate=wins / games if games else 0.0,
-        confidence_win_rate=wilson_lower_bound(wins, games),
-        confidence_high=wilson_upper_bound(wins, games),
-        position=position,
-        avg_laning_score=avg_laning_score if measured else None,
-        avg_gold_diff_14=avg_gold_diff_14 if measured else None,
-        timeline_games=timeline_games,
-    )
+    ally: bool = False,
+) -> list[PairEntry]:
+    """Records grouped by the other champion, pooled over patches and read.
+
+    ``rows`` are (other, other's position, patch, wins, games, timeline games,
+    laning score, gold at 14). An ally's rows in different roles sum into one
+    record, labelled with the role it was in most. Gold and laning pool over
+    the patches read, weighted by their timelines, and stay null under
+    `MIN_LANE_TIMELINES` of them.
+    """
+    grouped: dict[int, list] = defaultdict(list)
+    for row in rows:
+        grouped[row[0]].append(row)
+    out: list[PairEntry] = []
+    for other, group in grouped.items():
+        parts, patches = parts_by_patch(
+            [(patch, wins, games) for _, _, patch, wins, games, *_ in group], own, champion_id, position
+        )
+        read = read_records(parts, strength)
+        if read.games < min_games:
+            continue
+        used = [r for r in group if r[2] in patches]
+        timelines = sum(r[5] or 0 for r in used)
+
+        def pooled(index: int, rows_=used) -> float | None:
+            weighted = [(r[5], r[index]) for r in rows_ if r[5] and r[index] is not None]
+            weight = sum(t for t, _ in weighted)
+            return sum(t * v for t, v in weighted) / weight if weight else None
+
+        measured = timelines >= MIN_LANE_TIMELINES
+        roles: dict[str, int] = defaultdict(int)
+        for r in used:
+            roles[r[1]] += r[4]
+        out.append(
+            PairEntry(
+                champion=ChampionRef(
+                    id=other, name=sd.champion_name(other), icon_url=sd.champion_icon(other)
+                ),
+                games=read.games,
+                wins=read.wins,
+                win_rate=read.wins / read.games,
+                own_rate=read.own_rate,
+                lift=read.lift,
+                call=read.call,
+                patches=list(patches),
+                confidence_win_rate=wilson_lower_bound(read.wins, read.games),
+                confidence_high=wilson_upper_bound(read.wins, read.games),
+                position=max(roles, key=roles.get) if ally and roles else None,
+                avg_laning_score=pooled(6) if measured else None,
+                avg_gold_diff_14=pooled(7) if measured else None,
+                timeline_games=timelines,
+            )
+        )
+    return out
 
 
 def _champion_id(ref: str, sd: StaticDataService) -> int:
@@ -713,12 +813,42 @@ async def get_champion(
         return [_facet_entry(r, sd, kind) for r in grouped.get(kind, [])[:limit]]
 
     path = entries("build_path")
+    items = entries("item")
+    if items:
+        against_slot = {
+            row.item_id: row
+            for row in (
+                await db.execute(
+                    select(ItemChampionStat).where(
+                        ItemChampionStat.patch == patch,
+                        ItemChampionStat.queue_id == queue_id,
+                        ItemChampionStat.rank_bracket == bracket,
+                        ItemChampionStat.champion_id == champion_id,
+                        ItemChampionStat.item_id.in_([e.ids[0] for e in items]),
+                    )
+                )
+            ).scalars()
+        }
+        for entry in items:
+            row = against_slot.get(entry.ids[0])
+            if row is None or row.expected_wins is None or not row.buyers:
+                continue
+            entry.slot_buyers = row.buyers
+            if row.buyers >= CHAMPION_MIN_BUYERS:
+                entry.slot_delta = (row.buyer_wins - row.expected_wins) / row.buyers
     builds = BuildSection(
         # The whole point of Group B: once a real purchase order exists, stop
         # describing final inventories as if they were builds.
         basis="purchase_order" if path else "final_inventory",
-        complete=entries("build"),
-        items=entries("item"),
+        # Final inventories of three or more finished items. Most sets were one
+        # or two items from games that ended early, under a label that said
+        # "the full set of finished items".
+        complete=[
+            _facet_entry(r, sd, "build")
+            for r in grouped.get("build", [])
+            if len(r.facet_ids or []) >= 3
+        ][:FACET_LIMIT],
+        items=items,
         boots=entries("boots"),
         path=path,
     )
@@ -739,60 +869,78 @@ async def get_champion(
     )
 
     # --- matchups and synergies --------------------------------------------
-    matchup_rows = list(
-        (
+    # Read as the draft reads them: over this patch and the close one before it
+    # (which doubles the lane pairs with ten or more games), each against the
+    # champion's own rate on that patch, at the strengths `draftpriors`
+    # measured. The page's `min_games` floors the pooled record.
+    pool = poolable_patches(held or [patch], patch)
+    own: OwnRates = {
+        (champion_id, position, p): w / g
+        for p, w, g in (
             await db.execute(
-                select(MatchupStat).where(
-                    MatchupStat.patch == patch,
-                    MatchupStat.queue_id == queue_id,
-                    MatchupStat.rank_bracket == bracket,
-                    MatchupStat.champion_id == champion_id,
-                    MatchupStat.team_position == position,
-                    MatchupStat.games >= min_games,
+                select(ChampionStat.patch, ChampionStat.wins, ChampionStat.games).where(
+                    ChampionStat.patch.in_(pool),
+                    ChampionStat.queue_id == queue_id,
+                    ChampionStat.rank_bracket == bracket,
+                    ChampionStat.champion_id == champion_id,
+                    ChampionStat.team_position == position,
+                    ChampionStat.games > 0,
                 )
             )
-        ).scalars()
-    )
-    by_scope: dict[str, list[PairEntry]] = defaultdict(list)
-    for row in matchup_rows:
-        by_scope[row.scope].append(
-            _pair_entry(
-                row.enemy_champion_id, row.games, row.wins, sd,
-                avg_laning_score=row.avg_laning_score,
-                avg_gold_diff_14=row.avg_gold_diff_14,
-                timeline_games=row.timeline_games,
+        ).all()
+    }
+    matchup_rows = (
+        await db.execute(
+            select(
+                MatchupStat.scope,
+                MatchupStat.enemy_champion_id,
+                MatchupStat.patch,
+                MatchupStat.wins,
+                MatchupStat.games,
+                MatchupStat.timeline_games,
+                MatchupStat.avg_laning_score,
+                MatchupStat.avg_gold_diff_14,
+            ).where(
+                MatchupStat.patch.in_(pool),
+                MatchupStat.queue_id == queue_id,
+                MatchupStat.rank_bracket == bracket,
+                MatchupStat.champion_id == champion_id,
+                MatchupStat.team_position == position,
             )
         )
-    # Worst first, because "weak against" is the question people come here
-    # with, and by the middle of the range the sample supports, which is the
-    # record pulled toward 50% by about four games. The bottom of the range
-    # rewarded thin samples: on the live Jinx page Viktor at 3-3 was the 4th
-    # hardest lane and Samira at 3-2 the 6th. The top of the range, tried next,
-    # rewarded big ones: Yunara at 10-9 (52.6%) came 2nd hardest, only because
-    # its range was the narrowest.
-    for rows_ in by_scope.values():
-        rows_.sort(key=lambda p: (p.confidence_win_rate + p.confidence_high, -p.games))
+    ).all()
+    by_scope: dict[str, list] = defaultdict(list)
+    for scope, enemy, p, wins, games, timelines, pair_laning, pair_gold in matchup_rows:
+        by_scope[scope].append((enemy, position, p, wins, games, timelines, pair_laning, pair_gold))
+    lane = _read_pairs(by_scope["LANE"], own, champion_id, position, LANE_STRENGTH, min_games, sd)
+    team = _read_pairs(by_scope["TEAM"], own, champion_id, position, TEAM_STRENGTH, min_games, sd)
+    # Hardest first: "weak against" is the question people come here with.
+    for rows_ in (lane, team):
+        rows_.sort(key=lambda e: (e.lift, -e.games))
 
-    synergy_rows = list(
-        (
-            await db.execute(
-                select(SynergyStat).where(
-                    SynergyStat.patch == patch,
-                    SynergyStat.queue_id == queue_id,
-                    SynergyStat.rank_bracket == bracket,
-                    SynergyStat.champion_id == champion_id,
-                    SynergyStat.team_position == position,
-                    SynergyStat.games >= min_games,
-                )
+    synergy_rows = (
+        await db.execute(
+            select(
+                SynergyStat.ally_champion_id,
+                SynergyStat.ally_position,
+                SynergyStat.patch,
+                SynergyStat.wins,
+                SynergyStat.games,
+            ).where(
+                SynergyStat.patch.in_(pool),
+                SynergyStat.queue_id == queue_id,
+                SynergyStat.rank_bracket == bracket,
+                SynergyStat.champion_id == champion_id,
+                SynergyStat.team_position == position,
             )
-        ).scalars()
+        )
+    ).all()
+    synergies = _read_pairs(
+        [(ally, ally_position, p, wins, games, 0, None, None) for ally, ally_position, p, wins, games in synergy_rows],
+        own, champion_id, position, ALLY_STRENGTH, min_games, sd, ally=True,
     )
-    synergies = [
-        _pair_entry(r.ally_champion_id, r.games, r.wins, sd, position=r.ally_position)
-        for r in synergy_rows
-    ]
-    # Best first: synergy is a question about who to pair with, not avoid.
-    synergies.sort(key=lambda p: p.confidence_win_rate, reverse=True)
+    # Best first: an ally is a question about who to pair with, not avoid.
+    synergies.sort(key=lambda e: (-e.lift, -e.games))
 
     mix = await cached_lobby_rank_mix(db, patch, queue_id, bracket)
 
@@ -817,10 +965,7 @@ async def get_champion(
         skills=skills,
         laning=laning,
         spells=entries("spells"),
-        counters=CounterSection(
-            lane=by_scope.get("LANE", []),
-            team=by_scope.get("TEAM", []),
-        ),
+        counters=CounterSection(lane=lane, team=team),
         synergies=synergies,
     )
 
@@ -910,14 +1055,34 @@ async def get_champion_players(champion: str, db: DbDep, sd: StaticDep) -> Champ
             )
             .group_by(MatchParticipant.puuid)
             .having(games >= PLAYER_MIN_GAMES, scored >= PLAYER_MIN_SCORED)
-            # Ties on score go to the bigger sample.
-            .order_by(score.desc(), games.desc())
         )
     ).all()
-    result = ChampionPlayers(champion_id=champion_id, qualified=len(rows))
+    mean = (
+        await db.execute(
+            select(func.avg(MatchParticipant.performance_score))
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(
+                MatchParticipant.champion_id == champion_id,
+                MatchParticipant.team_position.in_(POSITIONS),
+                Match.is_remake.is_(False),
+            )
+        )
+    ).scalar()
+    champion_score = float(mean) if mean is not None else None
+    result = ChampionPlayers(
+        champion_id=champion_id, qualified=len(rows), champion_score=champion_score
+    )
     if len(rows) < PLAYER_MIN_ROWS:
         return result
-    top = rows[:PLAYER_LIMIT]
+
+    def ranked(row) -> float:
+        centre = champion_score if champion_score is not None else float(row.score)
+        return (float(row.score) * row.scored + PLAYER_SCORE_STRENGTH * centre) / (
+            row.scored + PLAYER_SCORE_STRENGTH
+        )
+
+    # Ties go to the bigger sample.
+    top = sorted(rows, key=lambda r: (ranked(r), r.games), reverse=True)[:PLAYER_LIMIT]
     puuids = [r.puuid for r in top]
 
     # Name and shard from each player's latest stored game on any champion:
@@ -964,6 +1129,7 @@ async def get_champion_players(champion: str, db: DbDep, sd: StaticDep) -> Champ
                 win_rate=(row.wins or 0) / row.games,
                 avg_score=float(row.score),
                 scored_games=row.scored,
+                ranked_score=ranked(row),
                 tier=rank.tier if rank else None,
                 division=rank.division if rank else None,
                 league_points=rank.league_points if rank else None,

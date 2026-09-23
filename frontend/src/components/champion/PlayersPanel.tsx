@@ -35,10 +35,14 @@ export default function PlayersPanel({ board, championName }: { board: ChampionP
     <section className="max-w-4xl">
       <div className="mb-2">
         <h3 className="display text-base font-600 text-ink">Best {championName} players</h3>
-        <p className="mt-0.5 text-xs leading-relaxed text-ink-faint">
-          Ranked by average Riftline score over every game we hold, not the patch above.{' '}
-          {board.qualified} {board.qualified === 1 ? 'player qualifies' : 'players qualify'} with{' '}
-          {board.min_games} or more games, {board.min_scored} of them scored.
+        <p className="mt-0.5 max-w-prose text-xs leading-relaxed text-ink-faint">
+          Ranked by average Riftline score over every game we hold, not the patch above,
+          pulled toward {championName}&apos;s average
+          {board.champion_score !== null && ` of ${board.champion_score.toFixed(1)}`} by{' '}
+          {board.score_strength} games, so a few good games do not top a long record. The score
+          column is each player&apos;s own average. {board.qualified}{' '}
+          {board.qualified === 1 ? 'player qualifies' : 'players qualify'} with {board.min_games} or
+          more games, {board.min_scored} of them scored.
         </p>
       </div>
 

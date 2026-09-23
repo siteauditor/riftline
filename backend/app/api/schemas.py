@@ -118,7 +118,15 @@ class SpellRef(BaseModel):
 
 class RuneRef(BaseModel):
     id: int | None = None
+    # Riot's name, so a page can say which rune an icon is; icons alone left a
+    # rune page as eleven unlabelled pictures.
+    name: str | None = None
     icon_url: str | None = None
+
+
+def rune_ref(rune_id: int, sd: StaticDataService) -> RuneRef:
+    """A rune, tree or stat shard with its name and icon."""
+    return RuneRef(id=rune_id, name=sd.rune_name(rune_id), icon_url=sd.rune_icon(rune_id))
 
 
 class RankInfo(BaseModel):
@@ -1082,6 +1090,7 @@ def _keystone_art(perks: dict | None, sd: StaticDataService) -> RuneRef | None:
     rune = _keystone(perks)
     if rune and rune.id:
         rune.icon_url = sd.rune_icon(rune.id)
+        rune.name = sd.rune_name(rune.id)
     return rune
 
 
@@ -1163,9 +1172,11 @@ def to_match_summary(
     keystone = _keystone(me.perks)
     if keystone and keystone.id:
         keystone.icon_url = sd.rune_icon(keystone.id)
+        keystone.name = sd.rune_name(keystone.id)
     secondary = _secondary_tree(me.perks)
     if secondary and secondary.id:
         secondary.icon_url = sd.rune_icon(secondary.id)
+        secondary.name = sd.rune_name(secondary.id)
 
     by_team: dict[int, list[ParticipantBrief]] = {}
     # Participants arrive in Riot's participantId order (see the relationship's
@@ -1569,18 +1580,9 @@ def to_live_game(game, sd: StaticDataService, queue_name: str) -> LiveGameOut:
                     for s in (p.spell1_id, p.spell2_id)
                     if s
                 ],
-                keystone=(
-                    RuneRef(id=p.keystone_id, icon_url=sd.rune_icon(p.keystone_id))
-                    if p.keystone_id
-                    else None
-                ),
+                keystone=rune_ref(p.keystone_id, sd) if p.keystone_id else None,
                 secondary_tree=(
-                    RuneRef(
-                        id=p.secondary_style_id,
-                        icon_url=sd.rune_icon(p.secondary_style_id),
-                    )
-                    if p.secondary_style_id
-                    else None
+                    rune_ref(p.secondary_style_id, sd) if p.secondary_style_id else None
                 ),
                 profile_icon_url=sd.profile_icon(p.profile_icon_id),
                 rank=to_rank_info(p.rank) if p.rank else None,

@@ -584,8 +584,9 @@ def delta(row, slot: int) -> float:
 
 async def test_an_item_is_scored_against_the_same_champions_other_items_in_its_slot():
     """Twenty players take A second and win fifteen; twenty take B second and
-    win five. Same champion, same slot, same first item: A is +25 points and B
-    is -25 against the champion's 2nd items, which win half the time."""
+    win five. Same champion, same slot, same first item: against the other
+    items the champion took second, A is +50 points (15 of 20 against B's 5 of
+    20) and B is -50. Counting an item's own buys in its baseline halved both."""
     patch = "I1.00"
     champion = 9601
     players = (
@@ -596,9 +597,9 @@ async def test_an_item_is_scored_against_the_same_champions_other_items_in_its_s
     items, _ = await rebuilt(patch)
 
     assert items[LEGENDARY_A].slot_games == [0, 20, 0, 0]
-    assert delta(items[LEGENDARY_A], 2) == pytest.approx(0.25)
-    assert delta(items[LEGENDARY_B], 2) == pytest.approx(-0.25)
-    # Everyone's first item: it is the baseline, so it is measured as even.
+    assert delta(items[LEGENDARY_A], 2) == pytest.approx(0.5)
+    assert delta(items[LEGENDARY_B], 2) == pytest.approx(-0.5)
+    # Everyone's first item: nothing else was bought first, so it is even.
     assert delta(items[LEGENDARY_C], 1) == pytest.approx(0.0)
 
 
