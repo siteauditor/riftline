@@ -1,0 +1,96 @@
+# Umami: the box's web analytics, self-hosted, as its own compose project.
+#
+# Installed at /root/umami on the VPS (copy this file and a filled-in .env
+# there; see docs/deploy.md, "Analytics"). It is box-level infrastructure
+# like the edge proxy rather than part of Riftline: one instance can count
+# every site here, and Riftline only carries the script tag. The pattern is
+# Riftline's own: no published ports, a `caddy` label for the hostname, and
+# the edge network the proxy reads labels from.
+#
+# Two settings matter for honest numbers. The tracker is served under a name
+# of our own (`insight.js`, collecting to /api/insight) rather than Umami's
+# default `script.js` and /api/send, which the common ad-blocker lists match;
+# and telemetry back to the Umami project is off.
+
+services:
+  umami:
+    # The Docker Hub copy of the official image. The box holds a stale
+    # ghcr.io login, and with one in place the daemon answers "denied" even
+    # for a public ghcr image (measured 2026-09-23); Docker Hub has no such
+    # login and pulls fine.
+    image: umamisoftware/umami:postgresql-latest
+    container_name: umami
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://umami:${POSTGRES_PASSWORD}@db:5432/umami
+      DATABASE_TYPE: postgresql
+      APP_SECRET: ${APP_SECRET}
+      TRACKER_SCRIPT_NAME: insight.js
+      COLLECT_API_ENDPOINT: /api/insight
+      DISABLE_TELEMETRY: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [default, edge]
+    labels:
+      caddy: stats.rhasta.space
+      caddy.reverse_proxy: '{{upstreams 3000}}'
+      caddy.encode: zstd gzip
+      caddy.header.Strict-Transport-Security: '"max-age=31536000; includeSubDomains"'
+      caddy.header.X-Content-Type-Options: nosniff
+      caddy.header.Referrer-Policy: strict-origin-when-cross-origin
+    healthcheck:
+      # Node's own fetch: the image has no curl.
+      test: ["CMD", "node", "-e",
+             "fetch('http://127.0.0.1:3000/api/heartbeat').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # The first start runs the database migrations.
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    container_name: umami-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_USER: umami
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - umami_db:/var/lib/postgresql/data
+    networks: [default]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umami -d umami"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+networks:
+  default:
+    name: umami_default
+  edge:
+    external: true
+    name: edge_default
+
+volumes:
+  umami_db:
+    name: umami_db

@@ -410,6 +410,42 @@ for players with ten scored games and a known Riot ID, and are rendered
 with `?source=stored`, so the prerender never spends the Riot key however
 many players it lists; their number grows with the players people look up.
 
+## Analytics
+
+Umami, self-hosted, at `https://stats.rhasta.space`: page views, referrers,
+countries and devices for every page, with no cookies and no personal
+identifiers, so no consent banner and nothing sent to a third party. It is
+box-level infrastructure like the edge proxy, not part of Riftline's deploy:
+one instance can count every site here, and Riftline only carries the
+script tag.
+
+- **Where it runs.** `/root/umami`, a compose project of two containers
+  (`umami`, `umami-db`), from `deploy/umami/docker-compose.yml` in this
+  repository plus a `.env` generated on the server. The database lives in
+  the `umami_db` volume. It went in on 2026-09-23.
+- **Getting in.** User `admin`; the password is in `/root/umami/.admin-password`
+  (root only). The default `umami` password was replaced through the API at
+  install, before the hostname was public.
+- **The tag.** The site's website id is in `/root/umami/website-id` and in
+  `frontend/index.html`. The tracker is served as `/insight.js` and collects
+  to `/api/insight`, not Umami's default names, because the common
+  ad-blocker lists match those; `data-domains` limits counting to the www
+  host, so local development and the redirect names count nothing, and
+  `data-exclude-search` drops query strings, so a profile's queue filter or a
+  champion's tab is not a separate page. Route changes inside the app are
+  counted as page views by the tracker itself.
+- **Updating.** `ssh MyVPS 'cd /root/umami && docker compose pull && docker
+  compose up -d'`; migrations run on start. The image is the Docker Hub copy
+  (`umamisoftware/umami`) because the box's stale `ghcr.io` login makes the
+  daemon refuse public ghcr images.
+- **Backup.** `ssh MyVPS 'docker exec umami-db pg_dump -U umami umami' >
+  umami.sql` takes the whole history; nothing is scheduled.
+
+```bash
+curl -s https://stats.rhasta.space/api/heartbeat        # ok
+ssh MyVPS 'cd /root/umami && docker compose ps'
+```
+
 ## Operating notes
 
 - **One API worker, on purpose.** The workload is IO-bound against Riot and
