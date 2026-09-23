@@ -95,8 +95,14 @@ class MetaResponse(BaseModel):
     lobby_ranks: LobbyRanksOut | None = None
 
 
+class CorpusSliceOut(BaseModel):
+    patch: str
+    queue_id: int
+    matches: int
+
+
 class CorpusResponse(BaseModel):
-    slices: list[dict]
+    slices: list[CorpusSliceOut]
     brackets: list[str] = Field(default_factory=list)
     total_matches: int
     # Epoch ms. The newest game held and when the last one was stored. The home

@@ -17,7 +17,7 @@ export type BandId = 'core' | 'middle' | 'tail' | 'unplayed'
 export interface PoolChampion {
   id: number
   name: string
-  slug?: string
+  slug?: string | null
   iconUrl: string | null
   tags: string[]
   level: number

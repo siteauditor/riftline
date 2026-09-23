@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 interface ItemLike {
   id: number | null
   name: string | null
-  slug?: string
+  slug?: string | null
   icon_url: string | null
 }
 

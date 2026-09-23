@@ -76,6 +76,19 @@ jobs:
       - name: Frontend tests
         run: docker run --rm riftline-web:ci pnpm test
 
+      # The frontend compiles against types generated from the API's OpenAPI
+      # document. Both the document and the types are committed; here they
+      # are made again from the code in this commit, so a backend change that
+      # was not followed by `python -m scripts.openapi` and `pnpm api:types`
+      # fails here instead of reaching a page as `undefined`.
+      - name: API schema and generated types are current
+        run: |
+          docker run --rm -e RIOT_API_KEY=RGAPI-ci-placeholder riftline-api:ci \
+            python -m scripts.openapi /dev/stdout > /tmp/openapi.json
+          diff -u frontend/openapi.json /tmp/openapi.json
+          docker run --rm riftline-web:ci sh -c \
+            'node scripts/api-types.mjs --out /tmp/gen.d.ts >/dev/null && diff -u src/lib/api.gen.d.ts /tmp/gen.d.ts'
+
       # Googlebot reads only the first 2 MB of a file, silently. The bundle is
       # a third of that today; this is the fence before it grows there.
       - name: Bundle size budget

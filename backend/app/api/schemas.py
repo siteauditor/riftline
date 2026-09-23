@@ -11,7 +11,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -75,6 +75,13 @@ QUEUE_LABELS = {
     "RANKED_FLEX_SR": "Ranked Flex",
     "RANKED_FLEX_TT": "Ranked Flex 3v3",
 }
+
+
+# Fixed vocabularies, spelled as types so the OpenAPI document, and the
+# frontend types generated from it, carry the words rather than "string".
+LaneLabel = Literal["won_big", "won", "even", "lost", "lost_big"]
+RecordBasis = Literal["role", "lane", "lane_pooled", "team"]
+RankState = Literal["ranked", "unranked", "hidden", "bot", "unknown"]
 
 
 class ChampionRef(BaseModel):
@@ -271,9 +278,9 @@ class MatchSummary(BaseModel):
     # demand would double the cost of the most common action in the product.
     laning_score: float | None = None
     laning_opponent: ChampionRef | None = None
-    # won_big, won, even, lost or lost_big, by the lane's distance from even
-    # against the role's spread. Null with no timeline or a thin role.
-    laning_label: str | None = None
+    # By the lane's distance from even against the role's spread. Null with
+    # no timeline or a thin role.
+    laning_label: LaneLabel | None = None
     gold_diff_14: int | None = None
     cs_diff_14: int | None = None
 
@@ -326,7 +333,7 @@ class ScoreboardPlayer(BaseModel):
     champ_level: int = 0
     # The lane at minute 14, as on the match row, and its label.
     laning_score: float | None = None
-    laning_label: str | None = None
+    laning_label: LaneLabel | None = None
 
     kills: int = 0
     deaths: int = 0
@@ -375,6 +382,14 @@ class TeamObjectives(BaseModel):
     bans: list[ChampionRef] = Field(default_factory=list)
 
 
+
+class PublishedComponentOut(BaseModel):
+    """One of the things the score is made of, as the method page lists them."""
+
+    id: str
+    label: str
+    measures: str
+
 class ScoreModelOut(BaseModel):
     """How the Riftline score is computed, published with every scoreboard.
 
@@ -384,7 +399,7 @@ class ScoreModelOut(BaseModel):
     """
 
     version: int
-    components: list[dict]
+    components: list[PublishedComponentOut]
     weights: dict[str, dict[str, float]]
     samples: dict[str, int] = Field(default_factory=dict)
     note: str
@@ -483,7 +498,7 @@ class CorpusRecordOut(BaseModel):
     win_rate: float
     gold_diff_14: float | None = None
     timeline_games: int = 0
-    basis: str = "lane"
+    basis: RecordBasis = "lane"
     patches: list[str] = Field(default_factory=list)
 
 
@@ -557,7 +572,7 @@ class LiveParticipantOut(BaseModel):
     ``unranked``.
     """
 
-    state: str
+    state: RankState
     puuid: str | None = None
     riot_id: str | None = None
     champion: ChampionRef
@@ -817,11 +832,23 @@ class LiveGameResponse(BaseModel):
     checked_at: int
 
 
+class RateWindowOut(BaseModel):
+    used: int
+    limit: int
+    period: float
+
+
+class RateLimitOut(BaseModel):
+    app: list[RateWindowOut] = Field(default_factory=list)
+    methods_tracked: int = 0
+    penalties: dict[str, float] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     riot_key_configured: bool
     static_data_version: str | None = None
-    rate_limit: dict = Field(default_factory=dict)
+    rate_limit: RateLimitOut = Field(default_factory=RateLimitOut)
     spectator_enabled: bool = True
 
 

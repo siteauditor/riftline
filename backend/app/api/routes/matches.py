@@ -135,6 +135,11 @@ class PlayerStoryOut(BaseModel):
     takedown_list: list[TakedownOut] = Field(default_factory=list)
 
 
+class StoryPhaseOut(BaseModel):
+    label: str
+    accuracy: float
+
+
 class StoryModelOut(BaseModel):
     version: int
     published: bool
@@ -143,7 +148,7 @@ class StoryModelOut(BaseModel):
     trained_games: int = 0
     trained_queue: int = TRAIN_QUEUE
     accuracy: float | None = None
-    phases: list[dict] = Field(default_factory=list)
+    phases: list[StoryPhaseOut] = Field(default_factory=list)
 
 
 class GameStoryResponse(BaseModel):

@@ -26,6 +26,7 @@ pnpm dev        # :5173, proxies /api to 127.0.0.1:8000
 pnpm build      # tsc -b, then the browser bundle and the server bundle: this is the type check
 pnpm lint       # oxlint
 pnpm test       # vitest: the lib and component tests, jsdom, no network
+pnpm api:types  # src/lib/api.gen.d.ts from openapi.json (written by `python -m scripts.openapi ../frontend/openapi.json` in backend/)
 pnpm prerender --api http://127.0.0.1:8000 --out /tmp/pages --build-id local   # every page as HTML, from a running API
 node prerender/serve.mjs --pages /tmp/pages/local                             # serve them in nginx's try_files order
 ```
@@ -58,7 +59,7 @@ The whole suite shares **one database**. A test that inserts rows needs ids no o
 
 ### Frontend
 
-`src/lib/api.ts` is the typed client and its response types, kept in step with `backend/app/api/schemas.py` by hand. It fetches relative `/api/...` paths, which the Vite dev server and the production nginx (`frontend/nginx.conf`) both proxy, so there is no CORS. Routes live in `src/routes.tsx`, shared by the browser entry (`src/main.tsx`) and the prerender entry (`src/entry-server.tsx`).
+`src/lib/api.ts` is the typed client. Its response types are aliases of `src/lib/api.gen.d.ts`, generated from the API's OpenAPI document: after any change to a response model, run `python -m scripts.openapi ../frontend/openapi.json` in `backend/` and `pnpm api:types` in `frontend/`, and commit both files; CI regenerates them and fails on a difference. A response field must therefore have a real type on the backend (a model, or a `Literal` for a fixed vocabulary), never `dict` or `Any`, or the page compiles against `unknown`. The client fetches relative `/api/...` paths, which the Vite dev server and the production nginx (`frontend/nginx.conf`) both proxy, so there is no CORS. Routes live in `src/routes.tsx`, shared by the browser entry (`src/main.tsx`) and the prerender entry (`src/entry-server.tsx`).
 
 **Every page is prerendered.** `prerender/run.mjs` renders each path in `GET /api/meta/pages` to a file nginx serves; the shell is `noindex`, so a URL is indexable exactly when it has a prerendered file (`app/services/seo.py` decides which, on the site's sample floors). A route that is prerendered declares the queries it reads in its `handle.prefetch` using the definitions in `src/lib/queries.ts`, and its component must read them through the same definitions, or the page hydrates with an empty cache and fetches everything again. Every route renders `<Head>` (`src/lib/seo.ts`) for its title, description and canonical; the prerenderer writes those tags and the client updates them in place. Anything that reads `Date.now()`, the timezone or the browser locale in render goes through `src/lib/clock.ts` (`useNow`, `useLocalOffsetHours`, `components/TimeAgo.tsx`) or a pinned locale (`toLocaleString('en-US')`, `shortDate`), or the hydrated text mismatches the HTML. Champions and items are addressed by slug (`/champions/aatrox`); ids still resolve and redirect. Profiles are prerendered from storage only (`?source=stored` on the summoner routes, `queries.*Stored`), for players with ten scored games and a known Riot ID; the page shows the stored answers as placeholder data and its live queries replace them.
 

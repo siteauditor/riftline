@@ -10,6 +10,7 @@
     "prerender": "node prerender/run.mjs",
     "lint": "oxlint",
     "test": "vitest run",
+    "api:types": "node scripts/api-types.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.1.1",
+    "openapi-typescript": "^7.13.0",
     "oxc-transform-react": "^0.151.0",
     "oxlint": "^1.81.0",
     "tailwindcss": "^4.3.3",

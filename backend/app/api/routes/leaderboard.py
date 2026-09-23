@@ -76,9 +76,19 @@ class LeaderboardResponse(BaseModel):
     rows: list[LeaderboardRow] = Field(default_factory=list)
 
 
+class PlatformOptionOut(BaseModel):
+    id: str
+    label: str
+
+
+class QueueOptionOut(BaseModel):
+    id: int
+    label: str
+
+
 class LeaderboardSlices(BaseModel):
-    platforms: list[dict]
-    queues: list[dict]
+    platforms: list[PlatformOptionOut]
+    queues: list[QueueOptionOut]
     tiers: list[str]
     divisions: list[str]
     apex_tiers: list[str]
