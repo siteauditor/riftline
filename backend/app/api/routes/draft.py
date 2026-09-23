@@ -23,14 +23,13 @@ from app.services.aggregate import (
     default_patch,
 )
 from app.services.draft import (
-    ALLY_SHRINKAGE,
     COMFORT_MAX_BONUS,
     CONTEXT_LIFT_CAP,
-    MATCHUP_SHRINKAGE,
-    TEAM_SHRINKAGE,
     DraftAdvisor,
     DraftContext,
+    Evidence,
 )
+from app.services.evidence import ALLY_STRENGTH, LANE_STRENGTH, TEAM_STRENGTH
 from app.services.players import PlayerNotFound, PlayerService
 
 log = logging.getLogger(__name__)
@@ -116,50 +115,73 @@ class DraftRequest(BaseModel):
 
 
 class EvidenceOut(BaseModel):
-    """One record behind a suggestion, with the sample it rests on."""
+    """One record about a pick, with the sample it rests on and how it was read."""
 
-    # "lane", "enemy" or "ally".
-    kind: str
+    # "lane": against the laner, and the only kind that moves the ranking.
+    # "enemy": against another enemy pick anywhere on the map. "ally": beside an
+    # ally (on a suggestion) or against one (on a ban candidate).
+    kind: Literal["lane", "enemy", "ally"]
     champion: ChampionRef
     games: int
     wins: int
     win_rate: float
-    # What the record claims, and the part its own sample supports. The list is
-    # ranked on the second one.
+    # The champion's own rate over the same patches: what the record is read against.
+    own_rate: float
+    # The posterior deviation from `own_rate`, in win-rate points as a fraction.
     lift: float
-    credible_lift: float
+    call: Literal["favoured", "unfavoured", "level"]
+    scored: bool
+    patches: list[str] = Field(default_factory=list)
     # Lane only, and only once enough of those games have a timeline.
     gold_diff_14: float | None = None
     laning_score: float | None = None
     timeline_games: int = 0
+    # Kept for one release: pages loaded before this model read it.
+    credible_lift: float = 0.0
 
 
 class SuggestionOut(BaseModel):
     champion: ChampionRef
-    # Baseline plus what the board supports plus comfort: the sort key.
-    score: float
-    base_win_rate: float
-    # Baseline plus everything the records claim, uncapped: "if they hold".
-    adjusted_win_rate: float
     games: int
-    matchup_win_rate: float | None = None
-    matchup_games: int = 0
-    mastery_points: int = 0
-    comfort: float = 0.0
-    # The two parts of the score that are not the baseline.
+    wins: int
+    # The champion's own rate in this role on the patch.
+    win_rate: float
+    # Its Wilson range, shifted by what the scored records support.
+    range_low: float
+    range_high: float
+    # Own rate plus that shift: the pick's win rate on this board.
+    expected: float
+    # What the list is ranked by: the low end plus comfort.
+    rank_score: float
     context_lift: float = 0.0
+    mastery_points: int = 0
+    last_played_days: int | None = None
+    comfort: float = 0.0
     comfort_bonus: float = 0.0
     evidence: list[EvidenceOut] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    # Kept for one release, for pages loaded before this model.
+    score: float = 0.0
+    base_win_rate: float = 0.0
+    adjusted_win_rate: float = 0.0
+    matchup_win_rate: float | None = None
+    matchup_games: int = 0
 
 
 class BanCandidateOut(BaseModel):
     champion: ChampionRef
     position: str
-    base_win_rate: float
     games: int
-    score: float
+    wins: int
+    win_rate: float
+    range_low: float
+    range_high: float
+    # Records against the champions your team has locked in: shown, not scored.
+    evidence: list[EvidenceOut] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    # Kept for one release.
+    base_win_rate: float = 0.0
+    score: float = 0.0
 
 
 class PersonalisationOut(BaseModel):
@@ -181,18 +203,27 @@ class PersonalisationOut(BaseModel):
 
 
 class DraftModelOut(BaseModel):
-    """The constants behind the score, so the page can state them."""
+    """The constants behind the ranking, so the page can state them."""
 
     comfort_weight: float
     comfort_max_bonus: float
+    # The prior's weight in games, by kind of record: a record of this many
+    # games counts for half. Only lane records are scored.
+    lane_strength: float
+    team_strength: float
+    ally_strength: float
+    context_lift_cap: float
+    # Kept for one release: the same strengths under their old names.
     lane_shrinkage: float
     team_shrinkage: float
     ally_shrinkage: float
-    context_lift_cap: float
 
 
 class DraftResponse(BaseModel):
     patch: str
+    # Every patch a record may come from: the patch, and the one before it when
+    # it is close enough to describe the same game.
+    patches: list[str] = Field(default_factory=list)
     position: str
     enemy_laner: ChampionRef | None = None
     allies: list[ChampionRef] = Field(default_factory=list)
@@ -400,55 +431,75 @@ async def suggest(
             icon_url=sd.champion_icon(champion_id),
         )
 
+    def evidence(e: Evidence) -> EvidenceOut:
+        return EvidenceOut(
+            kind=e.kind,
+            champion=champion(e.champion_id),
+            games=e.games,
+            wins=e.wins,
+            win_rate=e.win_rate,
+            own_rate=e.own_rate,
+            lift=e.lift,
+            call=e.call,
+            scored=e.scored,
+            patches=list(e.patches),
+            gold_diff_14=e.gold_diff_14,
+            laning_score=e.laning_score,
+            timeline_games=e.timeline_games,
+            credible_lift=e.lift if e.scored else 0.0,
+        )
+
+    def suggestion(s) -> SuggestionOut:
+        lane = next((e for e in s.evidence if e.kind == "lane"), None)
+        return SuggestionOut(
+            champion=champion(s.champion_id),
+            games=s.games,
+            wins=s.wins,
+            win_rate=s.win_rate,
+            range_low=s.range_low,
+            range_high=s.range_high,
+            expected=s.expected,
+            rank_score=s.rank_score,
+            context_lift=s.context_lift,
+            mastery_points=s.mastery_points,
+            last_played_days=s.last_played_days,
+            comfort=s.comfort,
+            comfort_bonus=s.comfort_bonus,
+            evidence=[evidence(e) for e in s.evidence],
+            reasons=s.reasons,
+            score=s.rank_score,
+            base_win_rate=s.base_low,
+            adjusted_win_rate=s.expected,
+            matchup_win_rate=lane.win_rate if lane else None,
+            matchup_games=lane.games if lane else 0,
+        )
+
     return DraftResponse(
         patch=patch,
+        patches=list(await advisor.pool(ctx)),
         position=position,
         enemy_laner=champion(body.enemy_laner) if body.enemy_laner else None,
         allies=[champion(c) for c in dict.fromkeys(body.allies)],
         enemies=[champion(c) for c in dict.fromkeys(body.enemies)],
         personalised=puuid is not None,
         personalisation=personalisation,
-        suggestions=[
-            SuggestionOut(
-                champion=champion(s.champion_id),
-                score=s.score,
-                base_win_rate=s.base_win_rate,
-                adjusted_win_rate=s.adjusted_win_rate,
-                games=s.games,
-                matchup_win_rate=s.matchup_win_rate,
-                matchup_games=s.matchup_games,
-                mastery_points=s.mastery_points,
-                comfort=s.comfort,
-                context_lift=s.context_lift,
-                comfort_bonus=s.comfort_bonus,
-                evidence=[
-                    EvidenceOut(
-                        kind=e.kind,
-                        champion=champion(e.champion_id),
-                        games=e.games,
-                        wins=e.wins,
-                        win_rate=e.win_rate,
-                        lift=e.lift,
-                        credible_lift=e.credible_lift,
-                        gold_diff_14=e.gold_diff_14,
-                        laning_score=e.laning_score,
-                        timeline_games=e.timeline_games,
-                    )
-                    for e in s.evidence
-                ],
-                reasons=s.reasons,
-            )
-            for s in suggestions
-        ],
-        bans_read_the_draft=bool(body.allies),
+        suggestions=[suggestion(s) for s in suggestions],
+        # The ban list never reorders on the board's records (team scope, not
+        # scored); the records against your allies ride along for the page.
+        bans_read_the_draft=False,
         ban_candidates=[
             BanCandidateOut(
                 champion=champion(c.champion_id),
                 position=c.position,
-                base_win_rate=c.base_win_rate,
                 games=c.games,
-                score=c.score,
+                wins=c.wins,
+                win_rate=c.win_rate,
+                range_low=c.range_low,
+                range_high=c.range_high,
+                evidence=[evidence(e) for e in c.evidence],
                 reasons=c.reasons,
+                base_win_rate=c.range_low,
+                score=c.score,
             )
             for c in bans
         ],
@@ -458,9 +509,12 @@ async def suggest(
         model=DraftModelOut(
             comfort_weight=body.comfort_weight,
             comfort_max_bonus=COMFORT_MAX_BONUS,
-            lane_shrinkage=MATCHUP_SHRINKAGE,
-            team_shrinkage=TEAM_SHRINKAGE,
-            ally_shrinkage=ALLY_SHRINKAGE,
+            lane_strength=LANE_STRENGTH,
+            team_strength=TEAM_STRENGTH,
+            ally_strength=ALLY_STRENGTH,
             context_lift_cap=CONTEXT_LIFT_CAP,
+            lane_shrinkage=LANE_STRENGTH,
+            team_shrinkage=TEAM_STRENGTH,
+            ally_shrinkage=ALLY_STRENGTH,
         ),
     )

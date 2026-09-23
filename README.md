@@ -277,21 +277,30 @@ its identity, which is not a third missing at random, and a test keeps any
 game, so the idle state carries their last stored game, their form and what they
 have been playing rather than an empty box.
 
-**Draft suggestions are ranked by what the records support.** Every suggestion returns
-its baseline, every record behind it with its sample, and the mastery weighting. Each
-record is first shrunk toward the champion's own baseline in proportion to sample size,
-then gives up its own margin of error, and only the remainder counts toward the
-ranking: measured on 2026-09-21, a 10-2 lane record over twelve games was lifting a
-50.7% pick to 60.0% and putting it first, and now argues for about three points. The
-unrestrained figure is still returned as `adjusted_win_rate`, the honest "if that record
-holds" number.
+**Draft suggestions are ranked by what the records support, and only the records that
+measurably repeat are scored.** Each champion starts from its own win rate in the role,
+shown as the range its sample supports, and the list is ranked by the low end of that
+range, plus mastery, as the tier list ranks. A record then moves it by a posterior
+reading (`app/services/evidence.py`): the context's effect has a prior centred on zero
+worth `LANE_STRENGTH` games, each patch of the record is read against the champion's
+own rate on that patch, and wins and losses move a pick by the same amount. A record is
+called favoured or unfavoured only when that posterior is 90% on one side.
 
-The board is read whole. Besides the lane opponent (`MatchupStat`, scope LANE), the
-advisor reads each other enemy pick (scope TEAM, 1,838 champion pairs with ten or more
-games on 16.18 against 288 in lane) and each ally already locked in (`SynergyStat`).
-The whole board may move a pick by at most `CONTEXT_LIFT_CAP`, so nine records pulling
-one way cannot stack into a number no sample supports. The same scoring, read from the
-other side, ranks the champions worth banning.
+The strengths are measured, not chosen, and `python -m scripts.ingest draftpriors`
+measures them again. On 2026-09-24 a lane record's deviation from the champion's own
+rate repeated from 16.17 to 16.18 (r = +0.23 over 112 pairs with five or more games,
+which puts the prior between 10 and 146 games; 100 is used). Records against the other
+enemies and beside allies did not repeat at all (every interval spanning zero), so they
+are returned and shown with their samples but do not move the list. The old reading
+measured records against the champion's Wilson lower bound and gave a 2-0 lane record
+1.2 points: Ekko took the board's biggest boost from one 7-1 record over eight games.
+Over 150 boards rebuilt from stored games the new ranking keeps the same first pick
+three times in four. Lane records pool the patch before when it is close
+(`aggregate.poolable_patches`), which doubles the lane pairs with ten or more games.
+
+The Riot ID that weighs mastery costs nothing until it is committed, a 404 is
+remembered for ten minutes, and the lookup has a two-second budget after which the
+stored mastery is used; the response says which of those happened.
 
 ---
 

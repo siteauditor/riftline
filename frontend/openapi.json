@@ -2466,17 +2466,32 @@
       "type": "string",
       "title": "Position"
      },
-     "base_win_rate": {
-      "type": "number",
-      "title": "Base Win Rate"
-     },
      "games": {
       "type": "integer",
       "title": "Games"
      },
-     "score": {
+     "wins": {
+      "type": "integer",
+      "title": "Wins"
+     },
+     "win_rate": {
       "type": "number",
-      "title": "Score"
+      "title": "Win Rate"
+     },
+     "range_low": {
+      "type": "number",
+      "title": "Range Low"
+     },
+     "range_high": {
+      "type": "number",
+      "title": "Range High"
+     },
+     "evidence": {
+      "items": {
+       "$ref": "#/components/schemas/EvidenceOut"
+      },
+      "type": "array",
+      "title": "Evidence"
      },
      "reasons": {
       "items": {
@@ -2484,15 +2499,27 @@
       },
       "type": "array",
       "title": "Reasons"
+     },
+     "base_win_rate": {
+      "type": "number",
+      "title": "Base Win Rate",
+      "default": 0.0
+     },
+     "score": {
+      "type": "number",
+      "title": "Score",
+      "default": 0.0
      }
     },
     "type": "object",
     "required": [
      "champion",
      "position",
-     "base_win_rate",
      "games",
-     "score"
+     "wins",
+     "win_rate",
+     "range_low",
+     "range_high"
     ],
     "title": "BanCandidateOut"
    },
@@ -3932,6 +3959,22 @@
       "type": "number",
       "title": "Comfort Max Bonus"
      },
+     "lane_strength": {
+      "type": "number",
+      "title": "Lane Strength"
+     },
+     "team_strength": {
+      "type": "number",
+      "title": "Team Strength"
+     },
+     "ally_strength": {
+      "type": "number",
+      "title": "Ally Strength"
+     },
+     "context_lift_cap": {
+      "type": "number",
+      "title": "Context Lift Cap"
+     },
      "lane_shrinkage": {
       "type": "number",
       "title": "Lane Shrinkage"
@@ -3943,23 +3986,22 @@
      "ally_shrinkage": {
       "type": "number",
       "title": "Ally Shrinkage"
-     },
-     "context_lift_cap": {
-      "type": "number",
-      "title": "Context Lift Cap"
      }
     },
     "type": "object",
     "required": [
      "comfort_weight",
      "comfort_max_bonus",
+     "lane_strength",
+     "team_strength",
+     "ally_strength",
+     "context_lift_cap",
      "lane_shrinkage",
      "team_shrinkage",
-     "ally_shrinkage",
-     "context_lift_cap"
+     "ally_shrinkage"
     ],
     "title": "DraftModelOut",
-    "description": "The constants behind the score, so the page can state them."
+    "description": "The constants behind the ranking, so the page can state them."
    },
    "DraftRequest": {
     "properties": {
@@ -4099,6 +4141,13 @@
       "type": "string",
       "title": "Patch"
      },
+     "patches": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Patches"
+     },
      "position": {
       "type": "string",
       "title": "Position"
@@ -4194,6 +4243,11 @@
     "properties": {
      "kind": {
       "type": "string",
+      "enum": [
+       "lane",
+       "enemy",
+       "ally"
+      ],
       "title": "Kind"
      },
      "champion": {
@@ -4211,13 +4265,33 @@
       "type": "number",
       "title": "Win Rate"
      },
+     "own_rate": {
+      "type": "number",
+      "title": "Own Rate"
+     },
      "lift": {
       "type": "number",
       "title": "Lift"
      },
-     "credible_lift": {
-      "type": "number",
-      "title": "Credible Lift"
+     "call": {
+      "type": "string",
+      "enum": [
+       "favoured",
+       "unfavoured",
+       "level"
+      ],
+      "title": "Call"
+     },
+     "scored": {
+      "type": "boolean",
+      "title": "Scored"
+     },
+     "patches": {
+      "items": {
+       "type": "string"
+      },
+      "type": "array",
+      "title": "Patches"
      },
      "gold_diff_14": {
       "anyOf": [
@@ -4245,6 +4319,11 @@
       "type": "integer",
       "title": "Timeline Games",
       "default": 0
+     },
+     "credible_lift": {
+      "type": "number",
+      "title": "Credible Lift",
+      "default": 0.0
      }
     },
     "type": "object",
@@ -4254,11 +4333,13 @@
      "games",
      "wins",
      "win_rate",
+     "own_rate",
      "lift",
-     "credible_lift"
+     "call",
+     "scored"
     ],
     "title": "EvidenceOut",
-    "description": "One record behind a suggestion, with the sample it rests on."
+    "description": "One record about a pick, with the sample it rests on and how it was read."
    },
    "FacetEntry": {
     "properties": {
@@ -10540,51 +10621,58 @@
      "champion": {
       "$ref": "#/components/schemas/ChampionRef"
      },
-     "score": {
-      "type": "number",
-      "title": "Score"
-     },
-     "base_win_rate": {
-      "type": "number",
-      "title": "Base Win Rate"
-     },
-     "adjusted_win_rate": {
-      "type": "number",
-      "title": "Adjusted Win Rate"
-     },
      "games": {
       "type": "integer",
       "title": "Games"
      },
-     "matchup_win_rate": {
-      "anyOf": [
-       {
-        "type": "number"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "title": "Matchup Win Rate"
-     },
-     "matchup_games": {
+     "wins": {
       "type": "integer",
-      "title": "Matchup Games",
-      "default": 0
+      "title": "Wins"
+     },
+     "win_rate": {
+      "type": "number",
+      "title": "Win Rate"
+     },
+     "range_low": {
+      "type": "number",
+      "title": "Range Low"
+     },
+     "range_high": {
+      "type": "number",
+      "title": "Range High"
+     },
+     "expected": {
+      "type": "number",
+      "title": "Expected"
+     },
+     "rank_score": {
+      "type": "number",
+      "title": "Rank Score"
+     },
+     "context_lift": {
+      "type": "number",
+      "title": "Context Lift",
+      "default": 0.0
      },
      "mastery_points": {
       "type": "integer",
       "title": "Mastery Points",
       "default": 0
      },
+     "last_played_days": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Played Days"
+     },
      "comfort": {
       "type": "number",
       "title": "Comfort",
-      "default": 0.0
-     },
-     "context_lift": {
-      "type": "number",
-      "title": "Context Lift",
       "default": 0.0
      },
      "comfort_bonus": {
@@ -10605,15 +10693,49 @@
       },
       "type": "array",
       "title": "Reasons"
+     },
+     "score": {
+      "type": "number",
+      "title": "Score",
+      "default": 0.0
+     },
+     "base_win_rate": {
+      "type": "number",
+      "title": "Base Win Rate",
+      "default": 0.0
+     },
+     "adjusted_win_rate": {
+      "type": "number",
+      "title": "Adjusted Win Rate",
+      "default": 0.0
+     },
+     "matchup_win_rate": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Matchup Win Rate"
+     },
+     "matchup_games": {
+      "type": "integer",
+      "title": "Matchup Games",
+      "default": 0
      }
     },
     "type": "object",
     "required": [
      "champion",
-     "score",
-     "base_win_rate",
-     "adjusted_win_rate",
-     "games"
+     "games",
+     "wins",
+     "win_rate",
+     "range_low",
+     "range_high",
+     "expected",
+     "rank_score"
     ],
     "title": "SuggestionOut"
    },

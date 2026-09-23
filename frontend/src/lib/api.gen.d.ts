@@ -844,14 +844,30 @@ export interface components {
             champion: components["schemas"]["ChampionRef"];
             /** Position */
             position: string;
-            /** Base Win Rate */
-            base_win_rate: number;
             /** Games */
             games: number;
-            /** Score */
-            score: number;
+            /** Wins */
+            wins: number;
+            /** Win Rate */
+            win_rate: number;
+            /** Range Low */
+            range_low: number;
+            /** Range High */
+            range_high: number;
+            /** Evidence */
+            evidence: components["schemas"]["EvidenceOut"][];
             /** Reasons */
             reasons: string[];
+            /**
+             * Base Win Rate
+             * @default 0
+             */
+            base_win_rate: number;
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
         };
         /** BaseStat */
         BaseStat: {
@@ -1392,21 +1408,27 @@ export interface components {
         };
         /**
          * DraftModelOut
-         * @description The constants behind the score, so the page can state them.
+         * @description The constants behind the ranking, so the page can state them.
          */
         DraftModelOut: {
             /** Comfort Weight */
             comfort_weight: number;
             /** Comfort Max Bonus */
             comfort_max_bonus: number;
+            /** Lane Strength */
+            lane_strength: number;
+            /** Team Strength */
+            team_strength: number;
+            /** Ally Strength */
+            ally_strength: number;
+            /** Context Lift Cap */
+            context_lift_cap: number;
             /** Lane Shrinkage */
             lane_shrinkage: number;
             /** Team Shrinkage */
             team_shrinkage: number;
             /** Ally Shrinkage */
             ally_shrinkage: number;
-            /** Context Lift Cap */
-            context_lift_cap: number;
         };
         /** DraftRequest */
         DraftRequest: {
@@ -1465,6 +1487,8 @@ export interface components {
         DraftResponse: {
             /** Patch */
             patch: string;
+            /** Patches */
+            patches: string[];
             /** Position */
             position: string;
             enemy_laner: components["schemas"]["ChampionRef"] | null;
@@ -1500,11 +1524,14 @@ export interface components {
         };
         /**
          * EvidenceOut
-         * @description One record behind a suggestion, with the sample it rests on.
+         * @description One record about a pick, with the sample it rests on and how it was read.
          */
         EvidenceOut: {
-            /** Kind */
-            kind: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "lane" | "enemy" | "ally";
             champion: components["schemas"]["ChampionRef"];
             /** Games */
             games: number;
@@ -1512,10 +1539,19 @@ export interface components {
             wins: number;
             /** Win Rate */
             win_rate: number;
+            /** Own Rate */
+            own_rate: number;
             /** Lift */
             lift: number;
-            /** Credible Lift */
-            credible_lift: number;
+            /**
+             * Call
+             * @enum {string}
+             */
+            call: "favoured" | "unfavoured" | "level";
+            /** Scored */
+            scored: boolean;
+            /** Patches */
+            patches: string[];
             /** Gold Diff 14 */
             gold_diff_14: number | null;
             /** Laning Score */
@@ -1525,6 +1561,11 @@ export interface components {
              * @default 0
              */
             timeline_games: number;
+            /**
+             * Credible Lift
+             * @default 0
+             */
+            credible_lift: number;
         };
         /**
          * FacetEntry
@@ -4091,36 +4132,37 @@ export interface components {
         /** SuggestionOut */
         SuggestionOut: {
             champion: components["schemas"]["ChampionRef"];
-            /** Score */
-            score: number;
-            /** Base Win Rate */
-            base_win_rate: number;
-            /** Adjusted Win Rate */
-            adjusted_win_rate: number;
             /** Games */
             games: number;
-            /** Matchup Win Rate */
-            matchup_win_rate: number | null;
-            /**
-             * Matchup Games
-             * @default 0
-             */
-            matchup_games: number;
-            /**
-             * Mastery Points
-             * @default 0
-             */
-            mastery_points: number;
-            /**
-             * Comfort
-             * @default 0
-             */
-            comfort: number;
+            /** Wins */
+            wins: number;
+            /** Win Rate */
+            win_rate: number;
+            /** Range Low */
+            range_low: number;
+            /** Range High */
+            range_high: number;
+            /** Expected */
+            expected: number;
+            /** Rank Score */
+            rank_score: number;
             /**
              * Context Lift
              * @default 0
              */
             context_lift: number;
+            /**
+             * Mastery Points
+             * @default 0
+             */
+            mastery_points: number;
+            /** Last Played Days */
+            last_played_days: number | null;
+            /**
+             * Comfort
+             * @default 0
+             */
+            comfort: number;
             /**
              * Comfort Bonus
              * @default 0
@@ -4130,6 +4172,28 @@ export interface components {
             evidence: components["schemas"]["EvidenceOut"][];
             /** Reasons */
             reasons: string[];
+            /**
+             * Score
+             * @default 0
+             */
+            score: number;
+            /**
+             * Base Win Rate
+             * @default 0
+             */
+            base_win_rate: number;
+            /**
+             * Adjusted Win Rate
+             * @default 0
+             */
+            adjusted_win_rate: number;
+            /** Matchup Win Rate */
+            matchup_win_rate: number | null;
+            /**
+             * Matchup Games
+             * @default 0
+             */
+            matchup_games: number;
         };
         /** TakedownOut */
         TakedownOut: {

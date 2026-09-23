@@ -1,45 +1,41 @@
 """Draft suggestions.
 
 Given a role, what is already picked, and what is banned, rank the champions
-worth taking.
+worth taking, and show every record behind the ranking.
 
-The scoring is deliberately transparent and every component comes back in the
-response. A draft tool that answers "pick Malphite" with no reason is one nobody
-trusts on the third pick, so the baseline, every record behind an adjustment and
-the mastery weighting are all visible on the card.
+**Ranked on what the corpus supports.** Each champion starts from its own win
+rate in the role on the default patch, shown with its Wilson range, and the
+list is ordered by the low end of that range, as the tier list is, so a thin
+sample does not float to the top. The board then moves it by what the records
+support, read by `evidence.read_records`: a posterior with a measured prior,
+patch by patch against the champion's own rate, symmetric in wins and losses.
 
-**What the list is sorted by is what the evidence supports, not what it claims.**
-Measured on the live API on 2026-09-21: mid into Ahri put Yone first, lifting a
-50.7% baseline to 60.0% on a 10-2 record over twelve games. The tier list refuses
-to let a thin sample top a list; this used to do exactly that. Every record now
-gives up the part its own sample cannot support (``credible``), and the ranking
-adds only the remainder. The unrestrained figure stays in the response as
-``adjusted_win_rate``, which is the honest "if that record holds" number.
+**Only lane records move the ranking.** Measured 2026-09-24 (see `evidence`):
+a lane record's deviation repeats from one patch to the next, so lane matchups
+are real and measurable; enemy-team and ally records do not measurably repeat
+on this corpus. They are returned with their samples and their calls, so the
+page can show them, but they are not scored until `python -m scripts.ingest
+draftpriors` finds them repeating. Records pool the patch before the default
+one when it is close enough (`aggregate.poolable_patches`), which doubles the
+lane pairs with ten or more games (120 to 244 on 16.18).
 
-Four kinds of evidence, all local rollups, all reported with their samples:
+**Comfort is a preference, not evidence.** The player's mastery, weighted by how
+recently they played the champion, adds up to `COMFORT_MAX_BONUS` points at a
+weight of 1. It moves the ranking, and it is shown as its own figure beside the
+range rather than inside it.
 
-* **Base** -- how the champion performs in this role on this patch, as a Wilson
-  lower bound so thin samples do not float to the top.
-* **Lane** -- the head-to-head record against the enemy laner (``MatchupStat``,
-  scope LANE), with the gold lead at 14 minutes where timelines exist.
-* **The enemy team** -- the record against each other enemy pick (scope TEAM).
-  A champion can be fine in lane and hopeless into the composition, and only
-  this scope sees that. It is also where the data is: 1,838 champion pairs with
-  ten or more games on 16.18, against 288 in lane.
-* **Allies** -- how the champion does alongside each ally already locked in
-  (``SynergyStat``).
-
-and one preference, not evidence:
-
-* **Comfort** -- the player's own mastery. A 51% champion with 200k points beats
-  a 54% champion they have never played, and every draft tool that ignores this
-  gives advice people cannot execute.
+Before 2026-09-24 records were measured against the champion's Wilson lower
+bound and a margin sized on one proportion was subtracted from another: Ekko
+took +3.3 points from one 7-1 record over eight games while three records of
+8-13 counted nothing, and a 2-0 lane record moved Cassiopeia from fifth to
+fourth.
 """
 
 from __future__ import annotations
 
 import logging
-import math
+import time
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -47,32 +43,42 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ChampionMastery, ChampionStat, MatchupStat, SynergyStat
-from app.services.aggregate import ALL_BRACKETS, WILSON_Z, wilson_lower_bound
+from app.services.aggregate import (
+    ALL_BRACKETS,
+    aggregated_slices,
+    poolable_patches,
+    wilson_lower_bound,
+    wilson_upper_bound,
+)
+from app.services.evidence import (
+    ALLY_STRENGTH,
+    LANE_STRENGTH,
+    TEAM_STRENGTH,
+    Call,
+    RecordPart,
+    read_records,
+)
 
 log = logging.getLogger(__name__)
 
-# Games at which a record earns half its weight. Below this the estimate is
-# pulled toward the champion's own baseline. Lane records are the most direct
-# evidence there is, so they are shrunk least; a champion being somewhere on the
-# enemy side, or beside an ally, says less per game.
-MATCHUP_SHRINKAGE = 30.0
-TEAM_SHRINKAGE = 40.0
-ALLY_SHRINKAGE = 40.0
-
-# The most all the context put together may move a pick, in win-rate points.
-# Nine sources (one lane, four enemies, four allies) each pulling a few points
-# in the same direction would otherwise add up to a number no sample supports.
+# The most all the scored records together may move a pick, in win-rate points.
 CONTEXT_LIFT_CAP = 0.08
 
 # Mastery points that count as "fully comfortable".
 COMFORT_CEILING = 100_000.0
 
-# Win-rate points a fully comfortable champion can gain at comfort_weight 1.0.
-# Scored in the same units as win rate so the two are directly comparable: at
-# the default weight of 0.15 a maxed-out champion pool is worth +1.5pp, enough
-# to break a tie between similar picks without letting comfort outrank a
-# genuinely better champion.
+# Win-rate points a fully comfortable champion gains at a weight of 1.0. The
+# page offers up to 0.4, so at most 4 points: enough to break a tie between
+# similar picks without letting comfort outrank a genuinely better champion.
 COMFORT_MAX_BONUS = 0.10
+
+# Comfort fades with time since the champion was last played: full within a
+# month, half at six months, a quarter from a year on. Mastery points never
+# decay, and a champion untouched for two years counted as fully comfortable.
+# A judgement about a preference, stated as one, not a measurement.
+COMFORT_FULL_DAYS = 30
+COMFORT_HALF_DAYS = 180
+COMFORT_FLOOR_DAYS = 365
 
 # Below this many games with a timeline, a lane's gold lead at 14 is one stomp.
 MIN_TIMELINE_GAMES = 5
@@ -80,37 +86,9 @@ MIN_TIMELINE_GAMES = 5
 EvidenceKind = Literal["lane", "enemy", "ally"]
 
 
-def credible_lift(
-    observed: float, base: float, games: int, shrinkage: float
-) -> tuple[float, float]:
-    """What a record claims, and what its own sample can support.
-
-    The first number is the existing shrinkage: a record counts for
-    ``games / (games + shrinkage)`` of the distance between it and the
-    champion's baseline. The second takes off that record's own standard error,
-    scaled the same way, and never crosses zero. A 10-2 lane record claims about
-    +9 win-rate points and supports about +3; a 55% over twenty games claims
-    +1.8 and supports nothing at all, which is the honest reading of 20 games.
-    """
-    if games <= 0:
-        return 0.0, 0.0
-    weight = games / (games + shrinkage)
-    claimed = weight * (observed - base)
-    # The record's own standard error, weighted like the lift it is qualifying.
-    # Taken on the Agresti-Coull adjusted proportion rather than the raw one,
-    # because the raw error of a perfect record is zero: a 2-0 was giving up
-    # almost nothing and arguing for +2.6 points.
-    padded = games + WILSON_Z**2
-    adjusted = (observed * games + WILSON_Z**2 / 2) / padded
-    margin = WILSON_Z * math.sqrt(adjusted * (1 - adjusted) / padded) * weight
-    if claimed >= 0:
-        return claimed, max(0.0, claimed - margin)
-    return claimed, min(0.0, claimed + margin)
-
-
 @dataclass(slots=True)
 class Evidence:
-    """One record that argues for or against a pick, with its sample."""
+    """One record about a pick, with its sample and how it was read."""
 
     kind: EvidenceKind
     # The other champion: the laner, an enemy pick, or an ally.
@@ -118,10 +96,14 @@ class Evidence:
     games: int
     wins: int
     win_rate: float
-    # What the record claims, and the part its sample supports.
+    # The champion's own rate over the same patches: the record's reference.
+    own_rate: float
     lift: float
-    credible_lift: float
-    # Lane only, and only where timelines exist.
+    call: Call
+    # Whether this record moves the ranking (lane only, for now).
+    scored: bool
+    patches: tuple[str, ...]
+    # Lane only, and only where enough games have timelines.
     gold_diff_14: float | None = None
     laning_score: float | None = None
     timeline_games: int = 0
@@ -130,34 +112,46 @@ class Evidence:
 @dataclass
 class Suggestion:
     champion_id: int
-    base_win_rate: float
     games: int
-    matchup_win_rate: float | None = None
-    matchup_games: int = 0
-    # Baseline plus everything the records claim: "if they hold".
-    adjusted_win_rate: float = 0.0
-    comfort: float = 0.0
-    mastery_points: int = 0
-    # What the list is sorted by: baseline plus what the records support.
-    score: float = 0.0
-    comfort_bonus: float = 0.0
-    # The part of the score that came from the board, after the cap.
+    wins: int
+    win_rate: float
+    # The Wilson range of the champion's own record, shifted by the context.
+    range_low: float
+    range_high: float
+    # The part of the range's shift that came from the scored records, capped.
     context_lift: float = 0.0
+    # Own rate plus the context: the pick's win rate on this board.
+    expected: float = 0.0
+    comfort: float = 0.0
+    comfort_bonus: float = 0.0
+    mastery_points: int = 0
+    last_played_days: int | None = None
+    # What the list is sorted by: the low end plus comfort.
+    rank_score: float = 0.0
+    # The low end with no board at all, kept for pages loaded before this model.
+    base_low: float = 0.0
     evidence: list[Evidence] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
 class BanCandidate:
-    """A champion worth denying, scored the same way from the other side."""
+    """A champion worth denying: the strongest picks, by the low end."""
 
     champion_id: int
     position: str
-    base_win_rate: float
     games: int
-    score: float
+    wins: int
+    win_rate: float
+    range_low: float
+    range_high: float
+    # Records against the champions your team has locked in, shown, not scored.
     evidence: list[Evidence] = field(default_factory=list)
     reasons: list[str] = field(default_factory=list)
+
+    @property
+    def score(self) -> float:
+        return self.range_low
 
 
 @dataclass
@@ -177,6 +171,8 @@ class DraftContext:
     puuid: str | None = None
     comfort_weight: float = 0.15
     min_games: int = 20
+    # When "now" is, for how long ago a champion was played. Tests pin it.
+    now: float | None = None
 
     @property
     def unavailable(self) -> set[int]:
@@ -196,6 +192,27 @@ def _cap(total: float) -> float:
     return max(-CONTEXT_LIFT_CAP, min(CONTEXT_LIFT_CAP, total))
 
 
+def _clamp(rate: float) -> float:
+    return max(0.0, min(1.0, rate))
+
+
+def recency(days: float | None) -> float:
+    """How much of a champion's mastery still counts, by days since it was played."""
+    if days is None:
+        return 1.0
+    if days <= COMFORT_FULL_DAYS:
+        return 1.0
+    if days <= COMFORT_HALF_DAYS:
+        return 1.0 - 0.5 * (days - COMFORT_FULL_DAYS) / (COMFORT_HALF_DAYS - COMFORT_FULL_DAYS)
+    if days <= COMFORT_FLOOR_DAYS:
+        return 0.5 - 0.25 * (days - COMFORT_HALF_DAYS) / (COMFORT_FLOOR_DAYS - COMFORT_HALF_DAYS)
+    return 0.25
+
+
+# Own rates keyed (champion, position, patch).
+OwnRates = dict[tuple[int, str, str], float]
+
+
 class DraftAdvisor:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
@@ -208,149 +225,102 @@ class DraftAdvisor:
         if not stats:
             return []
 
-        lane = await self._lane(ctx)
-        enemies = await self._enemy_team(ctx)
-        allies = await self._ally_synergy(ctx)
+        pool = await self.pool(ctx)
+        own = await self._own_rates(ctx, pool, [ctx.position])
+        lane = await self._lane(ctx, pool, own)
+        enemies = await self._enemy_team(ctx, pool, own)
+        allies = await self._ally_synergy(ctx, pool, own)
         mastery = await self._mastery(ctx)
+        now = ctx.now if ctx.now is not None else time.time()
 
         suggestions: list[Suggestion] = []
         for stat in stats:
             if stat.champion_id in unavailable:
                 continue
+            evidence = [
+                *([lane[stat.champion_id]] if stat.champion_id in lane else []),
+                *enemies.get(stat.champion_id, ()),
+                *allies.get(stat.champion_id, ()),
+            ]
+            context = _cap(sum(e.lift for e in evidence if e.scored))
+            low = wilson_lower_bound(stat.wins, stat.games)
+            high = wilson_upper_bound(stat.wins, stat.games)
+            win_rate = stat.wins / stat.games
 
-            base = wilson_lower_bound(stat.wins, stat.games)
+            points, played_at = mastery.get(stat.champion_id, (0, None))
+            days = None if played_at is None else max(0.0, (now * 1000 - played_at) / 86_400_000)
+            comfort = min(1.0, points / COMFORT_CEILING) * recency(days)
+            bonus = ctx.comfort_weight * comfort * COMFORT_MAX_BONUS
+
             suggestion = Suggestion(
                 champion_id=stat.champion_id,
-                base_win_rate=base,
                 games=stat.games,
-                adjusted_win_rate=base,
+                wins=stat.wins,
+                win_rate=win_rate,
+                range_low=_clamp(low + context),
+                range_high=_clamp(high + context),
+                context_lift=context,
+                expected=_clamp(win_rate + context),
+                comfort=comfort,
+                comfort_bonus=bonus,
+                mastery_points=points,
+                last_played_days=None if days is None else int(days),
+                rank_score=low + context + bonus,
+                base_low=low,
+                evidence=evidence,
             )
-            evidence: list[Evidence] = []
-
-            row = lane.get(stat.champion_id)
-            if row is not None and row.games > 0:
-                observed = row.wins / row.games
-                claimed, supported = credible_lift(
-                    observed, base, row.games, MATCHUP_SHRINKAGE
-                )
-                suggestion.matchup_win_rate = observed
-                suggestion.matchup_games = row.games
-                evidence.append(
-                    Evidence(
-                        kind="lane",
-                        champion_id=row.enemy_champion_id,
-                        games=row.games,
-                        wins=row.wins,
-                        win_rate=observed,
-                        lift=claimed,
-                        credible_lift=supported,
-                        # Withheld below the floor rather than averaged over
-                        # two games, like every other thin figure here.
-                        gold_diff_14=(
-                            row.avg_gold_diff_14
-                            if row.timeline_games >= MIN_TIMELINE_GAMES
-                            else None
-                        ),
-                        laning_score=(
-                            row.avg_laning_score
-                            if row.timeline_games >= MIN_TIMELINE_GAMES
-                            else None
-                        ),
-                        timeline_games=row.timeline_games or 0,
-                    )
-                )
-
-            for kind, rows, shrinkage in (
-                ("enemy", enemies.get(stat.champion_id, ()), TEAM_SHRINKAGE),
-                ("ally", allies.get(stat.champion_id, ()), ALLY_SHRINKAGE),
-            ):
-                for other, wins, games in rows:
-                    observed = wins / games
-                    claimed, supported = credible_lift(observed, base, games, shrinkage)
-                    evidence.append(
-                        Evidence(
-                            kind=kind,
-                            champion_id=other,
-                            games=games,
-                            wins=wins,
-                            win_rate=observed,
-                            lift=claimed,
-                            credible_lift=supported,
-                        )
-                    )
-
-            suggestion.evidence = evidence
-            # Uncapped, and clamped only to a real win rate: this is the "if
-            # those records hold" figure, and a 40-game 75% lane record really
-            # does claim that much. The cap belongs to the ranking, below.
-            suggestion.adjusted_win_rate = min(
-                1.0, max(0.0, base + sum(e.lift for e in evidence))
-            )
-            suggestion.context_lift = _cap(sum(e.credible_lift for e in evidence))
-
-            points = mastery.get(stat.champion_id, 0)
-            suggestion.mastery_points = points
-            suggestion.comfort = min(1.0, points / COMFORT_CEILING)
-            suggestion.comfort_bonus = (
-                ctx.comfort_weight * suggestion.comfort * COMFORT_MAX_BONUS
-            )
-
-            suggestion.score = base + suggestion.context_lift + suggestion.comfort_bonus
             suggestion.reasons = self._explain(suggestion, ctx)
             suggestions.append(suggestion)
 
-        suggestions.sort(key=lambda s: s.score, reverse=True)
+        suggestions.sort(key=lambda s: s.rank_score, reverse=True)
         return suggestions[:limit]
 
-    async def ban_candidates(
-        self, ctx: DraftContext, *, limit: int = 5
-    ) -> list[BanCandidate]:
-        """Who to deny: the same scoring, read from the enemy's side.
+    async def ban_candidates(self, ctx: DraftContext, *, limit: int = 5) -> list[BanCandidate]:
+        """The strongest picks on the patch, each in its main role, by the low end.
 
-        A champion is judged on its own baseline plus its record against the
-        allies already locked in. With nothing locked in there is no draft to
-        read, so this degrades to the strongest picks of the patch, and the
-        caller says so rather than implying it knows more than it does.
+        Records against the allies already locked in are attached for the page
+        to show, from each candidate's main role only: taken from every role a
+        champion plays, one champion could bring four records against the base
+        of one role. They do not reorder the list, for the reason team-scope
+        records do not move suggestions.
         """
         unavailable = ctx.unavailable
-        best_by_champion = await self._best_role_stats(ctx)
-        against_allies = await self._threats_to_allies(ctx)
+        best = await self._best_role_stats(ctx)
+        candidates = sorted(
+            (stat for champion, stat in best.items() if champion not in unavailable),
+            key=lambda stat: wilson_lower_bound(stat.wins, stat.games),
+            reverse=True,
+        )[:limit]
+        if not candidates:
+            return []
+        pool = await self.pool(ctx)
+        against = await self._threats_to_allies(ctx, pool, {s.champion_id: s.team_position for s in candidates})
 
         out: list[BanCandidate] = []
-        for champion_id, stat in best_by_champion.items():
-            if champion_id in unavailable:
-                continue
-            base = wilson_lower_bound(stat.wins, stat.games)
-            evidence = []
-            for ally, wins, games in against_allies.get(champion_id, ()):
-                observed = wins / games
-                claimed, supported = credible_lift(observed, base, games, TEAM_SHRINKAGE)
-                evidence.append(
-                    Evidence(
-                        kind="ally",
-                        champion_id=ally,
-                        games=games,
-                        wins=wins,
-                        win_rate=observed,
-                        lift=claimed,
-                        credible_lift=supported,
-                    )
-                )
+        for stat in candidates:
             candidate = BanCandidate(
-                champion_id=champion_id,
+                champion_id=stat.champion_id,
                 position=stat.team_position,
-                base_win_rate=base,
                 games=stat.games,
-                score=base + _cap(sum(e.credible_lift for e in evidence)),
-                evidence=evidence,
+                wins=stat.wins,
+                win_rate=stat.wins / stat.games,
+                range_low=wilson_lower_bound(stat.wins, stat.games),
+                range_high=wilson_upper_bound(stat.wins, stat.games),
+                evidence=against.get(stat.champion_id, []),
             )
-            candidate.reasons = self._explain_ban(candidate)
+            candidate.reasons = [
+                f"{candidate.win_rate * 100:.1f}% over {candidate.games} games, "
+                f"at least {candidate.range_low * 100:.1f}% on this sample"
+            ]
             out.append(candidate)
-
-        out.sort(key=lambda c: c.score, reverse=True)
-        return out[:limit]
+        return out
 
     # ------------------------------------------------------------- sources
+
+    async def pool(self, ctx: DraftContext) -> tuple[str, ...]:
+        """Every patch a record may come from: the patch and a close one before it."""
+        held = [s["patch"] for s in await aggregated_slices(self.session) if s["queue_id"] == ctx.queue_id]
+        return poolable_patches(held or [ctx.patch], ctx.patch)
 
     async def _role_stats(self, ctx: DraftContext) -> list[ChampionStat]:
         return list(
@@ -387,14 +357,66 @@ class DraftAdvisor:
                 best[row.champion_id] = row
         return best
 
-    async def _lane(self, ctx: DraftContext) -> dict[int, MatchupStat]:
+    async def _own_rates(self, ctx: DraftContext, pool: tuple[str, ...], positions: list[str]) -> OwnRates:
+        """Each champion's own rate in these roles on each pooled patch."""
+        rows = await self.session.execute(
+            select(
+                ChampionStat.champion_id, ChampionStat.team_position, ChampionStat.patch,
+                ChampionStat.wins, ChampionStat.games,
+            ).where(
+                ChampionStat.patch.in_(pool),
+                ChampionStat.queue_id == ctx.queue_id,
+                ChampionStat.team_position.in_(positions),
+                ChampionStat.rank_bracket == ctx.rank_bracket,
+                ChampionStat.games > 0,
+            )
+        )
+        return {(c, pos, patch): w / g for c, pos, patch, w, g in rows.all()}
+
+    @staticmethod
+    def _parts(rows, own: OwnRates, champion: int, position: str) -> tuple[list[RecordPart], tuple[str, ...]]:
+        """A record's rows as parts centred per patch; rows without a reference are dropped."""
+        by_patch: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+        for patch, wins, games in rows:
+            by_patch[patch][0] += wins
+            by_patch[patch][1] += games
+        parts, patches = [], []
+        for patch, (wins, games) in by_patch.items():
+            rate = own.get((champion, position, patch))
+            if rate is None or games <= 0:
+                continue
+            parts.append(RecordPart(wins, games, rate))
+            patches.append(patch)
+        return parts, tuple(sorted(patches, reverse=True))
+
+    def _evidence(
+        self, kind: EvidenceKind, other: int, parts: list[RecordPart], patches: tuple[str, ...],
+        strength: float, scored: bool,
+    ) -> Evidence | None:
+        if not parts:
+            return None
+        read = read_records(parts, strength)
+        return Evidence(
+            kind=kind,
+            champion_id=other,
+            games=read.games,
+            wins=read.wins,
+            win_rate=read.wins / read.games,
+            own_rate=read.own_rate,
+            lift=read.lift,
+            call=read.call,
+            scored=scored,
+            patches=patches,
+        )
+
+    async def _lane(self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates) -> dict[int, Evidence]:
         """Head-to-head records against the enemy laner, keyed by our champion."""
         if ctx.enemy_laner is None:
             return {}
         rows = (
             await self.session.execute(
                 select(MatchupStat).where(
-                    MatchupStat.patch == ctx.patch,
+                    MatchupStat.patch.in_(pool),
                     MatchupStat.queue_id == ctx.queue_id,
                     MatchupStat.team_position == ctx.position,
                     MatchupStat.rank_bracket == ctx.rank_bracket,
@@ -402,15 +424,45 @@ class DraftAdvisor:
                     MatchupStat.scope == "LANE",
                 )
             )
-        ).scalars()
-        return {row.champion_id: row for row in rows}
+        ).scalars().all()
+        by_champion: dict[int, list[MatchupStat]] = defaultdict(list)
+        for row in rows:
+            by_champion[row.champion_id].append(row)
 
-    async def _enemy_team(self, ctx: DraftContext) -> dict[int, list[tuple[int, int, int]]]:
-        """Records against each enemy pick other than the laner.
+        out: dict[int, Evidence] = {}
+        for champion, group in by_champion.items():
+            parts, patches = self._parts(
+                [(r.patch, r.wins, r.games) for r in group], own, champion, ctx.position
+            )
+            evidence = self._evidence("lane", ctx.enemy_laner, parts, patches, LANE_STRENGTH, True)
+            if evidence is None:
+                continue
+            # The gold lead and laning score pooled over the timelines behind
+            # them, and withheld below the floor rather than averaged over two.
+            timelines = sum(r.timeline_games or 0 for r in group if r.patch in patches)
+            if timelines >= MIN_TIMELINE_GAMES:
+                gold = [r for r in group if r.patch in patches and r.avg_gold_diff_14 is not None and r.timeline_games]
+                laning = [r for r in group if r.patch in patches and r.avg_laning_score is not None and r.timeline_games]
+                if gold:
+                    evidence.gold_diff_14 = sum(r.avg_gold_diff_14 * r.timeline_games for r in gold) / sum(
+                        r.timeline_games for r in gold
+                    )
+                if laning:
+                    evidence.laning_score = sum(r.avg_laning_score * r.timeline_games for r in laning) / sum(
+                        r.timeline_games for r in laning
+                    )
+            evidence.timeline_games = timelines
+            out[champion] = evidence
+        return out
 
-        Scope TEAM: "this champion was somewhere on the enemy side", which is a
-        different question from the lane, and the reason the laner is excluded
-        here rather than counted twice.
+    async def _enemy_team(
+        self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates
+    ) -> dict[int, list[Evidence]]:
+        """Records against each enemy pick other than the laner, shown not scored.
+
+        Scope TEAM: "this champion was somewhere on the enemy side", a different
+        question from the lane, and the reason the laner is excluded here rather
+        than counted twice.
         """
         wanted = ctx.other_enemies
         if not wanted:
@@ -418,12 +470,10 @@ class DraftAdvisor:
         rows = (
             await self.session.execute(
                 select(
-                    MatchupStat.champion_id,
-                    MatchupStat.enemy_champion_id,
-                    MatchupStat.wins,
-                    MatchupStat.games,
+                    MatchupStat.champion_id, MatchupStat.enemy_champion_id, MatchupStat.patch,
+                    MatchupStat.wins, MatchupStat.games,
                 ).where(
-                    MatchupStat.patch == ctx.patch,
+                    MatchupStat.patch.in_(pool),
                     MatchupStat.queue_id == ctx.queue_id,
                     MatchupStat.team_position == ctx.position,
                     MatchupStat.rank_bracket == ctx.rank_bracket,
@@ -433,53 +483,26 @@ class DraftAdvisor:
                 )
             )
         ).all()
-        out: dict[int, list[tuple[int, int, int]]] = {}
-        for champion, enemy, wins, games in rows:
-            out.setdefault(champion, []).append((enemy, wins, games))
-        return out
+        return self._grouped("enemy", rows, own, ctx.position, TEAM_STRENGTH)
 
-    async def _threats_to_allies(
-        self, ctx: DraftContext
-    ) -> dict[int, list[tuple[int, int, int]]]:
-        """The same TEAM records, read as "how this champion does against ours"."""
-        if not ctx.allies:
-            return {}
-        rows = (
-            await self.session.execute(
-                select(
-                    MatchupStat.champion_id,
-                    MatchupStat.enemy_champion_id,
-                    MatchupStat.wins,
-                    MatchupStat.games,
-                ).where(
-                    MatchupStat.patch == ctx.patch,
-                    MatchupStat.queue_id == ctx.queue_id,
-                    MatchupStat.rank_bracket == ctx.rank_bracket,
-                    MatchupStat.enemy_champion_id.in_(list(dict.fromkeys(ctx.allies))),
-                    MatchupStat.scope == "TEAM",
-                    MatchupStat.games > 0,
-                )
-            )
-        ).all()
-        out: dict[int, list[tuple[int, int, int]]] = {}
-        for champion, ally, wins, games in rows:
-            out.setdefault(champion, []).append((ally, wins, games))
-        return out
+    async def _ally_synergy(
+        self, ctx: DraftContext, pool: tuple[str, ...], own: OwnRates
+    ) -> dict[int, list[Evidence]]:
+        """How each candidate has done beside the allies locked in, shown not scored.
 
-    async def _ally_synergy(self, ctx: DraftContext) -> dict[int, list[tuple[int, int, int]]]:
-        """How each candidate has done alongside the allies already locked in."""
+        Summed over the ally's role: SynergyStat is keyed by it, and an ally
+        seen in two roles was counted as two records.
+        """
         wanted = list(dict.fromkeys(ctx.allies))
         if not wanted:
             return {}
         rows = (
             await self.session.execute(
                 select(
-                    SynergyStat.champion_id,
-                    SynergyStat.ally_champion_id,
-                    SynergyStat.wins,
-                    SynergyStat.games,
+                    SynergyStat.champion_id, SynergyStat.ally_champion_id, SynergyStat.patch,
+                    SynergyStat.wins, SynergyStat.games,
                 ).where(
-                    SynergyStat.patch == ctx.patch,
+                    SynergyStat.patch.in_(pool),
                     SynergyStat.queue_id == ctx.queue_id,
                     SynergyStat.team_position == ctx.position,
                     SynergyStat.rank_bracket == ctx.rank_bracket,
@@ -488,96 +511,115 @@ class DraftAdvisor:
                 )
             )
         ).all()
-        out: dict[int, list[tuple[int, int, int]]] = {}
-        for champion, ally, wins, games in rows:
-            out.setdefault(champion, []).append((ally, wins, games))
+        return self._grouped("ally", rows, own, ctx.position, ALLY_STRENGTH)
+
+    def _grouped(self, kind: EvidenceKind, rows, own: OwnRates, position: str, strength: float):
+        by_pair: dict[tuple[int, int], list[tuple[str, int, int]]] = defaultdict(list)
+        for champion, other, patch, wins, games in rows:
+            by_pair[(champion, other)].append((patch, wins, games))
+        out: dict[int, list[Evidence]] = defaultdict(list)
+        for (champion, other), group in by_pair.items():
+            parts, patches = self._parts(group, own, champion, position)
+            evidence = self._evidence(kind, other, parts, patches, strength, False)
+            if evidence is not None:
+                out[champion].append(evidence)
         return out
 
-    async def _mastery(self, ctx: DraftContext) -> dict[int, int]:
+    async def _threats_to_allies(
+        self, ctx: DraftContext, pool: tuple[str, ...], roles: dict[int, str]
+    ) -> dict[int, list[Evidence]]:
+        """Each ban candidate's TEAM records against our allies, in its main role only."""
+        allies = list(dict.fromkeys(ctx.allies))
+        if not allies or not roles:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(
+                    MatchupStat.champion_id, MatchupStat.team_position, MatchupStat.enemy_champion_id,
+                    MatchupStat.patch, MatchupStat.wins, MatchupStat.games,
+                ).where(
+                    MatchupStat.patch.in_(pool),
+                    MatchupStat.queue_id == ctx.queue_id,
+                    MatchupStat.rank_bracket == ctx.rank_bracket,
+                    MatchupStat.champion_id.in_(list(roles)),
+                    MatchupStat.enemy_champion_id.in_(allies),
+                    MatchupStat.scope == "TEAM",
+                    MatchupStat.games > 0,
+                )
+            )
+        ).all()
+        own = await self._own_rates(ctx, pool, sorted(set(roles.values())))
+        by_pair: dict[tuple[int, int], list[tuple[str, int, int]]] = defaultdict(list)
+        for champion, position, ally, patch, wins, games in rows:
+            if roles.get(champion) != position:
+                continue
+            by_pair[(champion, ally)].append((patch, wins, games))
+        out: dict[int, list[Evidence]] = defaultdict(list)
+        for (champion, ally), group in by_pair.items():
+            parts, patches = self._parts(group, own, champion, roles[champion])
+            evidence = self._evidence("ally", ally, parts, patches, TEAM_STRENGTH, False)
+            if evidence is not None:
+                out[champion].append(evidence)
+        return out
+
+    async def _mastery(self, ctx: DraftContext) -> dict[int, tuple[int, int | None]]:
         if not ctx.puuid:
             return {}
         rows = (
             await self.session.execute(
-                select(ChampionMastery.champion_id, ChampionMastery.champion_points).where(
-                    ChampionMastery.puuid == ctx.puuid
-                )
+                select(
+                    ChampionMastery.champion_id,
+                    ChampionMastery.champion_points,
+                    ChampionMastery.last_play_time,
+                ).where(ChampionMastery.puuid == ctx.puuid)
             )
         ).all()
-        return dict(rows)
+        return {champion: (points, played) for champion, points, played in rows}
 
     # ------------------------------------------------------------ wording
 
     @staticmethod
     def _explain(s: Suggestion, ctx: DraftContext) -> list[str]:
         reasons: list[str] = []
-        # The row already prints the score. Repeating the same figure underneath
-        # it reads as a template filling itself in, so the percentage appears
-        # only when the adjustment moved it and the two numbers really differ.
-        if s.adjusted_win_rate == s.base_win_rate:
-            reasons.append(f"baseline over {s.games} games")
-        else:
-            reasons.append(
-                f"{s.base_win_rate * 100:.1f}% baseline over {s.games} games"
-            )
-
         lane = next((e for e in s.evidence if e.kind == "lane"), None)
         if lane is not None:
-            direction = "favoured" if lane.lift >= 0 else "unfavoured"
-            supported = (
-                f"supports {lane.credible_lift * 100:+.1f} points"
-                if lane.credible_lift
-                else "too few games to move the score"
-            )
-            reasons.append(
-                f"{direction} into this lane: {lane.win_rate * 100:.0f}% over "
-                f"{lane.games} games, {supported}"
-            )
+            record = f"{lane.wins}-{lane.games - lane.wins} over {lane.games} games"
+            if lane.call == "level":
+                reasons.append(
+                    f"lane record {record}: too few games to call either way, "
+                    f"{lane.lift * 100:+.1f} points"
+                )
+            else:
+                reasons.append(
+                    f"{lane.call} into this lane: {record}, {lane.lift * 100:+.1f} points"
+                )
             if lane.gold_diff_14 is not None:
                 reasons.append(
                     f"usually {lane.gold_diff_14:+,.0f} gold by 14 in that lane, "
                     f"over {lane.timeline_games} games with timelines"
                 )
         elif ctx.enemy_laner is not None:
-            reasons.append("no head-to-head data for this matchup yet")
-
-        for kind, label in (("enemy", "enemy team"), ("ally", "alongside")):
-            rows = [e for e in s.evidence if e.kind == kind and e.credible_lift]
-            if rows:
-                total = sum(e.credible_lift for e in rows) * 100
-                reasons.append(
-                    f"{label}: {total:+.1f} points over {len(rows)} "
-                    f"{'record' if len(rows) == 1 else 'records'}"
-                )
+            reasons.append("no head-to-head record for this lane yet")
 
         if s.mastery_points >= 10_000:
-            reasons.append(f"{s.mastery_points // 1000}k mastery points")
+            when = ""
+            if s.last_played_days is not None and s.last_played_days > COMFORT_FULL_DAYS:
+                months = max(1, round(s.last_played_days / 30))
+                when = f", last played {months} month{'s' if months != 1 else ''} ago"
+            reasons.append(f"{s.mastery_points // 1000}k mastery points{when}")
         elif ctx.puuid and s.mastery_points == 0:
             reasons.append("never played on this account")
-
-        return reasons
-
-    @staticmethod
-    def _explain_ban(candidate: BanCandidate) -> list[str]:
-        reasons = [f"{candidate.base_win_rate * 100:.1f}% baseline over {candidate.games} games"]
-        strong = [e for e in candidate.evidence if e.credible_lift > 0]
-        strong.sort(key=lambda e: e.credible_lift, reverse=True)
-        for e in strong[:2]:
-            reasons.append(
-                f"{e.win_rate * 100:.0f}% against one of your picks over {e.games} games"
-            )
         return reasons
 
 
 __all__ = [
-    "ALLY_SHRINKAGE",
+    "COMFORT_MAX_BONUS",
     "CONTEXT_LIFT_CAP",
-    "MATCHUP_SHRINKAGE",
     "MIN_TIMELINE_GAMES",
-    "TEAM_SHRINKAGE",
     "BanCandidate",
     "DraftAdvisor",
     "DraftContext",
     "Evidence",
     "Suggestion",
-    "credible_lift",
+    "recency",
 ]
