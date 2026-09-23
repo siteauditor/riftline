@@ -38,6 +38,13 @@ export const DEFAULT_LADDER = {
   perPage: 50,
 }
 
+/** The tier list's own sample floor, and the default its URL leaves out.
+ *  Here rather than on the page, because the prerenderer reads it too. */
+export const TIERLIST_MIN_GAMES = 20
+
+/** The champion page's sample floor, and the default its URL leaves out. */
+export const CHAMPION_MIN_GAMES = 5
+
 export const queries = {
   meta: (opts: SliceQuery) =>
     queryOptions({ queryKey: ['meta', opts], queryFn: () => api.meta(opts) }),

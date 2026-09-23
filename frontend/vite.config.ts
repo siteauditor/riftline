@@ -1,9 +1,16 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig(({ isSsrBuild }) => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    // The React Compiler memoises components and hooks on its own, so new
+    // code never needs useMemo or useCallback by hand. It skips, silently, a
+    // component that breaks the rules of hooks; the lint rule catches those.
+    react({ compiler: true }),
+    tailwindcss(),
+  ],
   // The server bundle is one file the prerenderer imports; it has no use for
   // a copy of public/ beside it.
   publicDir: isSsrBuild ? false : 'public',
@@ -17,5 +24,10 @@ export default defineConfig(({ isSsrBuild }) => ({
         changeOrigin: true,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.{ts,tsx}'],
+    css: false,
   },
 }))

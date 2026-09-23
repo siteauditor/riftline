@@ -9,7 +9,7 @@ import SliceFilters, { SliceSummary, type SliceValue } from '../components/Slice
 import { EmptyState, ErrorView, Spinner } from '../components/StateViews'
 import WinRateRange from '../components/WinRateRange'
 import { type ChampionMetaRow, type MetaResponse } from '../lib/api'
-import { queries } from '../lib/queries'
+import { queries, TIERLIST_MIN_GAMES } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { compact, pct, positionLabel, shortDate, tierColor, tierLabel } from '../lib/format'
 import {
@@ -45,8 +45,7 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
 // stomps, so the cell shows a dash rather than a number.
 const GOLD_FLOOR = 10
 
-// The tier list's own sample floor, and the default the URL leaves out.
-export const MIN_GAMES = 20
+const MIN_GAMES = TIERLIST_MIN_GAMES
 
 type SortKey =
   | 'confidence_win_rate'

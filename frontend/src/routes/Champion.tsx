@@ -17,7 +17,7 @@ import { parseTab, type ChampionTab } from '../components/champion/tabs'
 import { POSITIONS, type ChampionDetail, type ChampionRef, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
 import { championSummary } from '../lib/prose'
-import { queries } from '../lib/queries'
+import { CHAMPION_MIN_GAMES, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import {
   SLICE_DEFAULTS,
@@ -29,8 +29,7 @@ import {
 } from '../lib/searchParams'
 
 const NUMBER_TABS = new Set<ChampionTab>(['build', 'runes', 'laning', 'counters', 'synergies'])
-// The champion page's own sample floor, and the default the URL leaves out.
-export const MIN_GAMES = 5
+const MIN_GAMES = CHAMPION_MIN_GAMES
 
 export default function Champion() {
   // A slug ("aatrox"), or an id from an older link; the API takes either.

@@ -1,28 +1,10 @@
+import type { ComponentType } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import type { RouteObject } from 'react-router-dom'
 
 import App from './App'
 import { sliceFromParams } from './lib/searchParams'
-import { DEFAULT_LADDER, queries } from './lib/queries'
-import Home from './routes/Home'
-import Profile from './routes/Profile'
-import Mastery from './routes/Mastery'
-import PlayerChampions from './routes/PlayerChampions'
-import Tierlist, { MIN_GAMES as TIERLIST_MIN_GAMES } from './routes/Tierlist'
-import Draft from './routes/Draft'
-import Champion, { MIN_GAMES as CHAMPION_MIN_GAMES } from './routes/Champion'
-import LiveGame from './routes/LiveGame'
-import Item from './routes/Item'
-import Items from './routes/Items'
-import Leaderboard from './routes/Leaderboard'
-import Match from './routes/Match'
-import Method from './routes/Method'
-import Score from './routes/method/Score'
-import WinChance from './routes/method/WinChance'
-import DeathReview from './routes/method/DeathReview'
-import LaneLabels from './routes/method/LaneLabels'
-import Groups from './routes/Groups'
-import Group from './routes/Group'
+import { CHAMPION_MIN_GAMES, DEFAULT_LADDER, queries, TIERLIST_MIN_GAMES } from './lib/queries'
 import NotFound, { RouteError } from './routes/NotFound'
 
 /**
@@ -33,6 +15,14 @@ import NotFound, { RouteError } from './routes/NotFound'
  * on the server, so the HTML has its numbers and the browser hydrates from
  * the same cache instead of fetching again. The keys come from `queries`, the
  * same definitions the components use, so the two cannot drift.
+ *
+ * One chunk per page. Every page is `lazy`, so the first load carries the
+ * shell and the one page asked for rather than all sixteen. The browser
+ * entry (main.tsx) loads the chunks the first location matches before it
+ * hydrates, and the prerenderer's static handler loads them inside `query`,
+ * so neither side ever renders a route without its component. `handle`
+ * stays here rather than in the lazy module: the prefetch runs before the
+ * page renders and must not wait on a second import to be found.
  */
 
 export interface PrefetchContext {
@@ -49,6 +39,10 @@ export interface RouteHandle {
 
 const handle = (prefetch: Prefetch): RouteHandle => ({ prefetch })
 
+const page = (load: () => Promise<{ default: ComponentType }>) => async () => ({
+  Component: (await load()).default,
+})
+
 const prefetchMethod: Prefetch = ({ queryClient }) => queryClient.prefetchQuery(queries.method())
 
 export const routes: RouteObject[] = [
@@ -61,7 +55,7 @@ export const routes: RouteObject[] = [
     children: [
       {
         index: true,
-        element: <Home />,
+        lazy: page(() => import('./routes/Home')),
         handle: handle(({ queryClient }) =>
           Promise.all([
             queryClient.prefetchQuery(queries.meta({ minGames: 40 })),
@@ -74,7 +68,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'summoner/:platform/:name/:tag',
-        element: <Profile />,
+        lazy: page(() => import('./routes/Profile')),
         // From storage only: the manifest lists a profile once the player has
         // enough scored games, and rendering a thousand of them must not cost
         // a Riot call. The page shows these until its live queries answer.
@@ -87,12 +81,15 @@ export const routes: RouteObject[] = [
           ])
         }),
       },
-      { path: 'summoner/:platform/:name/:tag/champions', element: <PlayerChampions /> },
-      { path: 'summoner/:platform/:name/:tag/mastery', element: <Mastery /> },
-      { path: 'summoner/:platform/:name/:tag/live', element: <LiveGame /> },
+      {
+        path: 'summoner/:platform/:name/:tag/champions',
+        lazy: page(() => import('./routes/PlayerChampions')),
+      },
+      { path: 'summoner/:platform/:name/:tag/mastery', lazy: page(() => import('./routes/Mastery')) },
+      { path: 'summoner/:platform/:name/:tag/live', lazy: page(() => import('./routes/LiveGame')) },
       {
         path: 'leaderboards',
-        element: <Leaderboard />,
+        lazy: page(() => import('./routes/Leaderboard')),
         handle: handle(({ queryClient }) =>
           Promise.all([
             queryClient.prefetchQuery(queries.leaderboardSlices()),
@@ -102,7 +99,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'tierlist',
-        element: <Tierlist />,
+        lazy: page(() => import('./routes/Tierlist')),
         handle: handle(({ search, queryClient }) => {
           // The same slice the page builds from an empty query string.
           const slice = { ...sliceFromParams(search, TIERLIST_MIN_GAMES), bracket: null }
@@ -114,7 +111,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'draft',
-        element: <Draft />,
+        lazy: page(() => import('./routes/Draft')),
         handle: handle(({ queryClient }) =>
           Promise.all([
             queryClient.prefetchQuery(queries.champions()),
@@ -124,7 +121,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'champions/:championId',
-        element: <Champion />,
+        lazy: page(() => import('./routes/Champion')),
         handle: handle(({ params, search, queryClient }) => {
           const ref = params.championId ?? ''
           const slice = sliceFromParams(search, CHAMPION_MIN_GAMES)
@@ -136,25 +133,37 @@ export const routes: RouteObject[] = [
       },
       {
         path: 'items',
-        element: <Items />,
+        lazy: page(() => import('./routes/Items')),
         handle: handle(({ queryClient }) => queryClient.prefetchQuery(queries.items())),
       },
       {
         path: 'items/:itemId',
-        element: <Item />,
+        lazy: page(() => import('./routes/Item')),
         handle: handle(({ params, search, queryClient }) => {
           const { patch, queueId, bracket } = sliceFromParams(search, 1)
           return queryClient.prefetchQuery(queries.item(params.itemId ?? '', { patch, queueId, bracket }))
         }),
       },
-      { path: 'match/:matchId', element: <Match /> },
-      { path: 'method', element: <Method />, handle: handle(prefetchMethod) },
-      { path: 'method/score', element: <Score />, handle: handle(prefetchMethod) },
-      { path: 'method/win-chance', element: <WinChance />, handle: handle(prefetchMethod) },
-      { path: 'method/death-review', element: <DeathReview />, handle: handle(prefetchMethod) },
-      { path: 'method/lane-labels', element: <LaneLabels />, handle: handle(prefetchMethod) },
-      { path: 'groups', element: <Groups /> },
-      { path: 'g/:slug', element: <Group /> },
+      { path: 'match/:matchId', lazy: page(() => import('./routes/Match')) },
+      { path: 'method', lazy: page(() => import('./routes/Method')), handle: handle(prefetchMethod) },
+      { path: 'method/score', lazy: page(() => import('./routes/method/Score')), handle: handle(prefetchMethod) },
+      {
+        path: 'method/win-chance',
+        lazy: page(() => import('./routes/method/WinChance')),
+        handle: handle(prefetchMethod),
+      },
+      {
+        path: 'method/death-review',
+        lazy: page(() => import('./routes/method/DeathReview')),
+        handle: handle(prefetchMethod),
+      },
+      {
+        path: 'method/lane-labels',
+        lazy: page(() => import('./routes/method/LaneLabels')),
+        handle: handle(prefetchMethod),
+      },
+      { path: 'groups', lazy: page(() => import('./routes/Groups')) },
+      { path: 'g/:slug', lazy: page(() => import('./routes/Group')) },
       // nginx serves the shell for every path it does not recognise, so the
       // router is what decides an address is not a page. Keep this last.
       { path: '*', element: <NotFound /> },

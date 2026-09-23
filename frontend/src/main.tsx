@@ -6,7 +6,7 @@ import {
   QueryClientProvider,
   type DehydratedState,
 } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, matchRoutes, RouterProvider } from 'react-router-dom'
 
 import './index.css'
 import { routes } from './routes'
@@ -56,24 +56,47 @@ if (import.meta.env.DEV) {
   window.queryClient = queryClient
 }
 
-const router = createBrowserRouter(routes)
+/**
+ * The route modules the first location needs, loaded before anything renders.
+ *
+ * Pages are code-split (routes.tsx), and a data router renders nothing until
+ * a lazy route has loaded. On a prerendered page that nothing would be
+ * hydrated against a full document: React would discard the HTML and render
+ * from scratch, and the point of prerendering would be lost. So the matched
+ * modules are imported first and the router starts already initialised. On
+ * the shell it costs nothing extra: the chunk had to load anyway.
+ */
+async function loadRoutesFor(location: Location): Promise<void> {
+  const matches = matchRoutes(routes, location) ?? []
+  await Promise.all(
+    matches.map(async ({ route }) => {
+      if (typeof route.lazy !== 'function') return
+      Object.assign(route, await route.lazy())
+      route.lazy = undefined
+    }),
+  )
+}
+
 const container = document.getElementById('root')!
 
-const app = (
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <HydrationBoundary state={window.__RQ_STATE__}>
-        <RouterProvider router={router} />
-      </HydrationBoundary>
-    </QueryClientProvider>
-  </StrictMode>
-)
+loadRoutesFor(window.location).then(() => {
+  const router = createBrowserRouter(routes)
+  const app = (
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <HydrationBoundary state={window.__RQ_STATE__}>
+          <RouterProvider router={router} />
+        </HydrationBoundary>
+      </QueryClientProvider>
+    </StrictMode>
+  )
 
-// A prerendered page arrives with its markup already in #root, and the
-// numbers it was rendered from in __RQ_STATE__: React takes over what is
-// there. The shell arrives with nothing but a comment, and is rendered into.
-if (container.firstElementChild) {
-  hydrateRoot(container, app)
-} else {
-  createRoot(container).render(app)
-}
+  // A prerendered page arrives with its markup already in #root, and the
+  // numbers it was rendered from in __RQ_STATE__: React takes over what is
+  // there. The shell arrives with nothing but a comment, and is rendered into.
+  if (container.firstElementChild) {
+    hydrateRoot(container, app)
+  } else {
+    createRoot(container).render(app)
+  }
+})

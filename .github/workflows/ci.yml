@@ -73,6 +73,9 @@ jobs:
       - name: Frontend lint
         run: docker run --rm riftline-web:ci pnpm lint
 
+      - name: Frontend tests
+        run: docker run --rm riftline-web:ci pnpm test
+
       # Googlebot reads only the first 2 MB of a file, silently. The bundle is
       # a third of that today; this is the fence before it grows there.
       - name: Bundle size budget
