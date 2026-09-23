@@ -34,10 +34,10 @@ from app.services.aggregate import (
     ALL_BRACKETS,
     POSITIONS,
     aggregated_slices,
-    patch_sort_key,
+    poolable_patches,
     win_as_int,
 )
-from app.services.draft import MATCHUP_SHRINKAGE, TEAM_SHRINKAGE, credible_lift
+from app.services.evidence import LANE_STRENGTH, TEAM_STRENGTH, Call, RecordPart, read_records
 from app.services.ranks import RankCache
 from app.services.roles import SUMMONERS_RIFT_MAP_ID, assign_team, load_priors
 from app.services.skins import record_sightings
@@ -91,17 +91,12 @@ MIN_RANKED_PER_SIDE = 3
 # publishes and what players read, and level 3 is roughly ten games.
 LOW_MASTERY_LEVEL = 3
 
-# How far the lane record may reach when this patch holds too few games.
-# Measured 2026-09-21 over the lanes of forty real lobbies: 26% of them have a
-# five game lane record on the current patch, 34% once the previous patch is
-# pooled in, and 35% have a team scope record for the same pair. A third patch
-# was never measured, so it is not assumed.
-MAX_POOLED_PATCHES = 2
-# And only a patch close enough to still describe the same game. Judgement
-# rather than a measurement: the corpus is crawled rather than exhaustive, so
-# the next patch held can be a number or two down, but past that the items and
-# the kits have moved and pooling would be a different claim.
-POOL_MAX_MINOR_GAP = 2
+# How far the lane record may reach when this patch holds too few games, and
+# which patch is close enough, is shared with the draft in `aggregate`
+# (`MAX_POOLED_PATCHES`, `POOL_MAX_MINOR_GAP`, `poolable_patches`). Measured
+# 2026-09-21 over the lanes of forty real lobbies: 26% of them have a five game
+# lane record on the current patch, 34% once the previous patch is pooled in,
+# and 35% have a team scope record for the same pair.
 
 # How many stored games a player needs before we describe their play at all, and
 # how many before a percentage is published rather than a W-L. Both are defined
@@ -199,6 +194,10 @@ class CorpusRecord:
     # ones, because a team scope record shown as a lane record is a false claim.
     basis: str = "lane"
     patches: tuple[str, ...] = ()
+    # (patch, wins, games) for each patch summed into this record, so each can
+    # be read against the champion's own rate on that patch. How the record is
+    # read, not what it says: left out of equality and the repr.
+    parts: tuple[tuple[str, int, int], ...] = field(default=(), compare=False, repr=False)
 
 
 def rank_points(entry: RankedEntry) -> int:
@@ -251,6 +250,9 @@ class LiveParticipant:
     # opponent, both from the stored corpus.
     champion_record: CorpusRecord | None = None
     lane_record: CorpusRecord | None = None
+    # This champion's own win rate in this position on each patch held, the
+    # reference a pooled lane record is read against, patch by patch.
+    own_rates: dict[str, float] = field(default_factory=dict)
     # How many games we hold for this player, always, even when the record below
     # is withheld: "we hold two games" and "we hold nothing" are different facts
     # and the page has to be able to tell them apart.
@@ -441,20 +443,13 @@ class LiveGame:
 
 
 def _poolable_patches(held: list[str]) -> tuple[str, ...]:
-    """The newest patch, plus the one before it when it is close enough.
+    """The newest patch held, plus the one before it when it is close enough.
 
-    `aggregated_slices` already orders by patch, newest first, so this only has
-    to decide whether the second one is near enough to describe the same game.
+    The live page anchors on the newest patch, because a game being played now
+    is on it; the draft anchors on the settled default patch. The rule for which
+    earlier patch may join is shared, in `aggregate.poolable_patches`.
     """
-    newest = held[0]
-    pool = [newest]
-    for patch in held[1:]:
-        if len(pool) >= MAX_POOLED_PATCHES:
-            break
-        a, b = patch_sort_key(newest), patch_sort_key(patch)
-        if a[0] == b[0] and a[1] - b[1] <= POOL_MAX_MINOR_GAP:
-            pool.append(patch)
-    return tuple(pool)
+    return poolable_patches(held, held[0])
 
 
 def _pool(rows: list[MatchupStat], patches: tuple[str, ...], basis: str) -> CorpusRecord | None:
@@ -476,7 +471,13 @@ def _pool(rows: list[MatchupStat], patches: tuple[str, ...], basis: str) -> Corp
         if weighted and timeline_games >= MIN_CORPUS_GAMES
         else None
     )
+    by_patch: dict[str, list[int]] = {}
+    for r in rows:
+        totals = by_patch.setdefault(r.patch, [0, 0])
+        totals[0] += r.wins
+        totals[1] += r.games
     return CorpusRecord(
+        parts=tuple((patch, w, g) for patch, (w, g) in by_patch.items()),
         games=games,
         wins=sum(r.wins for r in rows),
         # A TEAM row's gold lead is this champion's lead against its own laner
@@ -679,10 +680,10 @@ def side_read(
         if record is None or record.games <= 0:
             continue
         with_record += 1
-        supported = _lane_edge(p)
-        if supported > 0:
+        call = _lane_call(p)
+        if call == "favoured":
             favoured[p.team_id] += 1
-        elif supported < 0:
+        elif call == "unfavoured":
             favoured[300 - p.team_id] += 1
         else:
             level += 1
@@ -699,25 +700,28 @@ def side_read(
     )
 
 
-def _lane_edge(p: LiveParticipant) -> float:
-    """How far this player's lane record is from level, in supported points.
+def _lane_call(p: LiveParticipant) -> Call:
+    """Whether this player's lane record favours them, read as the draft reads it.
 
     Not a comparison against 50%: a 3-2 over five games is not a favoured lane.
-    `credible_lift` takes the record's own standard error off the claim, and the
-    baseline is the champion's own win rate in this role rather than a flat
-    half, so a 55% matchup for a champion who wins 55% everywhere reads as
-    level. The shrinkage follows the basis, so a team scope record has to be
-    bigger to say the same thing, which is what draft.py already does.
+    The reference is the champion's own win rate in this role, patch by patch
+    when the record pools two, so a 55% matchup for a champion who wins 55%
+    everywhere reads as level. The prior follows the basis (`evidence`), so a
+    team scope record has to be bigger to say the same thing: a 40-20 is a
+    favoured lane record and a level team record.
     """
     record = p.lane_record
     if record is None or record.games <= 0:
-        return 0.0
-    base = 0.5
+        return "level"
+    fallback = 0.5
     if p.champion_record is not None and p.champion_record.games > 0:
-        base = p.champion_record.wins / p.champion_record.games
-    shrinkage = TEAM_SHRINKAGE if record.basis == "team" else MATCHUP_SHRINKAGE
-    _, supported = credible_lift(record.wins / record.games, base, record.games, shrinkage)
-    return supported
+        fallback = p.champion_record.wins / p.champion_record.games
+    parts = [
+        RecordPart(wins, games, p.own_rates.get(patch, fallback))
+        for patch, wins, games in record.parts
+    ] or [RecordPart(record.wins, record.games, fallback)]
+    strength = TEAM_STRENGTH if record.basis == "team" else LANE_STRENGTH
+    return read_records(parts, strength).call
 
 
 def _one_side(
@@ -1019,7 +1023,7 @@ class LiveGameService:
         role_rows = (
             await self.session.execute(
                 select(ChampionStat).where(
-                    ChampionStat.patch == patches[0],
+                    ChampionStat.patch.in_(patches),
                     ChampionStat.queue_id == queue_id,
                     ChampionStat.rank_bracket == ALL_BRACKETS,
                     ChampionStat.champion_id.in_(champions),
@@ -1028,6 +1032,10 @@ class LiveGameService:
             )
         ).scalars()
         by_role: dict[tuple[int, str | None], ChampionStat] = {}
+        # Every pooled patch's own rate, so a pooled lane record is read against
+        # the champion as it was on each patch. Read against the newest patch
+        # alone, a buff between the two looked like a matchup.
+        own_rates: dict[tuple[int, str | None], dict[str, float]] = {}
         # Both figures are champion level rather than role level: `bans` and
         # `pool_games` carry the same value on every one of a champion's role
         # rows, so these are the maximum rather than the sum. Summed, a champion
@@ -1035,6 +1043,11 @@ class LiveGameService:
         # a 170% ban rate reached production for a few minutes.
         ban_totals: dict[int, list[int]] = {}
         for row in role_rows:
+            own_rates.setdefault((row.champion_id, row.team_position), {})[row.patch] = (
+                row.wins / row.games
+            )
+            if row.patch != patches[0]:
+                continue
             by_role[(row.champion_id, row.team_position)] = row
             totals = ban_totals.setdefault(row.champion_id, [0, 0])
             totals[0] = max(totals[0], row.bans)
@@ -1059,6 +1072,7 @@ class LiveGameService:
 
         opponent = {(p.team_id, p.position): p for p in participants}
         for p in participants:
+            p.own_rates = own_rates.get((p.champion_id, p.position), {})
             role = by_role.get((p.champion_id, p.position))
             if role is not None:
                 p.champion_record = CorpusRecord(

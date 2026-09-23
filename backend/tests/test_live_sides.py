@@ -163,9 +163,10 @@ def test_a_lane_is_only_favoured_when_its_own_sample_supports_it():
 
 
 def test_a_team_basis_record_has_to_be_bigger_to_say_the_same_thing():
-    """The shrinkage follows the basis, the way draft.py already weighs its own
-    evidence: a record of two champions merely sharing a game is weaker."""
-    same_numbers = dict(games=30, wins=21)
+    """The prior follows the basis, the way the draft weighs its own evidence:
+    a record of two champions merely sharing a game says less per game. A 40-20
+    is a favoured lane and, as a team scope record, a level one."""
+    same_numbers = dict(games=60, wins=40)
     base = CorpusRecord(games=500, wins=250, basis="role")
     as_lane = CorpusRecord(**same_numbers, basis="lane")
     as_team = CorpusRecord(**same_numbers, basis="team")
@@ -178,7 +179,9 @@ def test_a_team_basis_record_has_to_be_bigger_to_say_the_same_thing():
         [player(100, LANES[i], lane=as_team if i == 0 else None, champion=base) for i in range(5)],
         [player(200, LANES[i]) for i in range(5)],
     )
-    assert lane_lobby.sides[0].lanes_favoured >= team_lobby.sides[0].lanes_favoured
+    assert lane_lobby.sides[0].lanes_favoured == 1
+    assert team_lobby.sides[0].lanes_favoured == 0
+    assert team_lobby.lanes_level == 1
 
 
 def test_lanes_without_a_record_are_counted_in_neither_direction():
