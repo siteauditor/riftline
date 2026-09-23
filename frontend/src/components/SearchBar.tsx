@@ -2,12 +2,13 @@ import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } 
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { AnchoredList } from '@/components/ui/anchored-list'
 
 import RankBadge from './RankBadge'
 import SelectField from './SelectField'
 import { api, PLATFORMS } from '../lib/api'
 import { parseRiotId } from '../lib/format'
+import { useCombobox } from '../lib/useCombobox'
 import { useDebounced } from '../lib/useDebounced'
 import {
   foldRiotName,
@@ -69,7 +70,6 @@ function platformLabel(id: string): string {
 export default function SearchBar({ size = 'default', initialPlatform, autoFocus = false, onNavigate }: Props) {
   const navigate = useNavigate()
   const id = useId()
-  const listId = `${id}-list`
   // The region is what was picked here, else the page's, else the one this
   // browser remembers (read hydration-safely, see useLastRegion), else EUW.
   const [chosen, setChosen] = useState<string | null>(null)
@@ -77,10 +77,9 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   const platform = chosen || initialPlatform || remembered || 'euw1'
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [open, setOpen] = useState(false)
-  // A key rather than an index: suggestions arrive after a keystroke, and an
-  // index would silently move the highlight onto whichever row landed there.
-  const [activeKey, setActiveKey] = useState<string | null>(null)
+  // The open state and the highlight (held by key: suggestions arrive after a
+  // keystroke, and an index would move onto whichever row landed there).
+  const combo = useCombobox()
   const recent = useRecentSearches()
   const rowRef = useRef<HTMLDivElement>(null)
 
@@ -90,7 +89,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   const suggestions = useQuery({
     queryKey: ['suggest', settled, platform],
     queryFn: ({ signal }) => api.suggest(settled, platform, signal),
-    enabled: open && typedName(settled).length >= MIN_CHARS,
+    enabled: combo.open && typedName(settled).length >= MIN_CHARS,
     staleTime: 5 * 60_000,
     // The previous list stays up while the next one loads, so the dropdown
     // does not collapse and reopen on every letter.
@@ -143,8 +142,8 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
   // never flashes while a request is still on its way.
   const nothingKnown =
     long && suggestions.data?.query === text && options.length === 0
-  const showList = open && (options.length > 0 || nothingKnown)
-  const activeIndex = options.findIndex((o) => o.key === activeKey)
+  const list = combo.bind(options, pick)
+  const showList = combo.open && (options.length > 0 || nothingKnown)
 
   const large = size === 'large'
 
@@ -159,16 +158,15 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
     // Filled in, as a picked suggestion should be: if the account has since
     // been renamed, the ID is still there to correct.
     setValue(`${option.gameName}#${option.tagLine}`)
-    setOpen(false)
-    setActiveKey(null)
+    combo.close()
     setError(null)
     go(option.platform, option.gameName, option.tagLine)
   }
 
   function onSubmit(event: FormEvent) {
     event.preventDefault()
-    if (showList && activeIndex >= 0) {
-      pick(options[activeIndex])
+    if (showList && list.active) {
+      pick(list.active)
       return
     }
     const parsed = parseRiotId(value)
@@ -181,33 +179,14 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
       return
     }
     setError(null)
-    setOpen(false)
+    combo.close()
     go(platform, parsed.name, parsed.tag)
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    // Enter and the arrows belong to the input method while a Korean or
-    // Japanese name is still being composed.
-    if (event.nativeEvent.isComposing) return
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      if (!open) {
-        setOpen(true)
-        return
-      }
-      if (!options.length) return
-      const next =
-        event.key === 'ArrowDown'
-          ? (activeIndex + 1) % options.length
-          : activeIndex <= 0
-            ? options.length - 1
-            : activeIndex - 1
-      setActiveKey(options[next].key)
-    } else if (event.key === 'Escape' && open) {
-      event.preventDefault()
-      setOpen(false)
-      setActiveKey(null)
-    }
+    // The arrows and Escape belong to the list; Enter submits the form, which
+    // takes the highlighted suggestion when there is one.
+    list.onKeyDown(event)
   }
 
   return (
@@ -216,15 +195,11 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
           body. Drawn in place, it was clipped by whatever held the field: the
           home hero hides its overflow for the splash art, and cut the list
           off at its bottom edge after three rows (seen 2026-09-23). */}
-      <Popover
+      <AnchoredList
         open={showList}
-        onOpenChange={(next) => {
-          if (next) return
-          setOpen(false)
-          setActiveKey(null)
-        }}
-      >
-        <PopoverAnchor asChild>
+        onDismiss={combo.close}
+        anchorRef={rowRef}
+        anchor={
           <div
             ref={rowRef}
             className={`flex items-stretch overflow-hidden frame transition-colors focus-within:border-gold ${
@@ -257,25 +232,16 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
               id={`${id}-riot-id`}
               value={value}
               autoFocus={autoFocus}
-              role="combobox"
-              aria-autocomplete="list"
-              aria-expanded={showList}
-              aria-controls={listId}
-              aria-activedescendant={
-                showList && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined
-              }
+              {...list.inputProps(showList)}
               onChange={(e) => {
                 setValue(e.target.value)
-                setOpen(true)
-                setActiveKey(null)
+                combo.setOpen(true)
+                combo.setActiveKey(null)
                 if (error) setError(null)
               }}
               onKeyDown={onKeyDown}
-              onMouseDown={() => setOpen(true)}
-              onBlur={() => {
-                setOpen(false)
-                setActiveKey(null)
-              }}
+              onMouseDown={() => combo.setOpen(true)}
+              onBlur={combo.close}
               placeholder="Caps#EUW"
               spellCheck={false}
               autoComplete="off"
@@ -293,50 +259,26 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
               Search
             </button>
           </div>
-        </PopoverAnchor>
-
-        <PopoverContent
-          align="start"
-          sideOffset={4}
-          // A list of options, not a dialog: the field keeps focus and says
-          // which option is active, so the popover takes no role of its own.
-          role="presentation"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-          onCloseAutoFocus={(e) => e.preventDefault()}
-          // A press on the field itself is not outside: it opens the list, and
-          // letting it count would close the list and reopen it in one click.
-          onInteractOutside={(e) => {
-            if (rowRef.current?.contains(e.target as Node)) e.preventDefault()
-          }}
-          // Opaque: at the panel's usual 94% the text under the list showed
-          // through it.
-          className="w-(--radix-popover-trigger-width) overflow-hidden rounded-lg border-line bg-panel p-0 text-ink shadow-[0_18px_44px_-12px_rgb(0_0_0/0.85)]"
-        >
+        }
+      >
           {!text && (
-            <p id={`${listId}-label`} className="px-3 pb-1 pt-2 text-xs text-ink-faint">
+            <p id={`${combo.listId}-label`} className="px-3 pb-1 pt-2 text-xs text-ink-faint">
               Recent
             </p>
           )}
           <ul
-            id={listId}
+            id={combo.listId}
             role="listbox"
             {...(text
               ? { 'aria-label': 'Players Riftline has seen' }
-              : { 'aria-labelledby': `${listId}-label` })}
+              : { 'aria-labelledby': `${combo.listId}-label` })}
           >
             {options.map((o, i) => (
               <li
                 key={o.key}
-                id={`${listId}-${i}`}
-                role="option"
-                aria-selected={i === activeIndex}
-                // Keeps focus in the field, so the blur that closes the list
-                // does not land before the click that picks from it.
-                onMouseDown={(e) => e.preventDefault()}
-                onMouseMove={() => o.key !== activeKey && setActiveKey(o.key)}
-                onClick={() => pick(o)}
+                {...list.optionProps(o, i)}
                 className={`flex cursor-pointer items-center gap-2.5 px-3 py-2 ${
-                  i === activeIndex ? 'bg-raised' : ''
+                  i === list.activeIndex ? 'bg-raised' : ''
                 } ${large ? 'text-[15px]' : 'text-sm'}`}
               >
                 {o.iconUrl ? (
@@ -364,8 +306,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
                 : 'Players Riftline has seen. For anyone else, search the full Name#TAG.'}
             </p>
           )}
-        </PopoverContent>
-      </Popover>
+      </AnchoredList>
 
       {error && (
         <p role="alert" className="mt-2 text-sm text-loss">
