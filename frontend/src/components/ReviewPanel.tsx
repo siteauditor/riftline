@@ -1,6 +1,6 @@
 import type { LaneRecord, ReviewMetric, RoleReview } from '../lib/api'
 import { pct, positionLabel } from '../lib/format'
-import { LANE_TEXT, laneColor } from './story/lanes'
+import { laneColor } from './story/lanes'
 import Hint from './Hint'
 
 /**
@@ -25,7 +25,7 @@ export default function ReviewPanel({
   return (
     <section className="frame">
       <header className="border-b border-line-soft px-4 py-2.5">
-        <h2 className="eyebrow">Deaths and takedowns</h2>
+        <h2 className="eyebrow">{main ? 'Deaths and takedowns' : 'Lanes'}</h2>
       </header>
       <div className="space-y-4 px-4 py-3 text-xs">
         {main && (
@@ -69,7 +69,7 @@ function Metric({ metric, position }: { metric: ReviewMetric; position: string }
   const value = share ? pct(metric.value) : `${(metric.value * 100).toFixed(1)} pts`
   return (
     <Hint text={metric.measures}>
-    <li tabIndex={0} className="outline-none">
+    <li tabIndex={0}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-ink-dim">{metric.label}</span>
         <span className="tnum text-ink">{value}</span>
@@ -107,7 +107,6 @@ function Lanes({ record }: { record: LaneRecord }) {
         {parts.map((k) => (
           <span
             key={k}
-            title={`${LANE_TEXT[k]}: ${record[k]}`}
             style={{
               width: `${(record[k] / record.games) * 100}%`,
               background: laneColor(k),

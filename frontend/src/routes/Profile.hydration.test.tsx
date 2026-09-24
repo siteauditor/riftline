@@ -8,7 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ApiError } from '@/lib/api'
 import { queries } from '@/lib/queries'
-import { emptyAnalytics, emptyHistory, PLAYER, profile, storedHistory, storedProfile } from '@/test/fixtures/profile'
+import {
+  emptyAnalytics,
+  emptyHistory,
+  filledAnalytics,
+  fullGame,
+  PLAYER,
+  profile,
+  storedHistory,
+  storedProfile,
+} from '@/test/fixtures/profile'
 
 import Profile from './Profile'
 
@@ -115,6 +124,26 @@ describe('a prerendered profile hydrating a filtered link', () => {
       path.includes('/matches') || path.includes('/analytics') ? json(emptyHistory) : new Promise(() => {}),
     )
     expect(requests.filter((r) => r.includes('/matches'))).toEqual([])
+  })
+
+  it('serves every panel, and no hover-only title, in the prerendered HTML', () => {
+    const client = prerendered()
+    client.setQueryData(queries.matchesStored(platform, name, tag).queryKey, {
+      ...storedHistory,
+      matches: [fullGame(1), fullGame(2), fullGame(3)],
+      stored_total: 3,
+    })
+    client.setQueryData(queries.analyticsStored(platform, name, tag).queryKey, filledAnalytics)
+    const html = renderToString(page(BARE, client))
+    const served = document.createElement('div')
+    served.innerHTML = html
+    // The activity chart's one fact, in words rather than 24 bar titles; in
+    // UTC, as the server has no viewer's timezone.
+    expect(served.textContent).toContain('Busiest 19:00 to 22:00, 68% of these games')
+    expect(served.textContent).toContain('Deaths and takedowns')
+    // A title reaches a mouse only; every explanation is a hint, which a
+    // keyboard reaches too, or text on the page.
+    expect(html).not.toMatch(/ title="/)
   })
 
   it('reads storage, and says so, when live lookups are paused', async () => {

@@ -34,7 +34,7 @@ export default function LobbyRanks({ lobby, className = 'mt-3' }: { lobby: Lobby
         ))}
       </span>
       <Hint text={lobby.buckets.map((b) => `${label(b.tier)}: ${b.games}`).join(', ')}>
-        <span tabIndex={0} className="outline-none">
+        <span tabIndex={0}>
           <span className="tnum text-ink">{pct(largest.games / lobby.measured)}</span> of these
           games were {label(largest.tier)} lobbies
           <span className="text-ink-faint">

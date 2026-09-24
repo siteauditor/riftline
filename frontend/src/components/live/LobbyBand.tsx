@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 
+import Hint from '../Hint'
 import { Stat, StatCell, StatStrip } from '../Stat'
 import type { LiveGame, SideRead } from '../../lib/api'
 import { tierColor, tierLabel } from '../../lib/format'
@@ -184,20 +185,22 @@ function SameSidePairs({ game }: { game: LiveGame }) {
   return (
     <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-ink-faint">
       {pairs.slice(0, 3).map((pair) => (
-        <span
+        <Hint
           key={`${pair.puuid_a}-${pair.puuid_b}`}
-          title={
+          text={
             `${nameOf(pair.puuid_a)} and ${nameOf(pair.puuid_b)} were on the same side in ` +
             `${pair.games} of the stored games we hold with both of them, winning ${pair.wins}. ` +
             'Riftline only sees the games it has crawled, so this is a pattern rather than a count ' +
             'of how often they play together.'
           }
         >
-          <span className="text-ink-dim">
-            {nameOf(pair.puuid_a)} and {nameOf(pair.puuid_b)}
-          </span>{' '}
-          were on the same side in {pair.games} stored games. Possibly queued together.
-        </span>
+          <span tabIndex={0}>
+            <span className="text-ink-dim">
+              {nameOf(pair.puuid_a)} and {nameOf(pair.puuid_b)}
+            </span>{' '}
+            were on the same side in {pair.games} stored games. Possibly queued together.
+          </span>
+        </Hint>
       ))}
     </p>
   )

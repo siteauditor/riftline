@@ -1,5 +1,3 @@
-import { useMemo } from 'react'
-
 import type { MatchSummary } from '../../lib/api'
 import { pct, winRateColor } from '../../lib/format'
 
@@ -17,27 +15,25 @@ export default function RecentChampions({
   matches: MatchSummary[]
   max?: number
 }) {
-  const champions = useMemo(() => {
-    const by = new Map<
-      number,
-      { name: string; icon: string | null; games: number; wins: number }
-    >()
-    for (const m of matches) {
-      if (m.is_remake) continue
-      const row = by.get(m.champion.id) ?? {
-        name: m.champion.name,
-        icon: m.champion.icon_url,
-        games: 0,
-        wins: 0,
-      }
-      row.games += 1
-      if (m.win) row.wins += 1
-      by.set(m.champion.id, row)
+  const by = new Map<
+    number,
+    { name: string; icon: string | null; games: number; wins: number }
+  >()
+  for (const m of matches) {
+    if (m.is_remake) continue
+    const row = by.get(m.champion.id) ?? {
+      name: m.champion.name,
+      icon: m.champion.icon_url,
+      games: 0,
+      wins: 0,
     }
-    return [...by.entries()]
-      .sort((a, b) => b[1].games - a[1].games)
-      .slice(0, max)
-  }, [matches, max])
+    row.games += 1
+    if (m.win) row.wins += 1
+    by.set(m.champion.id, row)
+  }
+  const champions = [...by.entries()]
+    .sort((a, b) => b[1].games - a[1].games)
+    .slice(0, max)
 
   if (champions.length === 0) return null
 

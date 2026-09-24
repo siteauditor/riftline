@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useEffect, useEffectEvent, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 
+import Hint from '../Hint'
+import TimeAgo from '../TimeAgo'
 import type { PoolChampion } from './pool'
 import { levelStep } from './scale'
-import { compact, pct, scoreColor, timeAgo, winRateColor } from '../../lib/format'
+import { compact, pct, scoreColor, winRateColor } from '../../lib/format'
 import { championPath } from '../../lib/searchParams'
 import { buttonVariants } from '@/components/ui/button'
 
@@ -41,24 +43,26 @@ export default function ChampionDetail({
     panel.current?.focus()
   }, [champion.id])
 
-  const close = useCallback(() => {
+  const close = () => {
     // By id rather than a stored ref: the name filter can unmount the tile
     // while this is open, and a ref would then point at a detached node.
     const tile = document.getElementById(`mastery-tile-${champion.id}`)
     onClose()
     tile?.focus()
-  }, [champion.id, onClose])
+  }
 
   // Escape goes through the same path as the button, so both put focus back on
   // the tile. Closing with the keyboard and landing on `document.body` was the
-  // first thing this panel got wrong.
+  // first thing this panel got wrong. An effect event, so the listener is added
+  // once and still closes the champion now open.
+  const onEscape = useEffectEvent(close)
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') close()
+      if (event.key === 'Escape') onEscape()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [close])
+  }, [])
 
   return createPortal(
     <div
@@ -97,7 +101,7 @@ export default function ChampionDetail({
               <Pair label="To the next level" value={compact(entry.points_until_next_level)} />
             )}
             {entry.last_play_time && (
-              <Pair label="Last played" value={timeAgo(entry.last_play_time)} />
+              <Pair label="Last played" value={<TimeAgo at={entry.last_play_time} />} />
             )}
             {/* Riot's own season figures, drawn only where Riot filled them:
                 measured on one account, 23 of 166 champions carry a milestone
@@ -109,7 +113,7 @@ export default function ChampionDetail({
               <Pair
                 label="Tokens"
                 value={String(entry.tokens_earned)}
-                title="The number Riot reports toward this champion's next level."
+                hint="The number Riot reports toward this champion's next level."
               />
             )}
             {entry.milestone_grades && entry.milestone_grades.length > 0 && (
@@ -147,7 +151,7 @@ export default function ChampionDetail({
                 label="Riftline score"
                 value={record.avg_score.toFixed(1)}
                 color={scoreColor(record.avg_score)}
-                title={`Over ${record.scored_games} scored games.`}
+                note={`${record.scored_games} scored`}
               />
             )}
           </dl>
@@ -156,7 +160,7 @@ export default function ChampionDetail({
         <div className="ml-auto flex items-center gap-2 text-sm">
           {record && (
             <Link
-              to={`${base}/champions#champion-${champion.id}`}
+              to={`${base}/champions?queue=all#champion-${champion.id}`}
               className="text-ink-dim underline decoration-line underline-offset-2 hover:text-gold-bright"
             >
               Their games
@@ -195,19 +199,25 @@ function Pair({
   label,
   value,
   color,
-  title,
+  hint,
+  note,
 }: {
   label: string
-  value: string
+  value: ReactNode
   color?: string
-  title?: string
+  /** What the figure means, on hover and on focus. */
+  hint?: string
+  /** Its sample, written beside it. */
+  note?: string
 }) {
-  return (
-    <div title={title}>
+  const pair = (
+    <div tabIndex={hint ? 0 : undefined}>
       <dt className="text-xs text-ink-faint">{label}</dt>
       <dd className="tnum font-600" style={{ color: color ?? 'var(--color-ink)' }}>
         {value}
+        {note && <span className="ml-1.5 text-[11px] font-500 text-ink-faint">{note}</span>}
       </dd>
     </div>
   )
+  return hint ? <Hint text={hint}>{pair}</Hint> : pair
 }

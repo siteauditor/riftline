@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 
+import Hint from '../Hint'
+import TimeAgo from '../TimeAgo'
 import type { SharedGames } from '../../lib/api'
-import { timeAgo } from '../../lib/format'
 import { summonerPath } from '../../lib/profileAddress'
 
 /**
@@ -42,18 +43,28 @@ export default function MetBefore({
       : null
 
   return (
-    <Link
-      to={summonerPath(platform, name, tag)}
-      className="whitespace-nowrap text-[11px] text-ink-dim underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright"
-      title={
-        `You and this player were both in ${shared.games} stored ${shared.games === 1 ? 'game' : 'games'}: ` +
-        `${shared.same_side} on the same side and ${shared.opposite_side} against each other` +
-        (shared.last_played ? `, most recently ${timeAgo(shared.last_played)}` : '') +
-        '. These are the games Riftline holds, not everything either of you has played.'
+    <Hint
+      text={
+        <>
+          You and this player were both in {shared.games} stored{' '}
+          {shared.games === 1 ? 'game' : 'games'}: {shared.same_side} on the same side and{' '}
+          {shared.opposite_side} against each other
+          {shared.last_played && (
+            <>
+              , most recently <TimeAgo at={shared.last_played} />
+            </>
+          )}
+          . These are the games Riftline holds, not everything either of you has played.
+        </>
       }
     >
-      Met {times}
-      {(against || beside) && `, ${[against, beside].filter(Boolean).join(', ')}`}
-    </Link>
+      <Link
+        to={summonerPath(platform, name, tag)}
+        className="whitespace-nowrap text-[11px] text-ink-dim underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright"
+      >
+        Met {times}
+        {(against || beside) && `, ${[against, beside].filter(Boolean).join(', ')}`}
+      </Link>
+    </Hint>
   )
 }

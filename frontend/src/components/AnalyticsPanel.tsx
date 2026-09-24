@@ -1,6 +1,7 @@
 import type { Analytics } from '../lib/api'
 import { useLocalOffsetHours } from '../lib/clock'
 import { pct, positionLabel } from '../lib/format'
+import { busiestWindow, hourLabel } from '../lib/activity'
 import { gamesCovered } from '../lib/profileScope'
 
 /**
@@ -32,6 +33,7 @@ export default function AnalyticsPanel({ data }: { data: Analytics | undefined }
     const utcHour = (((hour - offsetHours) % 24) + 24) % 24
     return data.activity_utc[utcHour] ?? 0
   })
+  const busiest = busiestWindow(local)
 
   return (
     <section className="frame">
@@ -93,7 +95,6 @@ export default function AnalyticsPanel({ data }: { data: Analytics | undefined }
             {local.map((games, hour) => (
               <span
                 key={hour}
-                title={`${String(hour).padStart(2, '0')}:00, ${games} game${games === 1 ? '' : 's'}`}
                 className="flex-1 rounded-t-[1px] bg-gold/60"
                 style={{ height: `${Math.max(4, (games / peakGames) * 100)}%` }}
               />
@@ -106,6 +107,14 @@ export default function AnalyticsPanel({ data }: { data: Analytics | undefined }
             <span>18</span>
             <span>23</span>
           </div>
+          {/* The one fact the chart is for, said: the bars only drew it, and
+              their hours and counts were hover titles no phone could read. */}
+          {busiest && (
+            <p className="mt-1.5 text-xs text-ink-dim">
+              Busiest {hourLabel(busiest.start)} to {hourLabel(busiest.end)},{' '}
+              <span className="tnum">{pct(busiest.share)}</span> of these games
+            </p>
+          )}
         </div>
 
         <dl className="grid grid-cols-2 gap-x-3 gap-y-1 border-t border-line-soft pt-2.5 text-xs">

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import Hint from '../Hint'
 import PositionIcon from '../PositionIcon'
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, RoleRecord, SkinArt } from './PlayerBits'
@@ -163,12 +164,11 @@ function LaneCard({
             leaguePoints={p.rank?.league_points}
           />
           {p.rank && p.rank.games > 0 && (
-            <span
-              title={`${p.rank.wins}W ${p.rank.losses}L this season, ${pct(p.rank.win_rate, 1)} win rate`}
-              className="tnum whitespace-nowrap text-[11px] text-ink-faint"
-            >
-              {pct(p.rank.win_rate)} WR
-            </span>
+            <Hint text={`${p.rank.wins}W ${p.rank.losses}L this season, ${pct(p.rank.win_rate, 1)} win rate`}>
+              <span tabIndex={0} className="tnum whitespace-nowrap text-[11px] text-ink-faint">
+                {pct(p.rank.win_rate)} WR
+              </span>
+            </Hint>
           )}
           <MasteryChip p={p} />
         </div>
@@ -221,66 +221,68 @@ function LaneCenter({
       <PositionIcon position={lane} className="size-5 text-ink-dim" />
       <span className="display text-xs font-600 text-ink-dim">{positionLabel(lane)}</span>
       {unsure && (
-        <span
-          className="text-[10px] text-gold"
-          title="Riot's live data has no positions, so this lane is inferred from the champions and their summoner spells, and this one is a close call. Measured on held-out games, lanes this uncertain are right about half to two thirds of the time."
-        >
-          likely
-        </span>
+        <Hint text="Riot's live data has no positions, so this lane is inferred from the champions and their summoner spells, and this one is a close call. Measured on held-out games, lanes this uncertain are right about half to two thirds of the time.">
+          <span tabIndex={0} className="text-[10px] text-gold">
+            likely
+          </span>
+        </Hint>
       )}
       {record ? (
-        <span
-          className="mt-0.5 w-full"
-          style={{ opacity: BASIS_WEIGHT[record.basis] }}
-          title={matchupTitle(blue, red, lane, record)}
-        >
-          {/* Blue's share of the matchup's wins, as blue against red. A weaker
-              basis is drawn as a dashed rule rather than a filled bar, so a
-              record of two champions who merely shared a game cannot be read
-              as a lane record at a glance. */}
-          {record.basis === 'team' ? (
-            <span className="block border-t border-dashed border-ink-faint" />
-          ) : (
-            <span className="flex h-1 w-full overflow-hidden rounded-full bg-loss/70">
+        <Hint text={matchupTitle(blue, red, lane, record)}>
+          <span
+            tabIndex={0}
+            className="mt-0.5 w-full"
+            style={{ opacity: BASIS_WEIGHT[record.basis] }}
+          >
+            {/* Blue's share of the matchup's wins, as blue against red. A weaker
+                basis is drawn as a dashed rule rather than a filled bar, so a
+                record of two champions who merely shared a game cannot be read
+                as a lane record at a glance. */}
+            {record.basis === 'team' ? (
+              <span className="block border-t border-dashed border-ink-faint" />
+            ) : (
+              <span className="flex h-1 w-full overflow-hidden rounded-full bg-loss/70">
+                <span
+                  className="h-full bg-win"
+                  style={{ width: `${Math.round(record.win_rate * 100)}%` }}
+                />
+              </span>
+            )}
+            <span className="tnum mt-0.5 block text-[11px] text-ink-dim">
+              {record.wins}-{record.games - record.wins}
+            </span>
+            {BASIS_LABEL[record.basis] && (
+              <span className="block text-[10px] leading-tight text-ink-faint">
+                {BASIS_LABEL[record.basis]}
+              </span>
+            )}
+            {/* Dropped on a team basis rather than dimmed: a gold lead measured
+                against somebody else's laner is not a lead against this one. The
+                server drops it too; this is the second lock on the same door. */}
+            {record.basis !== 'team' && record.gold_diff_14 != null && (
               <span
-                className="h-full bg-win"
-                style={{ width: `${Math.round(record.win_rate * 100)}%` }}
-              />
-            </span>
-          )}
-          <span className="tnum mt-0.5 block text-[11px] text-ink-dim">
-            {record.wins}-{record.games - record.wins}
+                className="tnum block text-[10px]"
+                style={{
+                  color:
+                    record.gold_diff_14 >= 0 ? 'var(--color-win)' : 'var(--color-loss)',
+                }}
+              >
+                {signed(Math.round(record.gold_diff_14))}g
+              </span>
+            )}
           </span>
-          {BASIS_LABEL[record.basis] && (
-            <span className="block text-[10px] leading-tight text-ink-faint">
-              {BASIS_LABEL[record.basis]}
-            </span>
-          )}
-          {/* Dropped on a team basis rather than dimmed: a gold lead measured
-              against somebody else's laner is not a lead against this one. The
-              server drops it too; this is the second lock on the same door. */}
-          {record.basis !== 'team' && record.gold_diff_14 != null && (
-            <span
-              className="tnum block text-[10px]"
-              style={{
-                color:
-                  record.gold_diff_14 >= 0 ? 'var(--color-win)' : 'var(--color-loss)',
-              }}
-            >
-              {signed(Math.round(record.gold_diff_14))}g
-            </span>
-          )}
-        </span>
+        </Hint>
       ) : (
         // Named rather than left blank. Measured across forty real lobbies,
         // only 26% of lanes have a record on the newest patch, so a silent gap
         // here read as the page having failed to draw something.
-        <span
-          className="mt-0.5 text-[10px] text-ink-faint"
-          title={`We hold fewer than five stored games of ${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}, on this patch or the one before it.`}
+        <Hint
+          text={`We hold fewer than five stored games of ${blue.champion.name} against ${red.champion.name} as ${positionLabel(lane)}, on this patch or the one before it.`}
         >
-          no record yet
-        </span>
+          <span tabIndex={0} className="mt-0.5 text-[10px] text-ink-faint">
+            no record yet
+          </span>
+        </Hint>
       )}
     </div>
   )

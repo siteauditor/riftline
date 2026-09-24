@@ -8,9 +8,6 @@ import ItemIcon from './items/ItemIcon'
 import Scoreboard from './match/Scoreboard'
 import { LANE_TEXT, laneColor } from './story/lanes'
 import { useNow } from '../lib/clock'
-
-// Ranked solo and flex: the queues the win-chance model covers.
-const STORY_QUEUES = new Set([420, 440])
 import {
   compact,
   duration,
@@ -25,6 +22,9 @@ import {
 import Hint from './Hint'
 import { gameAnchor, summonerPath } from '../lib/profileAddress'
 import { WITHHELD, withheldText } from '../lib/withheld'
+
+// Ranked solo and flex: the queues the win-chance model covers.
+const STORY_QUEUES = new Set([420, 440])
 
 /**
  * One game in the history feed.
@@ -165,7 +165,6 @@ export default function MatchRow({
               key={`${s.id}-${i}`}
               src={s.icon_url ?? undefined}
               alt={s.name ?? ''}
-              title={s.name ?? ''}
               className="size-[22px] rounded-sm bg-raised"
               loading="lazy"
             />
@@ -178,7 +177,7 @@ export default function MatchRow({
               key={i}
               className="grid size-[22px] place-items-center rounded-full bg-raised"
             >
-              {r?.icon_url && <img src={r.icon_url} alt="" className="size-5" loading="lazy" />}
+              {r?.icon_url && <img src={r.icon_url} alt={r.name ?? ''} className="size-5" loading="lazy" />}
             </span>
           ))}
         </div>
@@ -213,7 +212,7 @@ export default function MatchRow({
               >
                 <span
                   tabIndex={0}
-                  className="tnum display text-[17px] font-700 outline-none"
+                  className="tnum display text-[17px] font-700"
                   style={{ color: scoreColor(match.score) }}
                 >
                   {match.score.toFixed(1)}
@@ -232,7 +231,7 @@ export default function MatchRow({
           */}
           {withheld && (
             <Hint text={withheld.long}>
-              <p tabIndex={0} className="mt-1 text-xs text-ink-faint outline-none">
+              <p tabIndex={0} className="mt-1 text-xs text-ink-faint">
                 {withheld.short}
               </p>
             </Hint>
@@ -251,9 +250,8 @@ export default function MatchRow({
             </p>
           )}
           {match.laning_score !== null && (
-            <p
-              className="tnum mt-0.5 text-xs text-ink-faint"
-              title={
+            <Hint
+              text={
                 match.laning_opponent
                   ? `Laning phase at 14 minutes against ${match.laning_opponent.name}` +
                     (match.gold_diff_14 !== null
@@ -262,25 +260,27 @@ export default function MatchRow({
                   : 'Laning phase at 14 minutes'
               }
             >
-              <span className="text-ink-faint">Laning </span>
-              <span
-                style={{
-                  color:
-                    match.laning_score >= 0.5
-                      ? 'var(--color-win)'
-                      : 'var(--color-loss)',
-                }}
-              >
-                {Math.round(match.laning_score * 100)}
-              </span>
-              <span className="text-line"> : </span>
-              {100 - Math.round(match.laning_score * 100)}
-              {match.laning_label && (
-                <span className="ml-1.5" style={{ color: laneColor(match.laning_label) }}>
-                  {LANE_TEXT[match.laning_label]}
+              <p tabIndex={0} className="tnum mt-0.5 text-xs text-ink-faint">
+                <span className="text-ink-faint">Laning </span>
+                <span
+                  style={{
+                    color:
+                      match.laning_score >= 0.5
+                        ? 'var(--color-win)'
+                        : 'var(--color-loss)',
+                  }}
+                >
+                  {Math.round(match.laning_score * 100)}
                 </span>
-              )}
-            </p>
+                <span className="text-line"> : </span>
+                {100 - Math.round(match.laning_score * 100)}
+                {match.laning_label && (
+                  <span className="ml-1.5" style={{ color: laneColor(match.laning_label) }}>
+                    {LANE_TEXT[match.laning_label]}
+                  </span>
+                )}
+              </p>
+            </Hint>
           )}
         </div>
 
@@ -403,8 +403,7 @@ function TeamMember({ p, platform }: { p: ParticipantBrief; platform: string }) 
       {p.champion.icon_url && (
         <img
           src={p.champion.icon_url}
-          alt={p.champion.name}
-          title={`${p.champion.name}, ${positionLabel(p.position)}`}
+          alt={`${p.champion.name}, ${positionLabel(p.position)}`}
           className="size-4 shrink-0 rounded-sm"
           loading="lazy"
         />

@@ -124,7 +124,6 @@ export default function WinChanceCurve({
               key={m.start_ms}
               className="display absolute grid size-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-deep text-[11px] font-700 text-gold-bright ring-1 ring-gold"
               style={{ left: `${x(m.start_ms)}%`, top: `${y(at(m.start_ms))}%` }}
-              title={`${clock(m.start_ms)}: ${m.text}`}
               aria-hidden
             >
               {i + 1}

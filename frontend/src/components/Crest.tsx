@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 
-import { tierColor, tierLabel } from '../lib/format'
+import { tierColor } from '../lib/format'
 import { rankArtFit, rankArtSrc, type RankArtKind } from '../lib/rankArt'
 
 /**
@@ -33,28 +33,21 @@ export type CrestSize = keyof typeof STEPS
 
 export default function Crest({
   tier,
-  division,
   size,
   className,
-  title,
 }: {
   tier?: string | null
-  division?: string | null
   size: CrestSize
   className?: string
-  /** `null` for a caller that sets a richer tooltip on its own wrapper: an
-   *  inner title always wins on hover, which is how the rank pill lost its LP. */
-  title?: string | null
 }) {
   if (!tier) return null
   const step = STEPS[size]
   return (
-    // The tier is always written out beside this, so the art is decoration to a
-    // screen reader. The title stays on the frame: the image is
-    // `pointer-events: none`, so a title on it would never fire.
+    // The tier is always written out beside this, so the art is decoration: to
+    // a screen reader, and to a pointer too. The hover title it carried said the
+    // word printed next to it, and on the rank pill it hid the pill's own LP.
     <span
       aria-hidden
-      title={title === null ? undefined : (title ?? tierLabel(tier, division))}
       className={`rank-art ${step.glow ? 'rank-art-glow' : ''} ${step.box} ${className ?? ''}`}
       style={{ '--accent': tierColor(tier), ...rankArtFit(tier, step.kind) } as CSSProperties}
     >

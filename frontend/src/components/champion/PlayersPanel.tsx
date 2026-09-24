@@ -75,7 +75,7 @@ export default function PlayersPanel({ board, championName }: { board: ChampionP
                       {/* A fixed slot, so an unranked player's name lines up
                           with the ranked ones instead of sliding left. */}
                       <span className="grid size-8 shrink-0 place-items-center">
-                        <Crest tier={p.tier} division={p.division} size="line" />
+                        <Crest tier={p.tier} size="line" />
                       </span>
                       <div className="min-w-0">
                         {to ? (

@@ -1,3 +1,4 @@
+import Hint from '../Hint'
 import type { StoryMoment } from '../../lib/api'
 import { clock, points } from './lanes'
 
@@ -24,13 +25,15 @@ export default function Moments({ moments, team }: { moments: StoryMoment[]; tea
               <span className="tnum mr-1.5 text-ink-faint">{clock(m.start_ms)}</span>
               {m.text}
             </span>
-            <span
-              className="tnum text-sm font-600"
-              style={{ color: swing >= 0 ? 'var(--color-win)' : 'var(--color-loss)' }}
-              title="Points of win chance for this side, from just before the sequence to a minute after"
-            >
-              {points(swing)}
-            </span>
+            <Hint text="Points of win chance for this side, from just before the sequence to a minute after">
+              <span
+                tabIndex={0}
+                className="tnum text-sm font-600"
+                style={{ color: swing >= 0 ? 'var(--color-win)' : 'var(--color-loss)' }}
+              >
+                {points(swing)}
+              </span>
+            </Hint>
           </li>
         )
       })}

@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 
 import { api, type MatchHistory, type MatchSummary, type QueueScope } from './api'
@@ -74,10 +73,7 @@ export function useMatchHistory(
       : undefined,
   })
 
-  const matches: MatchSummary[] = useMemo(
-    () => query.data?.pages.flatMap((p) => p.matches) ?? [],
-    [query.data],
-  )
+  const matches: MatchSummary[] = query.data?.pages.flatMap((p) => p.matches) ?? []
 
   return { query, matches }
 }

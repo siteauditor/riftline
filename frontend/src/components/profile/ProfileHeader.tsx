@@ -72,7 +72,7 @@ export default function ProfileHeader({
               {headline ? (
                 <>
                   <span className="flex items-center gap-1.5">
-                    <Crest tier={headline.tier} division={headline.division} size="inline" />
+                    <Crest tier={headline.tier} size="inline" />
                     <span
                       className="display text-base font-700 uppercase tracking-wide"
                       style={{ color: accent } as CSSProperties}

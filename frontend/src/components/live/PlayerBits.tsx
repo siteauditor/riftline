@@ -1,7 +1,9 @@
 import { useState } from 'react'
 
+import Hint from '../Hint'
+import TimeAgo from '../TimeAgo'
 import type { LiveParticipant } from '../../lib/api'
-import { compact, pct, positionLabel, timeAgo } from '../../lib/format'
+import { compact, pct, positionLabel } from '../../lib/format'
 
 /**
  * The skin a player is wearing, or the champion's base art if that image fails.
@@ -36,25 +38,33 @@ export function MasteryChip({ p }: { p: LiveParticipant }) {
   if (!p.mastery_known) return null
   if (!p.mastery) {
     return (
-      <span
-        className="text-[11px] text-ink-faint"
-        title={`Riot reports no mastery on ${p.champion.name} for this player, so this may be their first game on it.`}
-      >
-        No mastery
-      </span>
+      <Hint text={`Riot reports no mastery on ${p.champion.name} for this player, so this may be their first game on it.`}>
+        <span tabIndex={0} className="text-[11px] text-ink-faint">
+          No mastery
+        </span>
+      </Hint>
     )
   }
   const m = p.mastery
   return (
-    <span
-      className="tnum whitespace-nowrap text-[11px] text-ink-dim"
-      title={
-        `Mastery ${m.level} on ${p.champion.name}, ${m.points.toLocaleString('en-US')} points` +
-        (m.last_play_time ? `. Last played ${timeAgo(m.last_play_time)}.` : '.')
+    <Hint
+      text={
+        <>
+          Mastery {m.level} on {p.champion.name}, {m.points.toLocaleString('en-US')} points
+          {m.last_play_time ? (
+            <>
+              . Last played <TimeAgo at={m.last_play_time} />.
+            </>
+          ) : (
+            '.'
+          )}
+        </>
       }
     >
-      <span className="font-600 text-gold-bright">M{m.level}</span> {compact(m.points)}
-    </span>
+      <span tabIndex={0} className="tnum whitespace-nowrap text-[11px] text-ink-dim">
+        <span className="font-600 text-gold-bright">M{m.level}</span> {compact(m.points)}
+      </span>
+    </Hint>
   )
 }
 
@@ -64,12 +74,13 @@ export function RoleRecord({ p }: { p: LiveParticipant }) {
   return (
     // "Champ WR", not "Pick": on the tier list "Pick" is the pick rate, and one
     // word meaning two numbers on one site is how people misread both.
-    <span
-      className="tnum whitespace-nowrap text-[11px] text-ink-faint"
-      title={`${p.champion.name} as ${positionLabel(p.position)} in our stored games: ${r.wins} wins, ${r.games - r.wins} losses, ${pct(r.win_rate, 1)}. This is the champion, not this player.`}
+    <Hint
+      text={`${p.champion.name} as ${positionLabel(p.position)} in our stored games: ${r.wins} wins, ${r.games - r.wins} losses, ${pct(r.win_rate, 1)}. This is the champion, not this player.`}
     >
-      Champ WR {pct(r.win_rate)}
-    </span>
+      <span tabIndex={0} className="tnum whitespace-nowrap text-[11px] text-ink-faint">
+        Champ WR {pct(r.win_rate)}
+      </span>
+    </Hint>
   )
 }
 
@@ -81,18 +92,17 @@ export function Loadout({ p }: { p: LiveParticipant }) {
           key={`${s.id}-${i}`}
           src={s.icon_url ?? undefined}
           alt={s.name ?? ''}
-          title={s.name ?? ''}
           className="size-4 rounded-sm bg-raised"
           loading="lazy"
         />
       ))}
       {p.keystone?.icon_url && (
         <span className="ml-0.5 grid size-4 place-items-center rounded-full bg-raised">
-          <img src={p.keystone.icon_url} alt="" className="size-3.5" loading="lazy" />
+          <img src={p.keystone.icon_url} alt={p.keystone.name ?? ''} className="size-3.5" loading="lazy" />
         </span>
       )}
       {p.secondary_tree?.icon_url && (
-        <img src={p.secondary_tree.icon_url} alt="" className="size-3" loading="lazy" />
+        <img src={p.secondary_tree.icon_url} alt={p.secondary_tree.name ?? ''} className="size-3" loading="lazy" />
       )}
     </span>
   )

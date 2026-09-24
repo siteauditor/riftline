@@ -1,12 +1,14 @@
-import { useMemo } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
 import Head from '../components/Head'
+import Hint from '../components/Hint'
 import PositionIcon from '../components/PositionIcon'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
+import TimeAgo from '../components/TimeAgo'
 import type { ChampionPlayed, QueueScope } from '../lib/api'
 import {
   DEFAULT_SCOPE,
@@ -23,10 +25,14 @@ import {
   pct,
   positionLabel,
   scoreColor,
-  timeAgo,
   winRateColor,
 } from '../lib/format'
-import { championPath, useHydratedSearchParams, withParams } from '../lib/searchParams'
+import {
+  championPath,
+  useHydrated,
+  useHydratedSearchParams,
+  withParams,
+} from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import { summonerPath } from '../lib/profileAddress'
@@ -102,23 +108,31 @@ export default function PlayerChampions() {
 
   const query = useQuery({ ...queries.analytics(platform, name, tag, scope), retry: false })
 
-  const rows = useMemo(() => {
-    const list = [...(query.data?.champions ?? [])]
-    list.sort((a, b) => {
-      const va = value(a, sort)
-      const vb = value(b, sort)
-      if (va === null && vb === null) return b.games - a.games
-      if (va === null) return 1
-      if (vb === null) return -1
-      return descending ? vb - va : va - vb
-    })
-    return list
-  }, [query.data, sort, descending])
+  const rows = [...(query.data?.champions ?? [])].sort((a, b) => {
+    const va = value(a, sort)
+    const vb = value(b, sort)
+    if (va === null && vb === null) return b.games - a.games
+    if (va === null) return 1
+    if (vb === null) return -1
+    return descending ? vb - va : va - vb
+  })
 
   function sortBy(key: SortKey) {
     if (key === sort) setView({ dir: descending ? 'asc' : 'desc' })
     else setView({ sort: key, dir: 'desc' })
   }
+
+  // The mastery page opens this tab at one champion's row (`#champion-266`).
+  // The router does not scroll to a hash, and the row exists only once the
+  // answer has come, so the page does it; after hydration, since the server
+  // never sees a hash.
+  const location = useLocation()
+  const hydrated = useHydrated()
+  const target = hydrated && location.hash.startsWith('#champion-') ? location.hash.slice(1) : null
+  const hasRows = rows.length > 0
+  useEffect(() => {
+    if (target && hasRows) document.getElementById(target)?.scrollIntoView({ block: 'center' })
+  }, [target, hasRows])
 
   const base = summonerPath(platform, name, tag)
   const heroArt = useChampionArt(query.data?.champions[0]?.champion.id)
@@ -193,21 +207,22 @@ export default function PlayerChampions() {
                         sort === c.key ? (descending ? 'descending' : 'ascending') : 'none'
                       }
                     >
-                      <button
-                        type="button"
-                        onClick={() => sortBy(c.key)}
-                        title={c.title}
-                        className={`transition-colors hover:text-ink ${
-                          sort === c.key ? 'text-gold-bright' : ''
-                        }`}
-                      >
-                        {c.label}
-                        {sort === c.key && (
-                          <span aria-hidden className="ml-1">
-                            {descending ? '↓' : '↑'}
-                          </span>
-                        )}
-                      </button>
+                      <Hint text={c.title}>
+                        <button
+                          type="button"
+                          onClick={() => sortBy(c.key)}
+                          className={`transition-colors hover:text-ink ${
+                            sort === c.key ? 'text-gold-bright' : ''
+                          }`}
+                        >
+                          {c.label}
+                          {sort === c.key && (
+                            <span aria-hidden className="ml-1">
+                              {descending ? '↓' : '↑'}
+                            </span>
+                          )}
+                        </button>
+                      </Hint>
                     </th>
                   ))}
                 </tr>
@@ -217,6 +232,7 @@ export default function PlayerChampions() {
                   <ChampionRow
                     key={row.champion.id}
                     row={row}
+                    marked={target === `champion-${row.champion.id}`}
                     historyHref={`${base}?${withParams(new URLSearchParams(), {
                       champion: row.champion.id,
                       queue: scopeParam(scope),
@@ -230,7 +246,8 @@ export default function PlayerChampions() {
             From {gamesCovered({ games: data.games_analysed, total: data.stored_total, scope: data.scope })}{' '}
             Riftline holds, not the whole
             season. Scores and gold at 14 cover only the games that were scored or have a
-            timeline, and each shows how many. The{' '}
+            timeline, and each shows how many; a dash is a champion with none. A game count
+            opens those games in the match history. The{' '}
             <Link to={base} className="underline decoration-line underline-offset-2 hover:text-ink">
               Overview
             </Link>{' '}
@@ -243,10 +260,22 @@ export default function PlayerChampions() {
   )
 }
 
-function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: string }) {
+function ChampionRow({
+  row,
+  historyHref,
+  marked,
+}: {
+  row: ChampionPlayed
+  historyHref: string
+  /** The row a link from the mastery page opened this tab at. */
+  marked: boolean
+}) {
   const losses = row.games - row.wins
   return (
-    <tr className="border-b border-line-soft">
+    <tr
+      id={`champion-${row.champion.id}`}
+      className={`scroll-mt-20 border-b border-line-soft ${marked ? 'bg-raised' : ''}`}
+    >
       <td className="py-2 pr-3">
         <span className="flex items-center gap-2.5">
           {row.champion.icon_url ? (
@@ -268,7 +297,7 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
                   {positionLabel(row.main_position)}
                 </>
               )}
-              {row.last_played && <span className="ml-1">{timeAgo(row.last_played)}</span>}
+              {row.last_played && <TimeAgo at={row.last_played} className="ml-1" />}
             </span>
           </span>
         </span>
@@ -276,10 +305,10 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
       <td className="tnum py-2 pl-3 text-right">
         <Link
           to={historyHref}
-          title={`These ${row.games} games in the match history`}
           className="text-ink underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright hover:decoration-gold"
         >
           {row.games}
+          <span className="sr-only"> {row.champion.name} games, in the match history</span>
         </Link>
         <span className="block text-[11px] text-ink-faint">
           {row.wins}W {losses}L
@@ -315,8 +344,9 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
             <span className="block text-[11px] text-ink-faint">{row.scored_games} scored</span>
           </>
         ) : (
-          <span className="text-ink-faint" title="No scored games on this champion">
-            -
+          <span className="text-ink-faint">
+            <span aria-hidden>-</span>
+            <span className="sr-only">No scored games on this champion</span>
           </span>
         )}
       </td>
@@ -332,8 +362,9 @@ function ChampionRow({ row, historyHref }: { row: ChampionPlayed; historyHref: s
             </span>
           </>
         ) : (
-          <span className="text-ink-faint" title="No games with a timeline on this champion">
-            -
+          <span className="text-ink-faint">
+            <span aria-hidden>-</span>
+            <span className="sr-only">No games with a timeline on this champion</span>
           </span>
         )}
       </td>

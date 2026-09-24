@@ -172,7 +172,6 @@ function RoleChips({
           size="sm"
           active={p.position === role.position}
           onClick={() => onPick(p.position)}
-          title={`${positionLabel(p.position)}, ${p.scored_games} scored games`}
         >
           <PositionIcon position={p.position} className="size-3.5" />
           {positionLabel(p.position)}
@@ -202,7 +201,7 @@ function ComponentBar({
     <Hint text={component.measures}>
     <li
       tabIndex={0}
-      className={`grid items-center gap-3 outline-none ${
+      className={`grid items-center gap-3 ${
         narrow ? 'grid-cols-[7.5rem_1fr_2rem]' : 'grid-cols-[6.5rem_1fr_2rem] sm:grid-cols-[9rem_1fr_2rem]'
       }`}
     >

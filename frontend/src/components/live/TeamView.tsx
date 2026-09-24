@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 
+import Hint from '../Hint'
 import RankBadge from '../RankBadge'
 import { Loadout, MasteryChip, SkinArt } from './PlayerBits'
 import MetBefore from './MetBefore'
@@ -120,12 +121,14 @@ function PlayerRow({
         leaguePoints={p.rank?.league_points}
       />
       {p.rank && p.rank.games > 0 && (
-        <span
-          title={`${p.rank.wins}W ${p.rank.losses}L this season, ${pct(p.rank.win_rate, 1)} win rate`}
-          className="tnum hidden w-16 shrink-0 text-right text-xs text-ink-faint sm:block"
-        >
-          {pct(p.rank.win_rate)} WR
-        </span>
+        <Hint text={`${p.rank.wins}W ${p.rank.losses}L this season, ${pct(p.rank.win_rate, 1)} win rate`}>
+          <span
+            tabIndex={0}
+            className="tnum hidden w-16 shrink-0 text-right text-xs text-ink-faint sm:block"
+          >
+            {pct(p.rank.win_rate)} WR
+          </span>
+        </Hint>
       )}
     </li>
   )

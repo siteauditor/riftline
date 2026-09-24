@@ -87,9 +87,7 @@ export default function RankBadge({
             background: `color-mix(in srgb, ${colour} 14%, transparent)`,
           }}
         >
-          {/* The pill's tooltip carries the LP, so the crest is told not to
-              set a title of its own. */}
-          <Crest tier={tier} division={division} size="pill" title={null} />
+          <Crest tier={tier} size="pill" />
           {tierLabel(tier, division)}
           {showLp && leaguePoints != null && (
             <span className="font-500 opacity-70">{leaguePoints.toLocaleString('en-US')} LP</span>

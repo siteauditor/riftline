@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
@@ -11,10 +11,11 @@ import { buildPool, type PoolChampion } from '../components/mastery/pool'
 import { LEGEND_STEPS } from '../components/mastery/scale'
 import { Stat, StatCell, StatStrip } from '../components/Stat'
 import { EmptyState, ErrorView, GridSkeleton } from '../components/StateViews'
+import TimeAgo from '../components/TimeAgo'
 import { api } from '../lib/api'
 import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
-import { compact, pct, timeAgo } from '../lib/format'
+import { compact, pct } from '../lib/format'
 import { foldName, useHydratedSearchParams, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
@@ -51,30 +52,24 @@ export default function Mastery() {
   // normal first visit.
   const recordsQuery = useQuery({ ...queries.analytics(platform, name, tag, 'all'), retry: false })
 
-  const pool = useMemo(
-    () =>
-      buildPool({
-        mastery: masteryQuery.data,
-        champions: championsQuery.data?.champions ?? [],
-        records: recordsQuery.data?.champions ?? [],
-        now,
-      }),
-    [masteryQuery.data, championsQuery.data, recordsQuery.data, now],
-  )
+  const pool = buildPool({
+    mastery: masteryQuery.data,
+    champions: championsQuery.data?.champions ?? [],
+    records: recordsQuery.data?.champions ?? [],
+    now,
+  })
 
   // Their deepest champion, which is what this page is about. Read before the
   // loading and error branches, because a hook cannot run only sometimes.
   const heroArt = useChampionArt(pool.top?.id)
 
-  const shown = useMemo(() => {
-    const recentSince = now - 30 * 86_400_000
-    return pool.champions.filter(
-      (c) =>
-        (!filter || foldName(c.name).includes(filter)) &&
-        (!recentOnly || (c.lastPlayed !== null && c.lastPlayed >= recentSince)),
-    )
-  }, [pool.champions, filter, recentOnly, now])
-  const shownIds = useMemo(() => new Set(shown.map((c) => c.id)), [shown])
+  const recentSince = now - 30 * 86_400_000
+  const shown = pool.champions.filter(
+    (c) =>
+      (!filter || foldName(c.name).includes(filter)) &&
+      (!recentOnly || (c.lastPlayed !== null && c.lastPlayed >= recentSince)),
+  )
+  const shownIds = new Set(shown.map((c) => c.id))
   const inBand = (band: PoolChampion[]) => band.filter((c) => shownIds.has(c.id))
 
   // The player's own spelling once an answer has it, not the URL's.
@@ -242,6 +237,7 @@ export default function Mastery() {
               aside={bandAside(pool.bands.core.champions, inBand(pool.bands.core.champions), pool.bands.core.share)}
               selectedId={selected}
               onSelect={(c) => setSelected(c.id)}
+              now={now}
             />
             <BandSection
               band={pool.bands.middle}
@@ -252,6 +248,7 @@ export default function Mastery() {
               aside={bandAside(pool.bands.middle.champions, inBand(pool.bands.middle.champions), pool.bands.middle.share)}
               selectedId={selected}
               onSelect={(c) => setSelected(c.id)}
+              now={now}
               gap={6}
             />
             <BandSection
@@ -263,6 +260,7 @@ export default function Mastery() {
               aside={bandAside(pool.bands.tail.champions, inBand(pool.bands.tail.champions), pool.bands.tail.share)}
               selectedId={selected}
               onSelect={(c) => setSelected(c.id)}
+              now={now}
               gap={4}
             />
             <BandSection
@@ -278,6 +276,7 @@ export default function Mastery() {
               }
               selectedId={selected}
               onSelect={(c) => setSelected(c.id)}
+              now={now}
               collapsible
               gap={4}
             />
@@ -318,7 +317,11 @@ export default function Mastery() {
           )}
           Mastery points are Riot's own lifetime count.
           {mastery?.platform && ` Read from ${mastery.platform.toUpperCase()}.`}
-          {mastery?.fetched_at ? ` Last checked ${timeAgo(mastery.fetched_at)}.` : ''}
+          {mastery?.fetched_at ? (
+            <>
+              {' '}Last checked <TimeAgo at={mastery.fetched_at} />.
+            </>
+          ) : null}
         </p>
       </div>
 

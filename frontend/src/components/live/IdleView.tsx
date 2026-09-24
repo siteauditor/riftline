@@ -9,6 +9,7 @@ import StatusBand from './StatusBand'
 import { SectionTitle } from '../Stat'
 import { EmptyState, MatchListSkeleton } from '../StateViews'
 import type { IdleSummary, MatchSummary, Profile } from '../../lib/api'
+import { useNow } from '../../lib/clock'
 import { tierColor, timeAgo } from '../../lib/format'
 import { summonerPath } from '../../lib/profileAddress'
 
@@ -23,7 +24,7 @@ import { summonerPath } from '../../lib/profileAddress'
  * Everything here is composed from parts the profile already uses, so the idle
  * page costs one history read and no new UI: the match row expands into the
  * full scoreboard, the form strip is the same twenty games, and the rank cards
- * are the one line variant the profile shows on a phone.
+ * are the card's one line variant.
  */
 export default function IdleView({
   idle,
@@ -46,6 +47,7 @@ export default function IdleView({
   poll: ReactNode
 }) {
   const overview = summonerPath(platform, name, tag)
+  const now = useNow()
   const ranked = profile?.ranks.find((r) => r.tier) ?? profile?.ranks[0]
   const accent = tierColor(ranked?.tier)
   // The newest game Riot knows about when the history has loaded, and the
@@ -61,7 +63,7 @@ export default function IdleView({
         title="Not in a game right now"
         detail={
           lastPlayedAt
-            ? `Last played ${timeAgo(lastPlayedAt)}. This page checks Riot every minute while it is open.`
+            ? `Last played ${timeAgo(lastPlayedAt, now)}. This page checks Riot every minute while it is open.`
             : 'This page checks Riot every minute while it is open.'
         }
         aside={poll}
@@ -97,7 +99,7 @@ export default function IdleView({
                   <p className="px-1 py-4 text-sm text-ink-faint">
                     The most recent game we hold is{' '}
                     {idle.last_game
-                      ? `${idle.last_game.champion.name}, ${timeAgo(idle.last_game.game_creation)}`
+                      ? `${idle.last_game.champion.name}, ${timeAgo(idle.last_game.game_creation, now)}`
                       : 'not loaded yet'}
                     . Open the overview to load their history from Riot.
                   </p>

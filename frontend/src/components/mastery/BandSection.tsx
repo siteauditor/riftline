@@ -24,6 +24,7 @@ export default function BandSection({
   aside,
   selectedId,
   onSelect,
+  now,
   collapsible = false,
   gap = 8,
 }: {
@@ -36,6 +37,8 @@ export default function BandSection({
   aside: ReactNode
   selectedId: number | null
   onSelect: (champion: PoolChampion) => void
+  /** The page's reading of the clock, passed to every tile. */
+  now: number
   /** The unplayed band, which is most of the roster on a new account. */
   collapsible?: boolean
   gap?: number
@@ -89,6 +92,7 @@ export default function BandSection({
                 size={size}
                 selected={champion.id === selectedId}
                 onSelect={onSelect}
+                now={now}
               />
             ))}
           </div>

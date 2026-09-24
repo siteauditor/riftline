@@ -124,11 +124,10 @@ export default function Scoreboard({
                   <thead>
                     <tr className="text-[11px] text-ink-faint">
                       <th className="py-1 text-left font-500">Player</th>
-                      <th
-                        className="py-1 pl-2 text-right font-500"
-                        title="The Riftline score, and where it placed in this lobby"
-                      >
-                        Score
+                      <th className="py-1 pl-2 text-right font-500">
+                        <Hint text="The Riftline score, and where it placed in this lobby">
+                          <span tabIndex={0}>Score</span>
+                        </Hint>
                       </th>
                       <th className="py-1 pl-2 text-right font-500">KDA</th>
                       <th className="py-1 pl-2 text-right font-500">Damage</th>
@@ -178,18 +177,26 @@ function Objectives({ objectives }: { objectives: TeamObjectives }) {
     : []
   return (
     <p className="tnum flex flex-wrap items-baseline gap-x-2.5 text-[11px] text-ink-faint">
-      <span title="Kills by this side, summed from its own players">
+      <span>
         <span className="text-ink-dim">{objectives.kills}</span> kills
       </span>{' '}
-      <span title="Gold earned by this side">
+      <span>
         <span className="text-ink-dim">{compact(objectives.gold)}</span> gold
       </span>{' '}
-      {counts.map(([letter, n, label]) => (
-        <span key={letter} title={`${label} taken`} className={n ? '' : 'opacity-50'}>
-          <span className="text-ink-dim">{letter}</span>
-          {n}{' '}
-        </span>
-      ))}
+      {/* One hint for the letters, which a screen reader hears in full. */}
+      {counts.length > 0 && (
+        <Hint text="Towers (T), inhibitors (I), dragons (D), barons (B) and heralds (H) this side took">
+          <span tabIndex={0} className="flex gap-x-2.5">
+            {counts.map(([letter, n, label]) => (
+              <span key={letter} className={n ? '' : 'opacity-50'}>
+                <span aria-hidden className="text-ink-dim">{letter}</span>
+                <span className="sr-only">{label} </span>
+                {n}
+              </span>
+            ))}
+          </span>
+        </Hint>
+      )}
     </p>
   )
 }
@@ -219,7 +226,6 @@ function Row({
               <img
                 src={player.champion.icon_url}
                 alt={player.champion.name}
-                title={player.champion.name}
                 loading="lazy"
                 className="size-8"
               />
@@ -236,8 +242,7 @@ function Row({
               <img
                 key={`${spell.id}-${i}`}
                 src={spell.icon_url ?? undefined}
-                alt=""
-                title={spell.name ?? ''}
+                alt={spell.name ?? ''}
                 loading="lazy"
                 className="size-[15px] bg-raised"
               />
@@ -268,17 +273,21 @@ function Row({
             </span>
           )}
           {player.laning_label && (
-            <span
-              className="hidden shrink-0 text-[10px] font-600 sm:inline"
-              style={{ color: laneColor(player.laning_label) }}
-              title={
+            <Hint
+              text={
                 player.laning_score != null
                   ? `Lane at 14 minutes: ${Math.round(player.laning_score * 100)} : ${100 - Math.round(player.laning_score * 100)}`
-                  : undefined
+                  : null
               }
             >
-              {LANE_TEXT[player.laning_label]}
-            </span>
+              <span
+                tabIndex={player.laning_score != null ? 0 : undefined}
+                className="hidden shrink-0 text-[10px] font-600 outline-none sm:inline"
+                style={{ color: laneColor(player.laning_label) }}
+              >
+                {LANE_TEXT[player.laning_label]}
+              </span>
+            </Hint>
           )}
           {player.badges.slice(0, 2).map((badge) => (
             <Hint key={badge.id} text={badge.detail}>
@@ -296,11 +305,9 @@ function Row({
         ) : (
           <span className="tnum display text-[15px] font-700" style={{ color: scoreColor(player.score) }}>
             {player.score.toFixed(1)}
-            <span
-              className="ml-1 text-[10px] font-500 text-ink-faint"
-              title={`${ordinal(player.placement ?? 0)} of ten in this lobby`}
-            >
-              #{player.placement}
+            <span className="ml-1 text-[10px] font-500 text-ink-faint">
+              <span aria-hidden>#{player.placement}</span>
+              <span className="sr-only">, {ordinal(player.placement ?? 0)} of ten in this lobby</span>
             </span>
           </span>
         )}
@@ -309,11 +316,8 @@ function Row({
       <td className="tnum py-1.5 pl-2 text-right text-ink-dim">
         {player.kills}/<span className="text-loss">{player.deaths}</span>/
         {player.assists}
-        <span
-          className="ml-1 text-[10px] text-ink-faint"
-          title="Kill participation"
-        >
-          {pct(player.kill_participation)}
+        <span className="ml-1 text-[10px] text-ink-faint">
+          {pct(player.kill_participation)} <span>KP</span>
         </span>
       </td>
 
@@ -334,15 +338,18 @@ function Row({
           {player.cs_per_min.toFixed(1)}
         </span>
       </td>
-      <td
-        className="tnum py-1.5 pl-2 text-right text-ink-dim"
-        title={
-          player.wards_placed === null
-            ? 'Vision score'
-            : `${player.wards_placed} wards placed, ${player.wards_killed} killed, ${player.control_wards} control`
-        }
-      >
-        {player.vision_score}
+      <td className="tnum py-1.5 pl-2 text-right text-ink-dim">
+        <Hint
+          text={
+            player.wards_placed === null
+              ? 'Vision score'
+              : `Vision score. ${player.wards_placed} wards placed, ${player.wards_killed} killed, ${player.control_wards} control`
+          }
+        >
+          <span tabIndex={0}>
+            {player.vision_score}
+          </span>
+        </Hint>
       </td>
 
       <td className="py-1.5 pl-3">

@@ -80,7 +80,7 @@ export default function RankCard({
             <div className="flex items-center gap-3">
               {/* The emblem is one of the two places a rank is the subject
                   rather than a label, so it gets the full art and its glow. */}
-              <Crest tier={rank.tier} division={rank.division} size="card" />
+              <Crest tier={rank.tier} size="card" />
               <div className="min-w-0">
                 <p
                   className="display text-[26px] font-700 uppercase leading-none tracking-tight"
@@ -177,6 +177,10 @@ function LpLine({ history }: { history: RankHistory }) {
   const y = (rank: number) =>
     height - pad - ((rank - low) / range) * (height - pad * 2)
   const line = points.map((p) => `${x(p.at).toFixed(1)},${y(p.numeric_rank).toFixed(1)}`).join(' ')
+  // The two ends in words: each reading's own figure lives in a 2px point's
+  // SVG title, which a phone never shows and a pointer rarely finds.
+  const start = reading(points[0])
+  const end = reading(points[points.length - 1])
 
   return (
     <figure className="mt-3">
@@ -184,7 +188,7 @@ function LpLine({ history }: { history: RankHistory }) {
         viewBox={`0 0 ${width} ${height}`}
         className="h-auto w-full"
         role="img"
-        aria-label={`Rank from ${dateLabel(first)} to ${dateLabel(last)}`}
+        aria-label={`Rank over ${points.length} readings, from ${start} on ${dateLabel(first)} to ${end} on ${dateLabel(last)}`}
       >
         <polyline
           points={line}
@@ -202,10 +206,20 @@ function LpLine({ history }: { history: RankHistory }) {
           </circle>
         ))}
       </svg>
-      <figcaption className="mt-0.5 flex justify-between text-[10px] text-ink-faint">
-        <span>{dateLabel(first)}</span>
-        <span>{dateLabel(last)}</span>
+      <figcaption aria-hidden className="tnum mt-0.5 flex justify-between gap-3 text-[10px] leading-tight text-ink-faint">
+        <span>
+          {dateLabel(first)}
+          <span className="block text-ink-dim">{start}</span>
+        </span>
+        <span className="text-right">
+          {dateLabel(last)}
+          <span className="block text-ink-dim">{end}</span>
+        </span>
       </figcaption>
     </figure>
   )
+}
+
+function reading(point: RankHistory['points'][number]): string {
+  return `${tierLabel(point.tier, point.division)} ${point.league_points.toLocaleString('en-US')} LP`
 }

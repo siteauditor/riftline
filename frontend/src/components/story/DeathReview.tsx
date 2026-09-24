@@ -100,6 +100,7 @@ export default function DeathReview({
               {player.death_list.map((d) => (
                 <span
                   key={d.ms}
+                  aria-hidden
                   className={`absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ${
                     d.traded ? 'bg-transparent ring-ink' : 'ring-deep'
                   }`}
@@ -108,7 +109,6 @@ export default function DeathReview({
                     top: `${100 - ((d.y - MAP_MIN) / (MAP_MAX_Y - MAP_MIN)) * 100}%`,
                     background: d.traded ? undefined : 'var(--color-loss)',
                   }}
-                  title={`${clock(d.ms)}, ${d.traded ? 'traded' : 'untraded'}`}
                 />
               ))}
             </div>

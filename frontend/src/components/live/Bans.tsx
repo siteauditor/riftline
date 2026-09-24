@@ -1,3 +1,4 @@
+import Hint from '../Hint'
 import type { LiveGame } from '../../lib/api'
 import { pct } from '../../lib/format'
 import { BLUE, RED } from './sides'
@@ -25,28 +26,29 @@ export default function Bans({ game }: { game: LiveGame }) {
           </h3>
           <div className={`flex flex-wrap gap-1 ${sided && i === 0 ? 'justify-end' : ''}`}>
             {g.bans.map((b, j) => (
-              <span
+              <Hint
                 key={`${b.champion.id}-${j}`}
-                className="w-9 shrink-0 text-center"
-                title={
+                text={
                   b.ban_rate === null
                     ? `${b.champion.name}, banned. We hold too few games of them on this patch to say how often that happens.`
                     : `${b.champion.name} is banned in ${pct(b.ban_rate, 1)} of the ${(b.ban_rate_games ?? 0).toLocaleString('en-US')} games we hold on this patch.`
                 }
               >
-                <span className="block size-9 overflow-hidden bg-raised grayscale">
-                  {b.champion.icon_url && (
-                    <img src={b.champion.icon_url} alt={b.champion.name} loading="lazy" />
+                <span tabIndex={0} className="w-9 shrink-0 text-center">
+                  <span className="block size-9 overflow-hidden bg-raised grayscale">
+                    {b.champion.icon_url && (
+                      <img src={b.champion.icon_url} alt={b.champion.name} loading="lazy" />
+                    )}
+                  </span>
+                  {/* Bans are the only settled information during champion
+                      select, so each one says how usual it is. */}
+                  {b.ban_rate != null && (
+                    <span className="tnum mt-0.5 block text-[10px] leading-none text-ink-faint">
+                      {pct(b.ban_rate)}
+                    </span>
                   )}
                 </span>
-                {/* Bans are the only settled information during champion
-                    select, so each one says how usual it is. */}
-                {b.ban_rate != null && (
-                  <span className="tnum mt-0.5 block text-[10px] leading-none text-ink-faint">
-                    {pct(b.ban_rate)}
-                  </span>
-                )}
-              </span>
+              </Hint>
             ))}
             {g.bans.length === 0 && <span className="text-xs text-ink-faint">None</span>}
           </div>

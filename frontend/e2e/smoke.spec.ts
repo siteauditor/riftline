@@ -1,7 +1,7 @@
 import { devices, expect, test, type Locator, type Page } from '@playwright/test'
 
-import type { MatchSummary } from '../src/lib/api'
-import { game } from '../src/test/fixtures/profile'
+import type { Analytics, MatchSummary } from '../src/lib/api'
+import { emptyAnalytics, filledAnalytics, fullGame, game } from '../src/test/fixtures/profile'
 
 /**
  * What must hold on any corpus, including the empty one CI runs with: the
@@ -44,7 +44,7 @@ test('the home page is prerendered and a Riot ID search navigates', async ({ pag
   const riotId = page.getByRole('combobox', { name: 'Riot ID' })
   await riotId.fill('Caps#EUW')
   await riotId.press('Enter')
-  await expect(page).toHaveURL(/\/summoner\/euw1\/Caps\/EUW$/)
+  await expect(page).toHaveURL(CAPS_PAGE)
   expect(hydrationErrors(errors)).toEqual([])
 })
 
@@ -99,6 +99,13 @@ const RECENT = [
   { platform: 'kr', gameName: 'Hide on bush', tagLine: 'KR1' },
   { platform: 'euw1', gameName: 'Caps', tagLine: 'EUW' },
 ].map((r, i) => ({ ...r, iconUrl: null, at: 1_790_000_000_000 - i }))
+
+// Riot spells the account "Cäps", and a profile moves to the player's own
+// spelling once Riot has answered for it, so the page is at either address
+// depending on whether that answer has come. Asserting the typed spelling
+// alone failed whenever the answer was quick (the search dialog's test,
+// 2026-09-24).
+const CAPS_PAGE = /\/summoner\/euw1\/C(a|%C3%A4)ps\/EUW$/
 
 async function remember(page: Page, region?: string) {
   await page.addInitScript(
@@ -175,7 +182,7 @@ test('the search dialog shows its list above the dialog and picks from it', asyn
   const last = page.getByRole('listbox').getByRole('option').last()
   await expect.poll(() => onTop(last)).toBe(true)
   await last.click()
-  await expect(page).toHaveURL(/\/summoner\/euw1\/Caps\/EUW$/)
+  await expect(page).toHaveURL(CAPS_PAGE)
   await expect(dialog).toBeHidden()
 })
 
@@ -410,7 +417,12 @@ test('an unknown path is the app saying not found, not a blank shell', async ({ 
  * address rules run on any corpus and never reach Riot. `asked` records every
  * summoner request, to prove nothing is asked under an address being left.
  */
-async function mockHomePlayer(page: Page, asked: string[], games: MatchSummary[] = []) {
+async function mockHomePlayer(
+  page: Page,
+  asked: string[],
+  games: MatchSummary[] = [],
+  analytics: Analytics = emptyAnalytics,
+) {
   const profile = (platform: string, label: string) => ({
     puuid: 'mover', game_name: 'Mover', tag_line: 'EUW', riot_id: 'Mover#EUW',
     platform, platform_label: label,
@@ -432,11 +444,7 @@ async function mockHomePlayer(page: Page, asked: string[], games: MatchSummary[]
       rest === 'matches'
         ? { puuid: 'mover', matches: games, start: 0, count: 20, has_more: false, source: 'riot', stored_total: null }
         : rest === 'analytics'
-          ? {
-              puuid: 'mover', basis: 'stored_matches', games_analysed: 0, roles: [], classes: [],
-              activity_utc: [], champions: [], score_profile: [], review: [], lanes: [],
-              totals: { win_rate: 0, kda: 0, avg_kills: 0, avg_deaths: 0, avg_assists: 0, cs_per_min: 0, vision_per_game: 0, damage_per_min: 0 },
-            }
+          ? { ...analytics, puuid: 'mover', game_name: 'Mover', tag_line: 'EUW', platform: 'euw1' }
           : rest === undefined
             ? profile(platform, platform === 'na1' ? 'NA' : platform.toUpperCase())
             : null
@@ -525,4 +533,24 @@ test('a bar of the form strip opens its game', async ({ page }) => {
   const row = page.locator(`#game-${game(3).match_id}`)
   await expect(row.locator('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'true')
   await expect(row.locator('button[aria-expanded]')).toBeFocused()
+})
+
+// About 65 hover-only titles on the profile said what a figure meant to a
+// mouse and to nobody else (2026-09-24): each is now a hint, which the
+// keyboard reaches too, or text on the page.
+test("a profile's figures explain themselves to a keyboard, never in a hover-only title", async ({ page }) => {
+  await mockHomePlayer(page, [], [fullGame(1), fullGame(2), fullGame(3)], filledAnalytics)
+  await open(page, '/summoner/euw1/Mover/EUW')
+  // The activity chart's busiest hours, in the viewer's own time.
+  await expect(page.getByText(/^Busiest \d\d:00 to \d\d:00, \d+% of these games$/)).toBeVisible()
+  await expect(page.locator('main [title]')).toHaveCount(0)
+  // A strengths bar is a Tab stop, and says what it measures.
+  await page.locator('aside li[tabindex="0"]').first().focus()
+  await expect(page.getByRole('tooltip')).toContainText(
+    /Damage to champions per minute|Vision score per minute|Kills and assists per death/,
+  )
+  // An item names itself on focus, as it did on hover. By name: the bar's
+  // hint is still fading out while this one opens.
+  await page.getByRole('link', { name: "Zhonya's Hourglass" }).first().focus()
+  await expect(page.getByRole('tooltip', { name: "Zhonya's Hourglass" })).toHaveCount(1)
 })

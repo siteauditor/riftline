@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 
 import type { MatchSummary, QueueScope } from '../lib/api'
 import { scopeNoun } from '../lib/profileScope'
@@ -45,28 +45,20 @@ export default function FormStrip({ matches, scope, onPick }: Props) {
   const [hovered, setHovered] = useState<number | null>(null)
 
   // Oldest on the left: the strip reads as a timeline.
-  const games = useMemo(
-    () => matches.filter((m) => !m.is_remake).slice().reverse(),
-    [matches],
-  )
+  const games = matches.filter((m) => !m.is_remake).reverse()
 
   // Scored games in this window, which decides what the bars mean.
-  const scored = useMemo(
-    () => games.filter((g) => g.score !== null).length,
-    [games],
-  )
+  const scored = games.filter((g) => g.score !== null).length
 
-  const summary = useMemo(() => {
-    const wins = games.filter((g) => g.win).length
-    const kills = games.reduce((n, g) => n + g.kills, 0)
-    const deaths = games.reduce((n, g) => n + g.deaths, 0)
-    const assists = games.reduce((n, g) => n + g.assists, 0)
-    return {
-      wins,
-      losses: games.length - wins,
-      kda: deaths === 0 ? kills + assists : (kills + assists) / deaths,
-    }
-  }, [games])
+  const wins = games.filter((g) => g.win).length
+  const kills = games.reduce((n, g) => n + g.kills, 0)
+  const deaths = games.reduce((n, g) => n + g.deaths, 0)
+  const assists = games.reduce((n, g) => n + g.assists, 0)
+  const summary = {
+    wins,
+    losses: games.length - wins,
+    kda: deaths === 0 ? kills + assists : (kills + assists) / deaths,
+  }
 
   if (games.length === 0) return null
 
@@ -156,7 +148,7 @@ export default function FormStrip({ matches, scope, onPick }: Props) {
             </span>
             {active.score !== null && (
               <Hint text={`Riftline score, ${ordinal(active.placement ?? 0)} of ten in that lobby`}>
-                <span tabIndex={0} className="tnum font-600 outline-none" style={{ color: scoreColor(active.score) }}>
+                <span tabIndex={0} className="tnum font-600" style={{ color: scoreColor(active.score) }}>
                   {active.score.toFixed(1)}
                 </span>
               </Hint>

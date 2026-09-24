@@ -30,7 +30,7 @@ export default function ProfileTabs({
    *  games; mastery and the live game are not about a set of games. */
   scope?: QueueScope
 }) {
-  // No options of its own. `App` already mounts `['health']` with a 30s poll
+  // No options of its own. `App` already mounts `['health']` with a five-minute poll
   // for the whole session, and a second observer with different staleTime and
   // retry settings just races it for the shared query's configuration.
   const health = useQuery({ queryKey: ['health'], queryFn: api.health })

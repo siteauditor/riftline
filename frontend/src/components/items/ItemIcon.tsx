@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 
+import Hint from '../Hint'
+
 interface ItemLike {
   id: number | null
   name: string | null
@@ -12,7 +14,8 @@ interface ItemLike {
  *
  * The one place an item is drawn, so every scoreboard, match row and build on
  * the site leads to the item it shows. The name is the link's accessible label
- * and its tooltip, because an icon alone says nothing to a screen reader.
+ * and its hint, because an icon alone says nothing to a screen reader, and a
+ * title attribute said it to a mouse only.
  * An empty slot stays an empty box and links nowhere.
  */
 export default function ItemIcon({
@@ -35,14 +38,15 @@ export default function ItemIcon({
     return <span className={box} style={style} aria-hidden />
   }
   return (
-    <Link
-      to={`/items/${item.slug ?? item.id}${search}`}
-      title={item.name ?? undefined}
-      aria-label={item.name ?? `Item ${item.id}`}
-      className={`${box} outline-offset-1 transition-[filter] hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-bright`}
-      style={style}
-    >
-      <img src={item.icon_url} alt="" loading="lazy" className="size-full" />
-    </Link>
+    <Hint text={item.name}>
+      <Link
+        to={`/items/${item.slug ?? item.id}${search}`}
+        aria-label={item.name ?? `Item ${item.id}`}
+        className={`${box} outline-offset-1 transition-[filter] hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-bright`}
+        style={style}
+      >
+        <img src={item.icon_url} alt="" loading="lazy" className="size-full" />
+      </Link>
+    </Hint>
   )
 }
