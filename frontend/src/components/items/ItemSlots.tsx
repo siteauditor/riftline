@@ -1,3 +1,4 @@
+import Hint from '../Hint'
 import type { ItemFigures } from '../../lib/api'
 import { compact, pct } from '../../lib/format'
 import { points, slotLabel } from './groups'
@@ -26,8 +27,10 @@ export default function ItemSlots({ figures }: { figures: ItemFigures }) {
               <th className="py-1.5 text-left font-500">Bought as</th>
               <th className="py-1.5 text-left font-500">Share</th>
               <th className="py-1.5 text-right font-500">Games</th>
-              <th className="py-1.5 text-right font-500" title="Points against the same slot">
-                Against slot
+              <th className="py-1.5 text-right font-500">
+                <Hint text="Points against the same slot">
+                  <span tabIndex={0}>Against slot</span>
+                </Hint>
               </th>
             </tr>
           </thead>
@@ -57,13 +60,7 @@ export default function ItemSlots({ figures }: { figures: ItemFigures }) {
 }
 
 export function Delta({ value }: { value: number | null }) {
-  if (value === null) {
-    return (
-      <span className="text-xs text-ink-faint" title="Too few games to say">
-        few games
-      </span>
-    )
-  }
+  if (value === null) return <span className="text-xs text-ink-faint">too few games</span>
   return (
     <span
       className="font-600"

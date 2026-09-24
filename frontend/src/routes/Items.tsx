@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 
@@ -32,12 +31,10 @@ export default function Items() {
   const [search, setSearch] = useHydratedSearchParams()
   const [query, setQuery] = useSearchText('q', 120)
   const needle = foldName(query)
-  // Memoised on the parameter's text: the list below refilters only when it changes.
+  // From the parameter's text, a string, which the compiler compares by value:
+  // the list below refilters only when the filter changes.
   const statText = search.get('stat') ?? ''
-  const chosen: StatFilterKey[] = useMemo(
-    () => statText.split(',').filter(isStatFilterKey),
-    [statText],
-  )
+  const chosen: StatFilterKey[] = statText.split(',').filter(isStatFilterKey)
   const setChosen = (keys: StatFilterKey[]) =>
     setSearch((prev) => withParams(prev, { stat: keys }), { replace: true })
   const toggle = (key: StatFilterKey) =>
@@ -45,14 +42,10 @@ export default function Items() {
 
   const list = useQuery({ ...queries.items(), staleTime: 10 * 60 * 1000 })
 
-  const sections = useMemo(
-    () =>
-      (list.data?.sections ?? []).map((s) => ({
-        ...s,
-        shown: s.items.filter((i) => matchesFilter(i, chosen, needle)),
-      })),
-    [list.data, chosen, needle],
-  )
+  const sections = (list.data?.sections ?? []).map((s) => ({
+    ...s,
+    shown: s.items.filter((i) => matchesFilter(i, chosen, needle)),
+  }))
   const total = sections.reduce((n, s) => n + s.items.length, 0)
   const shown = sections.reduce((n, s) => n + s.shown.length, 0)
 
@@ -136,11 +129,17 @@ export default function Items() {
               .filter((s) => s.shown.length > 0)
               .map((s) => (
                 <section key={s.key} aria-labelledby={`items-${s.key}`}>
-                  <div className="mb-3 flex items-baseline gap-3">
+                  <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <h2 id={`items-${s.key}`} className="display text-xl font-700 text-ink">
                       {s.label}
                     </h2>
                     <span className="tnum text-xs text-ink-faint">{s.shown.length}</span>
+                    {s.key === 'finished' && (
+                      // Its own line on a phone, where it squeezed the heading onto two.
+                      <span className="w-full text-xs text-ink-faint sm:w-auto">
+                        Beside each, the share of players who bought it on the newest patch
+                      </span>
+                    )}
                   </div>
                   <ul className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-x-3 gap-y-1">
                     {s.shown.map((item) => (
@@ -185,10 +184,8 @@ function ItemCard({ item, showShare }: { item: ItemSummary; showShare: boolean }
           </span>
         </span>
         {showShare && item.bought_share !== null && (
-          <span
-            className="tnum shrink-0 text-right text-xs text-ink-dim"
-            title="Share of players who bought it, on the newest patch"
-          >
+          <span className="tnum shrink-0 text-right text-xs text-ink-dim">
+            <span className="sr-only">bought by </span>
             {pct(item.bought_share, 1)}
           </span>
         )}

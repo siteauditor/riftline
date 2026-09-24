@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { PLATFORMS, type LeaderboardResponse } from '../lib/api'
 import { DEFAULT_LADDER, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
+import Hint from '../components/Hint'
 import TimeAgo from '../components/TimeAgo'
 import Crest from '../components/Crest'
 import SelectField from '../components/SelectField'
@@ -284,17 +285,21 @@ export default function Leaderboard() {
             <table className="w-full min-w-[520px] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-line text-xs text-ink-faint">
-                  <th
-                    className="py-1.5 text-right font-500"
-                    title={
-                      data.total_on_ladder
-                        ? 'Position on the ladder, ordered by LP.'
-                        : 'Position within the rows we scanned, ordered by LP. ' +
-                          'Riot gives no total for this tier and does not promise ' +
-                          'an order, so this is not a ladder rank.'
-                    }
-                  >
-                    #
+                  <th className="py-1.5 text-right font-500">
+                    <Hint
+                      text={
+                        data.total_on_ladder
+                          ? 'Position on the ladder, ordered by LP.'
+                          : 'Position within the rows we scanned, ordered by LP. ' +
+                            'Riot gives no total for this tier and does not promise ' +
+                            'an order, so this is not a ladder rank.'
+                      }
+                    >
+                      <span tabIndex={0}>
+                        <span aria-hidden>#</span>
+                        <span className="sr-only">Position</span>
+                      </span>
+                    </Hint>
                   </th>
                   <th className="py-2 pl-4 text-left font-500">Player</th>
                   {mixedRanks && <th className="py-2 text-left font-500">Rank</th>}
@@ -332,19 +337,17 @@ export default function Leaderboard() {
                             </span>
                           </Link>
                         ) : row.no_riot_id ? (
-                          <span
-                            className="text-ink-faint"
-                            title="Riot has no account record behind this ladder entry, so there is no name to show."
-                          >
-                            No Riot ID
-                          </span>
+                          <Hint text="Riot has no account record behind this ladder entry, so there is no name to show.">
+                            <span tabIndex={0} className="text-ink-faint">
+                              No Riot ID
+                            </span>
+                          </Hint>
                         ) : (
-                          <span
-                            className="text-ink-faint"
-                            title="Riot sends ladders without names, so each one is looked up separately, a few at a time, within the rate limit Riot sets. Once found, a name is kept."
-                          >
-                            {lookingUp ? 'Looking up name' : 'Name not found yet'}
-                          </span>
+                          <Hint text="Riot sends ladders without names, so each one is looked up separately, a few at a time, within the rate limit Riot sets. Once found, a name is kept.">
+                            <span tabIndex={0} className="text-ink-faint">
+                              {lookingUp ? 'Looking up name' : 'Name not found yet'}
+                            </span>
+                          </Hint>
                         )}
                         {row.inactive && (
                           <span className="ml-2 text-[11px] text-ink-faint">inactive</span>

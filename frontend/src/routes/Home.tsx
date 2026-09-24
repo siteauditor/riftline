@@ -494,7 +494,7 @@ function BestGameRow({ game }: { game: BestGame }) {
 
       <div className="text-right">
         <Hint text={`Riftline score ${game.score.toFixed(2)} of 10`}>
-          <span tabIndex={0} className="block outline-none">
+          <span tabIndex={0} className="block">
             <CountUp
               value={game.score}
               format={(n) => n.toFixed(1)}

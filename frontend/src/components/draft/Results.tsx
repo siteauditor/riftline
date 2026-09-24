@@ -385,7 +385,6 @@ function SuggestionRow({
             rate={s.expected}
             low={s.range_low}
             high={s.range_high}
-            games={s.games}
             description={
               `${pct(s.expected, 1)} on this board, a range of ${pct(s.range_low, 1)} to ` +
               `${pct(s.range_high, 1)} over ${s.games} games`
@@ -431,7 +430,6 @@ function Bans({ data }: { data: DraftResponse }) {
               rate={c.win_rate}
               low={c.range_low}
               high={c.range_high}
-              games={c.games}
               size="sm"
               description={`${pct(c.win_rate, 1)} over ${c.games} games, a range of ${pct(c.range_low, 1)} to ${pct(c.range_high, 1)}`}
             />

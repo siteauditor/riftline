@@ -18,7 +18,6 @@ export default function FacetRate({ entry }: { entry: FacetEntry }) {
         rate={entry.win_rate}
         low={entry.range_low}
         high={entry.range_high}
-        games={entry.games}
         size="sm"
         description={`${pct(entry.win_rate, 1)} over ${entry.games} games, a range of ${pct(entry.range_low, 0)} to ${pct(entry.range_high, 0)}`}
       />

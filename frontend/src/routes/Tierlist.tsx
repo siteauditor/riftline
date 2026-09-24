@@ -500,7 +500,6 @@ function Rows({
                 rate={row.win_rate}
                 low={row.confidence_win_rate}
                 high={row.confidence_high}
-                games={row.games}
                 description={`${pct(row.win_rate, 1)} over ${row.games} games, a range of ${pct(row.confidence_win_rate, 1)} to ${pct(row.confidence_high, 1)}`}
               />
               <Trend row={row} previousPatch={previousPatch} />

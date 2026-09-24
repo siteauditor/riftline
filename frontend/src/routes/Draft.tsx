@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
 import ArtHeader from '../components/ArtHeader'
@@ -79,10 +79,7 @@ export default function Draft() {
     ...queries.champions(),
     staleTime: 6 * 60 * 60 * 1000,
   })
-  const championById = useMemo(
-    () => new Map((championData?.champions ?? []).map((c) => [c.id, c])),
-    [championData],
-  )
+  const championById = new Map((championData?.champions ?? []).map((c) => [c.id, c]))
 
   // The request as a string, settled: a primitive, so the debounce compares by
   // value, and the query waits until it has settled rather than asking once for

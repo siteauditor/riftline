@@ -248,6 +248,8 @@ function AuditCard({
   components: { id: string; label: string }[]
 }) {
   const peak = Math.max(...role.deciles.map((d) => d.win_rate), 0.01)
+  const lowest = role.deciles[0]
+  const highest = role.deciles[role.deciles.length - 1]
   return (
     <div className="frame space-y-3 px-4 py-3">
       <div className="flex items-baseline justify-between">
@@ -268,10 +270,19 @@ function AuditCard({
               key={i}
               className="flex-1 rounded-t-sm"
               style={{ height: `${(d.win_rate / peak) * 100}%`, background: 'var(--accent)', opacity: 0.35 + 0.65 * d.win_rate }}
-              title={`Scores ${d.low} to ${d.high}: ${pct(d.win_rate)} won, ${d.games} players`}
             />
           ))}
         </div>
+        {lowest && highest && (
+          <p className="tnum mt-1 flex justify-between gap-3 text-[11px] text-ink-faint">
+            <span>
+              Scores {lowest.low.toFixed(1)} to {lowest.high.toFixed(1)}, {pct(lowest.win_rate)} won
+            </span>
+            <span className="text-right">
+              {highest.low.toFixed(1)} to {highest.high.toFixed(1)}, {pct(highest.win_rate)} won
+            </span>
+          </p>
+        )}
       </div>
       <table className="w-full border-collapse text-xs">
         <thead>

@@ -521,7 +521,7 @@ function Stat({
         <Hint text={moved.title}>
           <dd
             tabIndex={0}
-            className="tnum absolute left-0 top-full whitespace-nowrap text-[11px] outline-none"
+            className="tnum absolute left-0 top-full whitespace-nowrap text-[11px]"
             style={{ color: moved.color }}
           >
             {moved.text}

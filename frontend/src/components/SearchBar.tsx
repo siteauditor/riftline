@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
@@ -6,7 +6,7 @@ import { AnchoredList } from '@/components/ui/anchored-list'
 
 import RankBadge from './RankBadge'
 import SelectField from './SelectField'
-import { api, PLATFORMS } from '../lib/api'
+import { api, PLATFORMS, type SuggestResponse } from '../lib/api'
 import { parseRiotId } from '../lib/format'
 import { useCombobox } from '../lib/useCombobox'
 import { useDebounced } from '../lib/useDebounced'
@@ -15,6 +15,7 @@ import {
   rememberRegion,
   useLastRegion,
   useRecentSearches,
+  type RecentSearch,
 } from '../lib/storage'
 import { summonerPath } from '../lib/profileAddress'
 
@@ -53,6 +54,56 @@ function typedName(text: string): string {
 
 function platformLabel(id: string): string {
   return PLATFORMS.find((p) => p.id === id)?.label ?? id.toUpperCase()
+}
+
+/**
+ * What the list offers for the text in the field: this browser's recent
+ * searches while it is empty, else the players we hold who fit what is typed.
+ */
+function optionsFor(
+  text: string,
+  long: boolean,
+  recent: readonly RecentSearch[],
+  answer: SuggestResponse | undefined,
+): Option[] {
+  if (!text) {
+    return recent.map((r) => ({
+      key: `recent:${r.platform}:${r.gameName}#${r.tagLine}`,
+      platform: r.platform,
+      platformLabel: platformLabel(r.platform),
+      gameName: r.gameName,
+      tagLine: r.tagLine,
+      iconUrl: r.iconUrl,
+    }))
+  }
+  if (!long) return []
+  // An answer to an earlier text (the debounce has not fired, or the next
+  // request is in flight) stays only where it still fits what is typed now,
+  // or "hon" would go on offering HONEY BADGER under "honz" until the next
+  // answer landed. An answer to exactly this text is taken as sent: the
+  // server folds with Python's casefold, which differs from toLowerCase on
+  // letters like "ß", and it is the one that decides what matches.
+  const current = answer?.query === text
+  const name = typedName(text)
+  const hash = text.lastIndexOf('#')
+  const tag = hash === -1 ? '' : text.slice(hash + 1).trim().toLowerCase()
+  const players = (answer?.players ?? []).filter(
+    (p) =>
+      current ||
+      (foldRiotName(p.game_name).startsWith(name) &&
+        p.tag_line.toLowerCase().startsWith(tag)),
+  )
+  return players.map((p) => ({
+    key: `known:${p.platform}:${p.riot_id}`,
+    platform: p.platform,
+    platformLabel: p.platform_label,
+    gameName: p.game_name,
+    tagLine: p.tag_line,
+    iconUrl: p.profile_icon_url,
+    tier: p.tier,
+    division: p.division,
+    leaguePoints: p.league_points,
+  }))
 }
 
 /**
@@ -98,46 +149,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
     retry: false,
   })
 
-  const options: Option[] = useMemo(() => {
-    if (!text) {
-      return recent.map((r) => ({
-        key: `recent:${r.platform}:${r.gameName}#${r.tagLine}`,
-        platform: r.platform,
-        platformLabel: platformLabel(r.platform),
-        gameName: r.gameName,
-        tagLine: r.tagLine,
-        iconUrl: r.iconUrl,
-      }))
-    }
-    if (!long) return []
-    // An answer to an earlier text (the debounce has not fired, or the next
-    // request is in flight) stays only where it still fits what is typed now,
-    // or "hon" would go on offering HONEY BADGER under "honz" until the next
-    // answer landed. An answer to exactly this text is taken as sent: the
-    // server folds with Python's casefold, which differs from toLowerCase on
-    // letters like "ß", and it is the one that decides what matches.
-    const current = suggestions.data?.query === text
-    const name = typedName(text)
-    const hash = text.lastIndexOf('#')
-    const tag = hash === -1 ? '' : text.slice(hash + 1).trim().toLowerCase()
-    const players = (suggestions.data?.players ?? []).filter(
-      (p) =>
-        current ||
-        (foldRiotName(p.game_name).startsWith(name) &&
-          p.tag_line.toLowerCase().startsWith(tag)),
-    )
-    return players.map((p) => ({
-      key: `known:${p.platform}:${p.riot_id}`,
-      platform: p.platform,
-      platformLabel: p.platform_label,
-      gameName: p.game_name,
-      tagLine: p.tag_line,
-      iconUrl: p.profile_icon_url,
-      tier: p.tier,
-      division: p.division,
-      leaguePoints: p.league_points,
-    }))
-  }, [text, long, recent, suggestions.data])
+  const options = optionsFor(text, long, recent, suggestions.data)
 
   // Said only once the answer is in for exactly what is in the field, so it
   // never flashes while a request is still on its way.

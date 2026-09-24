@@ -23,43 +23,27 @@ export default function WinRateRange({
   rate,
   low,
   high,
-  games,
   size = 'lg',
-  rankedOn = 'low',
   description,
 }: {
   rate: number
   low: number
   high: number
-  games: number
   /** `sm` for a row of text-sm, as in the matchup tables. */
   size?: 'lg' | 'sm'
-  /** What the surrounding list is ordered by: the tier list reads the low
-   *  end, the matchup tables the middle. */
-  rankedOn?: 'low' | 'middle'
-  /** The figure read out in words, for a page that explains the bar once in a
-   *  legend rather than in hover text on every row (hover text reaches neither
-   *  a phone nor a keyboard). Without it, the tier list's hover text is kept. */
-  description?: string
+  /** The figure read out in words. The page explains the bar once, in a
+   *  legend, rather than in hover text on every row, which reached neither a
+   *  phone nor a keyboard. */
+  description: string
 }) {
   // Gold only when even the low end is a winning rate: that is a pick the
   // sample actually backs, not one that merely happened to win.
   const backed = low >= 0.5
   return (
-    <span
-      className="inline-flex flex-col items-end gap-1"
-      title={
-        description
-          ? undefined
-          : `${pct(rate, 1)} over ${games.toLocaleString('en-US')} games. The sample supports ` +
-            `anything from ${pct(low, 1)} to ${pct(high, 1)}, and the list ranks on ${
-              rankedOn === 'low' ? 'the low end' : 'the middle of that'
-            }.`
-      }
-    >
-      {description && <span className="sr-only">{description}</span>}
+    <span className="inline-flex flex-col items-end gap-1">
+      <span className="sr-only">{description}</span>
       <span
-        aria-hidden={description ? true : undefined}
+        aria-hidden
         className={`tnum display leading-none text-ink ${
           size === 'sm' ? 'text-[15px] font-600' : 'text-xl font-700'
         }`}
@@ -86,7 +70,7 @@ export default function WinRateRange({
           style={{ left: `${place(0.5)}%` }}
         />
       </span>
-      <span aria-hidden={description ? true : undefined} className="tnum text-[11px] leading-none text-ink-faint">
+      <span aria-hidden className="tnum text-[11px] leading-none text-ink-faint">
         {Math.round(low * 100)} to {Math.round(high * 100)}
       </span>
     </span>

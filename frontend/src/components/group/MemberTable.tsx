@@ -1,8 +1,9 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { Group, GroupMember, LaneRecord } from '../../lib/api'
 import { pct, positionLabel, scoreColor, timeAgo } from '../../lib/format'
+import Hint from '../Hint'
 import PositionIcon from '../PositionIcon'
 import RankBadge from '../RankBadge'
 import ReviewPanel from '../ReviewPanel'
@@ -35,14 +36,21 @@ function num(value: number | null, digits = 1): string {
   return value === null ? '–' : value.toFixed(digits)
 }
 
-function WinRateCell({ member }: { member: GroupMember }) {
-  if (member.win_rate === null) {
-    return (
-      <span className="text-ink-faint" title={member.withheld ?? undefined}>
-        –
+/** A figure left out, with the reason: a hint for the eye, words for a reader. */
+function Withheld({ why }: { why: string | null }) {
+  if (!why) return <span className="text-ink-faint">–</span>
+  return (
+    <Hint text={why}>
+      <span tabIndex={0} className="text-ink-faint">
+        <span aria-hidden>–</span>
+        <span className="sr-only">{why}</span>
       </span>
-    )
-  }
+    </Hint>
+  )
+}
+
+function WinRateCell({ member }: { member: GroupMember }) {
+  if (member.win_rate === null) return <Withheld why={member.withheld} />
   return (
     <span className={`tnum font-600 ${member.win_rate >= 0.5 ? 'text-ink' : 'text-ink-dim'}`}>
       {pct(member.win_rate)}
@@ -52,23 +60,18 @@ function WinRateCell({ member }: { member: GroupMember }) {
 
 function ScoreCell({ member }: { member: GroupMember }) {
   if (member.avg_score === null) {
-    return (
-      <span
-        className="text-ink-faint"
-        title={`${member.scored_games} scored games here; the average needs 5`}
-      >
-        –
-      </span>
-    )
+    return <Withheld why={`${member.scored_games} scored games here; the average needs 5`} />
   }
   return (
-    <span
-      className="tnum display text-base font-700"
-      style={{ color: scoreColor(member.avg_score) }}
-      title={`Over ${member.scored_games} scored games`}
-    >
-      {member.avg_score.toFixed(1)}
-    </span>
+    <Hint text={`Over ${member.scored_games} scored games`}>
+      <span
+        tabIndex={0}
+        className="tnum display text-base font-700"
+        style={{ color: scoreColor(member.avg_score) }}
+      >
+        {member.avg_score.toFixed(1)}
+      </span>
+    </Hint>
   )
 }
 
@@ -77,21 +80,20 @@ function Form({ results }: { results: boolean[] }) {
   if (results.length === 0) return <span className="text-xs text-ink-faint">–</span>
   const wins = results.filter(Boolean).length
   return (
-    <span
-      className="inline-flex gap-0.5"
-      title={`Last ${results.length}, newest first: ${wins} won, ${results.length - wins} lost`}
-    >
-      {results.map((won, i) => (
-        <span
-          key={i}
-          aria-hidden
-          className={`block h-3.5 w-1.5 rounded-[1px] ${won ? 'bg-win' : 'bg-loss/80'}`}
-        />
-      ))}
-      <span className="sr-only">
-        {wins} of the last {results.length} won
+    <Hint text={`Last ${results.length}, newest first: ${wins} won, ${results.length - wins} lost`}>
+      <span tabIndex={0} className="inline-flex gap-0.5">
+        {results.map((won, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className={`block h-3.5 w-1.5 rounded-[1px] ${won ? 'bg-win' : 'bg-loss/80'}`}
+          />
+        ))}
+        <span className="sr-only">
+          {wins} of the last {results.length} won
+        </span>
       </span>
-    </span>
+    </Hint>
   )
 }
 
@@ -105,26 +107,30 @@ function LaneStrip({ lanes }: { lanes: LaneRecord[] }) {
   }))
   const won = parts[0].n + parts[1].n
   const lost = parts[3].n + parts[4].n
+  const said = `At 14 minutes: ${won} won, ${parts[2].n} even, ${lost} lost, of ${total}`
   return (
-    <span className="inline-flex items-center gap-2" title={`At 14 minutes: ${won} won, ${parts[2].n} even, ${lost} lost, of ${total}`}>
-      <span className="flex h-1.5 w-16 overflow-hidden rounded-full bg-raised" aria-hidden>
-        {parts
-          .filter((p) => p.n > 0)
-          .map((p) => (
-            <span
-              key={p.k}
-              style={{
-                width: `${(p.n / total) * 100}%`,
-                background: laneColor(p.k),
-                opacity: p.k === 'won' || p.k === 'lost' ? 0.6 : 1,
-              }}
-            />
-          ))}
+    <Hint text={said}>
+      <span tabIndex={0} className="inline-flex items-center gap-2">
+        <span className="sr-only">{said}</span>
+        <span className="flex h-1.5 w-16 overflow-hidden rounded-full bg-raised" aria-hidden>
+          {parts
+            .filter((p) => p.n > 0)
+            .map((p) => (
+              <span
+                key={p.k}
+                style={{
+                  width: `${(p.n / total) * 100}%`,
+                  background: laneColor(p.k),
+                  opacity: p.k === 'won' || p.k === 'lost' ? 0.6 : 1,
+                }}
+              />
+            ))}
+        </span>
+        <span aria-hidden className="tnum text-[11px] text-ink-faint">
+          {won}-{parts[2].n}-{lost}
+        </span>
       </span>
-      <span className="tnum text-[11px] text-ink-faint">
-        {won}-{parts[2].n}-{lost}
-      </span>
-    </span>
+    </Hint>
   )
 }
 
@@ -226,21 +232,23 @@ export default function MemberTable({
               <th className="w-8 py-2 text-left font-500">#</th>
               <th className="py-2 text-left font-500">Player</th>
               <th className="py-2 text-left font-500" aria-sort={sort === 'rank' ? 'descending' : 'none'}>
-                <SortButton active={sort === 'rank'} onClick={() => onSort('rank')} title="Official rank, then LP">
+                <SortButton active={sort === 'rank'} onClick={() => onSort('rank')} hint="Official rank, then LP">
                   Rank
                 </SortButton>
               </th>
               {columns.map((c) => (
                 <th key={c.key} className="py-2 pl-3 text-right font-500" aria-sort={sort === c.key ? 'descending' : 'none'}>
-                  <SortButton active={sort === c.key} onClick={() => onSort(c.key)} title={c.title}>
+                  <SortButton active={sort === c.key} onClick={() => onSort(c.key)} hint={c.title}>
                     {c.label}
                   </SortButton>
                 </th>
               ))}
               <th className="py-2 pl-3 text-left font-500">Role</th>
               {group.scored_mode && (
-                <th className="py-2 pl-3 text-left font-500" title="Lanes won, even and lost at 14 minutes">
-                  Lanes
+                <th className="py-2 pl-3 text-left font-500">
+                  <Hint text="Lanes won, even and lost at 14 minutes">
+                    <span tabIndex={0}>Lanes</span>
+                  </Hint>
                 </th>
               )}
               <th className="py-2 pl-3 text-left font-500">Last 10</th>
@@ -277,10 +285,13 @@ export default function MemberTable({
                     ))}
                     <td className="py-2.5 pl-3">
                       {m.main_position ? (
-                        <span className="flex items-center gap-1.5 text-xs text-ink-dim" title={positionLabel(m.main_position)}>
-                          <PositionIcon position={m.main_position} className="size-4" />
-                          <span className="tnum">{pct(m.positions[0]?.share ?? 0)}</span>
-                        </span>
+                        <Hint text={positionLabel(m.main_position)}>
+                          <span tabIndex={0} className="flex items-center gap-1.5 text-xs text-ink-dim">
+                            <PositionIcon position={m.main_position} className="size-4" />
+                            <span className="sr-only">{positionLabel(m.main_position)}, </span>
+                            <span className="tnum">{pct(m.positions[0]?.share ?? 0)}</span>
+                          </span>
+                        </Hint>
                       ) : (
                         <span className="text-xs text-ink-faint">–</span>
                       )}
@@ -357,25 +368,27 @@ export default function MemberTable({
 function SortButton({
   active,
   onClick,
-  title,
+  hint,
   children,
 }: {
   active: boolean
   onClick: () => void
-  title: string
-  children: React.ReactNode
+  /** What the column measures. */
+  hint: string
+  children: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={`border-b-2 pb-0.5 transition-colors ${
-        active ? 'border-gold text-gold-bright' : 'border-transparent hover:text-ink'
-      }`}
-    >
-      {children}
-    </button>
+    <Hint text={hint}>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`border-b-2 pb-0.5 transition-colors ${
+          active ? 'border-gold text-gold-bright' : 'border-transparent hover:text-ink'
+        }`}
+      >
+        {children}
+      </button>
+    </Hint>
   )
 }
 
@@ -416,10 +429,16 @@ function MemberDetail({ member, group }: { member: GroupMember; group: Group }) 
             {member.positions.length > 0 && (
               <ul className="flex flex-wrap gap-x-3 gap-y-1">
                 {member.positions.map((p) => (
-                  <li key={p.position} className="flex items-center gap-1 text-ink-dim" title={`${p.games} games, ${pct(p.win_rate)} won`}>
-                    <PositionIcon position={p.position} className="size-3.5" />
-                    <span className="tnum">{pct(p.share)}</span>
-                  </li>
+                  <Hint
+                    key={p.position}
+                    text={`${positionLabel(p.position)}: ${p.games} games, ${pct(p.win_rate)} won`}
+                  >
+                    <li tabIndex={0} className="flex items-center gap-1 text-ink-dim">
+                      <PositionIcon position={p.position} className="size-3.5" />
+                      <span className="sr-only">{positionLabel(p.position)}, </span>
+                      <span className="tnum">{pct(p.share)}</span>
+                    </li>
+                  </Hint>
                 ))}
               </ul>
             )}
@@ -478,7 +497,7 @@ function MemberDetail({ member, group }: { member: GroupMember; group: Group }) 
   )
 }
 
-function Note({ children }: { children: React.ReactNode }) {
+function Note({ children }: { children: ReactNode }) {
   return (
     <p className="accent-edge self-start bg-panel/50 py-2.5 pl-4 pr-3 text-xs leading-relaxed text-ink-dim">
       {children}
