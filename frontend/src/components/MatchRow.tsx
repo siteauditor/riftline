@@ -23,6 +23,7 @@ import {
   timeAgo,
 } from '../lib/format'
 import Hint from './Hint'
+import { summonerPath } from '../lib/profileAddress'
 
 /**
  * One game in the history feed.
@@ -391,7 +392,7 @@ function TeamMember({ p, platform }: { p: ParticipantBrief; platform: string }) 
       )}
       {name && tag ? (
         <Link
-          to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+          to={summonerPath(platform, name, tag)}
           className="truncate text-ink-dim hover:text-gold-bright hover:underline"
         >
           {label}

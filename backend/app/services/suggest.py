@@ -22,7 +22,7 @@ import time
 from bisect import bisect_left
 from dataclasses import dataclass
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.schemas import epoch_ms, numeric_rank
@@ -140,6 +140,13 @@ async def load_index(session: AsyncSession) -> SuggestIndex:
                 and_(
                     RankedEntry.puuid == Player.puuid,
                     RankedEntry.queue_type == "RANKED_SOLO_5x5",
+                    # The home's rank only. A row stamped for another shard is
+                    # not the rank of the region the suggestion links to; an
+                    # unstamped one predates the stamps and was read there.
+                    or_(
+                        Player.league_platform.is_(None),
+                        Player.league_platform == Player.platform,
+                    ),
                 ),
             )
             .where(Player.game_name.is_not(None), Player.tag_line.is_not(None))
@@ -149,9 +156,10 @@ async def load_index(session: AsyncSession) -> SuggestIndex:
     # A rename can leave two rows holding one Riot ID: the account that owns it
     # now, and a stale row for the account that gave it up. Keep the one
     # account-v1 confirmed most recently, and a confirmed row over one whose
-    # name was only read from a stored game.
+    # name was only read from a stored game. One suggestion per Riot ID, not
+    # per shard: a Riot ID names one account, and its link is the home's.
     rows = sorted(rows, key=lambda r: epoch_ms(r.account_fetched_at) or 0, reverse=True)
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str]] = set()
     players: list[KnownPlayer] = []
     for row in rows:
         try:
@@ -160,9 +168,9 @@ async def load_index(session: AsyncSession) -> SuggestIndex:
             continue
         folded = normalize_riot_name(row.game_name)
         tag_folded = row.tag_line.strip().casefold()
-        if not folded or (folded, tag_folded, platform.id) in seen:
+        if not folded or (folded, tag_folded) in seen:
             continue
-        seen.add((folded, tag_folded, platform.id))
+        seen.add((folded, tag_folded))
         players.append(
             KnownPlayer(
                 puuid=row.puuid,

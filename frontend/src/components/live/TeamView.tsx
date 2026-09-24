@@ -6,6 +6,7 @@ import MetBefore from './MetBefore'
 import PlayerRecordChips from './PlayerRecordChips'
 import type { LiveGame, LiveParticipant } from '../../lib/api'
 import { pct } from '../../lib/format'
+import { summonerPath } from '../../lib/profileAddress'
 
 export default function TeamView({ game, platform, you }: { game: LiveGame; platform: string; you: string }) {
   // Grouped by whatever team ids the mode actually uses, not a hardcoded
@@ -90,7 +91,7 @@ function PlayerRow({
       <span className="min-w-0 flex-1 truncate text-sm">
         {linkable ? (
           <Link
-            to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+            to={summonerPath(platform, name, tag)}
             className="display text-[15px] font-600 text-ink transition-colors hover:text-gold-bright"
           >
             {name}

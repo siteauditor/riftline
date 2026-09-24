@@ -209,11 +209,12 @@ async def add_member(
     platform: str,
     label: str | None = None,
 ) -> tuple[GroupMember, Player]:
-    """Resolve a Riot ID and add the player. One or two calls for a new player.
+    """Resolve a Riot ID and add the player. Three calls for a new player.
 
-    The member is stored against the shard the account plays on, which is not
-    always the one asked: an OCE Riot ID resolves through SEA while the account
-    lives on SG2, and its rank is only on SG2.
+    The account, its active region and its home summoner record. The member is
+    stored against the home shard, which is not always the one asked: an OCE
+    Riot ID resolves through SEA while the account lives on SG2, and its rank
+    is only on SG2.
     """
     name, tag = parse_riot_id(riot_id)
     count = (
@@ -236,10 +237,9 @@ async def add_member(
     if already is not None:
         raise AlreadyMember(f"{player.riot_id} is already in this group.")
 
-    home = await players.effective_platform(player, asked)
-    if home.id != asked.id:
-        # The level and icon shown in the group belong to the shard played on.
-        await players.ensure_summoner(player, home)
+    home = players.home_of(player)
+    # The level and icon shown in the group belong to the shard played on.
+    await players.ensure_summoner(player)
 
     member = GroupMember(
         group_id=group.id,
@@ -496,14 +496,16 @@ class Warmer:
         player = await self.session.get(Player, target.puuid)
         if player is None:
             return
-        if player.league_platform == target.platform and is_fresh(
+        # The home's rank, which is what the member row shows: members follow
+        # their player when the home moves (`homes.move_home`).
+        if player.league_platform == player.platform and is_fresh(
             player.league_fetched_at, RANK_STALE_SECONDS
         ):
             return
         if not await self.budget.take(1):
             return
         self.budget.spend(1)
-        await self.players.ranks(player, target.platform)
+        await self.players.ranks(player)
 
     async def _new_games(self, target: WarmTarget) -> None:
         cursor = await self._cursor(target.puuid)

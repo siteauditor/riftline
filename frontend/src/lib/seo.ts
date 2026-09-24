@@ -1,6 +1,7 @@
 import { PLATFORMS, type ChampionInfo, type ItemDetail } from './api'
 import { canonicalUrl, ORIGIN, SITE_NAME, type PageHead } from './head'
 import { positionLabel, tierLabel } from './format'
+import { summonerPath } from './profileAddress'
 import { championPath } from './searchParams'
 
 const regionLabel = (platform: string) =>
@@ -267,11 +268,15 @@ export const heads = {
   },
 
   /** `brief` is the page's own first sentence (rank and record), when the
-   *  profile has loaded; the generic description stands in until then. */
+   *  profile has loaded; the generic description stands in until then.
+   *  `platform` is the page's own shard once the profile has answered (its
+   *  home, or a second shard it is about: `canonicalPlatform`), so the
+   *  canonical of every other address a player can be opened at is the one
+   *  address the sitemap lists. */
   profile(riotId: string, platform: string, rank?: string | null, brief?: string): PageHead {
     const [name, tag] = riotId.split('#')
     const platformLabel = regionLabel(platform)
-    const path = `/summoner/${platform}/${encodeURIComponent(name ?? '')}/${encodeURIComponent(tag ?? '')}`
+    const path = summonerPath(platform, name ?? '', tag ?? '')
     return {
       title: titled(`${riotId}${rank ? `, ${rank}` : ''}, ${platformLabel} stats`),
       description:
@@ -285,7 +290,7 @@ export const heads = {
   profileTab(riotId: string, platform: string, tab: 'champions' | 'mastery' | 'live'): PageHead {
     const [name, tag] = riotId.split('#')
     const platformLabel = regionLabel(platform)
-    const base = `/summoner/${platform}/${encodeURIComponent(name ?? '')}/${encodeURIComponent(tag ?? '')}`
+    const base = summonerPath(platform, name ?? '', tag ?? '')
     const copy = {
       champions: {
         title: `${riotId}: champions played`,

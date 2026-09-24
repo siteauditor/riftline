@@ -10,6 +10,7 @@ import { SectionTitle } from '../Stat'
 import { EmptyState, MatchListSkeleton } from '../StateViews'
 import type { IdleSummary, MatchSummary, Profile } from '../../lib/api'
 import { tierColor, timeAgo } from '../../lib/format'
+import { summonerPath } from '../../lib/profileAddress'
 
 /**
  * The live page when nobody is in a game, which is almost always.
@@ -44,7 +45,7 @@ export default function IdleView({
   /** The countdown and the check button, owned by the page. */
   poll: ReactNode
 }) {
-  const overview = `/summoner/${encodeURIComponent(platform)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  const overview = summonerPath(platform, name, tag)
   const ranked = profile?.ranks.find((r) => r.tier) ?? profile?.ranks[0]
   const accent = tierColor(ranked?.tier)
   // The newest game Riot knows about when the history has loaded, and the

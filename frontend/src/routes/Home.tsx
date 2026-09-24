@@ -28,6 +28,7 @@ import TimeAgo from '../components/TimeAgo'
 import CountUp from '../components/CountUp'
 import Hint from '../components/Hint'
 import { toast } from 'sonner'
+import { summonerPath } from '../lib/profileAddress'
 
 // Two accounts with a real history behind them. The previous EUW example was
 // `Caps#EUW`, which resolves to an unranked level 31 with no games: the first
@@ -40,7 +41,7 @@ const EXAMPLES = [
 const SOLO_QUEUE = 420
 
 function profilePath(platform: string, name: string, tag: string) {
-  return `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  return summonerPath(platform, name, tag)
 }
 
 /**

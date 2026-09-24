@@ -33,7 +33,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Match, MatchParticipant, Player, RankedEntry, RankHistory, utcnow
 from app.riot.client import RiotClient
-from app.riot.routing import Platform, resolve_platform
+from app.riot.routing import Platform, UnknownPlatform, resolve_platform
+from app.services.flight import TtlCache
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +80,34 @@ def _reading(entry: RankedEntry) -> tuple:
     return (entry.tier, entry.division, entry.league_points, entry.wins, entry.losses)
 
 
+def _fill(entry: RankedEntry, raw: dict) -> None:
+    """Copy one league-v4 entry onto a row, stored or not."""
+    entry.tier = raw.get("tier")
+    entry.division = raw.get("rank")
+    entry.league_points = raw.get("leaguePoints") or 0
+    entry.wins = raw.get("wins") or 0
+    entry.losses = raw.get("losses") or 0
+    entry.hot_streak = bool(raw.get("hotStreak"))
+    entry.veteran = bool(raw.get("veteran"))
+    entry.fresh_blood = bool(raw.get("freshBlood"))
+    entry.inactive = bool(raw.get("inactive"))
+
+
+def transient_entries(puuid: str, raw_entries: Iterable[dict] | None) -> list[RankedEntry]:
+    """A league-v4 answer as rows that are never added to a session.
+
+    For a shard that is not the player's home: the page shows what that shard
+    says, and nothing about it is stored, because the stored rows are the
+    home's (see ``app/services/homes.py``).
+    """
+    out = []
+    for raw in raw_entries or []:
+        entry = RankedEntry(puuid=puuid, queue_type=raw.get("queueType") or "UNKNOWN")
+        _fill(entry, raw)
+        out.append(entry)
+    return out
+
+
 async def puuids_with_history(session: AsyncSession, puuids: Sequence[str]) -> set[str]:
     """Which of these players already have a rank reading on record. One query."""
     if not puuids:
@@ -116,15 +145,7 @@ async def apply_league_entries(
         seen.add(queue)
         entry = by_queue.get(queue) or RankedEntry(puuid=puuid, queue_type=queue)
         before = _reading(entry) if queue in by_queue else None
-        entry.tier = raw.get("tier")
-        entry.division = raw.get("rank")
-        entry.league_points = raw.get("leaguePoints") or 0
-        entry.wins = raw.get("wins") or 0
-        entry.losses = raw.get("losses") or 0
-        entry.hot_streak = bool(raw.get("hotStreak"))
-        entry.veteran = bool(raw.get("veteran"))
-        entry.fresh_blood = bool(raw.get("freshBlood"))
-        entry.inactive = bool(raw.get("inactive"))
+        _fill(entry, raw)
         if queue not in by_queue:
             session.add(entry)
         if baseline or _reading(entry) != before:
@@ -146,6 +167,19 @@ async def apply_league_entries(
     for queue, entry in by_queue.items():
         if queue not in seen:
             await session.delete(entry)
+
+
+# Answers for players read on a shard that is not their home, which are shown
+# and never stored. Keyed by (shard, puuid) and kept for the caller's TTL, so a
+# live page that polls does not pay for the same stranger twice.
+league_elsewhere: TtlCache[tuple[str, str], tuple[dict, ...]] = TtlCache()
+
+
+def _home_id(player: Player) -> str | None:
+    try:
+        return resolve_platform(player.platform).id
+    except UnknownPlatform:
+        return None
 
 
 class RankCache:
@@ -277,6 +311,11 @@ class RankCache:
         whatever landed is written, so the next call starts warmer and finishes
         the job. A live-game view would rather render in two seconds with seven
         of nine ranks than block for twelve.
+
+        Only a player whose home is ``platform`` is stored, stubs created here
+        included. For anyone else the answer is read and returned but never
+        written: the stored rank is their home's, and a KR lobby's reading of a
+        EUW player replacing it is how a read of the wrong shard deleted ranks.
         """
         wanted = [p for p in dict.fromkeys(puuids) if p]
         if not wanted:
@@ -285,39 +324,53 @@ class RankCache:
         resolved = resolve_platform(platform)
 
         players = await self.ensure_players(wanted, resolved)
+        home_here = {p for p, row in players.items() if _home_id(row) == resolved.id}
         cached = (
             await self.session.execute(
-                select(RankedEntry).where(RankedEntry.puuid.in_(wanted))
+                select(RankedEntry).where(RankedEntry.puuid.in_(list(home_here)))
             )
         ).scalars()
         by_puuid: dict[str, list[RankedEntry]] = {p: [] for p in wanted}
         for entry in cached:
             by_puuid[entry.puuid].append(entry)
 
-        # `.get`, not `[...]`: if a row could not be created after retries we
-        # still owe the caller an answer for that puuid, as `known=False`.
-        # A cached rank belongs to a shard, so a row filled from another one is
-        # stale here however recent it is. Two shards can hold the same puuid.
-        stale = [
-            p
-            for p in wanted
-            if p in players
-            and (
-                refresh
-                or players[p].league_platform != resolved.id
-                or not is_fresh(players[p].league_fetched_at, ttl)
-            )
-        ]
-        unreachable = [p for p in wanted if p not in players]
-        out = {p: RankSnapshot(p, by_puuid[p]) for p in wanted}
+        out: dict[str, RankSnapshot] = {}
+        stale: list[str] = []
+        for p in wanted:
+            if p not in players:
+                # A row could not be created after retries; we still owe the
+                # caller an answer for that puuid.
+                out[p] = RankSnapshot(p, known=False)
+            elif p in home_here:
+                row = players[p]
+                if (
+                    refresh
+                    or row.league_platform != resolved.id
+                    or not is_fresh(row.league_fetched_at, ttl)
+                ):
+                    stale.append(p)
+                else:
+                    out[p] = RankSnapshot(p, by_puuid[p])
+            else:
+                hit, raw = (False, None) if refresh else league_elsewhere.get((resolved.id, p), ttl)
+                if hit:
+                    out[p] = RankSnapshot(p, transient_entries(p, raw))
+                else:
+                    stale.append(p)
         if not stale:
-            return out
+            return {p: out[p] for p in wanted}
 
         fetched = await self._fetch(stale, resolved, budget_seconds)
-        tracked = await puuids_with_history(self.session, list(fetched))
+        tracked = await puuids_with_history(
+            self.session, [p for p in fetched if p in home_here]
+        )
+        stored: list[str] = []
         for puuid, raw in fetched.items():
             if raw is None:
-                out[puuid] = RankSnapshot(puuid, by_puuid[puuid], known=False)
+                continue
+            if puuid not in home_here:
+                league_elsewhere.put((resolved.id, puuid), tuple(raw))
+                out[puuid] = RankSnapshot(puuid, transient_entries(puuid, raw))
                 continue
             await apply_league_entries(
                 self.session, puuid, raw, by_puuid[puuid],
@@ -325,24 +378,34 @@ class RankCache:
             )
             players[puuid].league_platform = resolved.id
             players[puuid].league_fetched_at = utcnow()
+            stored.append(puuid)
 
-        for puuid in (*stale, *unreachable):
-            if puuid not in fetched:
+        for puuid in stale:
+            if puuid not in out and puuid not in stored:
+                # Not fetched in the budget, or the fetch failed: what we
+                # hold, marked unknown.
                 out[puuid] = RankSnapshot(puuid, by_puuid[puuid], known=False)
 
         await self._commit_tolerating_race()
 
+        # Read again after the commit, for every stored player and not only the
+        # ones just written: a write race there rolls back, and a rollback
+        # expires every row in the session, the ones read before it included.
+        # The answers from other shards were never in the session.
         refreshed = (
             await self.session.execute(
-                select(RankedEntry).where(RankedEntry.puuid.in_(wanted))
+                select(RankedEntry).where(RankedEntry.puuid.in_(list(home_here)))
             )
         ).scalars()
-        final: dict[str, list[RankedEntry]] = {p: [] for p in wanted}
+        final: dict[str, list[RankedEntry]] = {p: [] for p in home_here}
         for entry in refreshed:
             final[entry.puuid].append(entry)
-        for puuid, snapshot in out.items():
-            out[puuid] = RankSnapshot(puuid, final[puuid], known=snapshot.known)
-        return out
+        for puuid in home_here:
+            if puuid in out:
+                out[puuid] = RankSnapshot(puuid, final[puuid], known=out[puuid].known)
+            elif puuid in stored:
+                out[puuid] = RankSnapshot(puuid, final[puuid])
+        return {p: out[p] for p in wanted}
 
     async def _fetch(
         self,

@@ -13,6 +13,7 @@ import { duration, ordinal, parseRiotId, positionLabel, scoreColor } from '../li
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
 import { useHydratedSearchParams } from '../lib/searchParams'
+import { summonerPath } from '../lib/profileAddress'
 
 /**
  * One stored game on its own page.
@@ -82,7 +83,7 @@ export default function Match() {
               {subject && riotId ? (
                 <>
                   <Link
-                    to={`/summoner/${platform}/${encodeURIComponent(riotId.name)}/${encodeURIComponent(riotId.tag)}`}
+                    to={summonerPath(platform, riotId.name, riotId.tag)}
                     className="transition-colors hover:text-gold-bright"
                   >
                     {riotId.name}

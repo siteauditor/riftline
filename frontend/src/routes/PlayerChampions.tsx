@@ -20,6 +20,7 @@ import {
 import { championPath, intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import { Chip, ChipGroup } from '@/components/ui/chips'
+import { summonerPath } from '../lib/profileAddress'
 
 const QUEUES = [
   { id: null, label: 'All' },
@@ -111,7 +112,7 @@ export default function PlayerChampions() {
     else setView({ sort: key, dir: 'desc' })
   }
 
-  const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  const base = summonerPath(platform, name, tag)
   const heroArt = useChampionArt(query.data?.champions[0]?.champion.id)
   const data = query.data
 

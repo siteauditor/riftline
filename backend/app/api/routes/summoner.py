@@ -53,7 +53,7 @@ from app.api.schemas import (
     to_profile,
 )
 from app.api.schemas import ChampionRef as ChampionRefSchema
-from app.db.models import Match, MatchParticipant, RankHistory
+from app.db.models import Match, MatchParticipant, RankHistory, utcnow
 from app.riot.errors import RiotForbidden
 from app.riot.routing import resolve_platform
 from app.services.lanes import lane_labeler, lane_records
@@ -94,35 +94,40 @@ async def get_profile(
     ),
     source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
 ) -> ProfileResponse:
-    """Profile header: level, icon, every ranked queue and the ladder position."""
-    asked = resolve_platform(platform)
+    """Profile header: level, icon, every ranked queue and the ladder position.
+
+    ``shard`` says how the platform in the URL relates to the account: its
+    home, a second shard where it holds a rank or stored games (read live,
+    stored nowhere), or a shard where it holds neither, answered with the
+    home's data and ``plays_on`` so the page can move there.
+    """
+    summoner: dict | None = None
+    read_at: int | None = None
     if source == "stored":
         player = await players.resolve_stored(platform, game_name, tag_line)
-        ranks = await players.stored_ranks(player)
-        # The ranks were read on one shard and the row says which; that is the
-        # home shard, without the match-id call `effective_platform` may make.
-        home = resolve_platform(player.league_platform) if player.league_platform else asked
-        elsewhere = home if home.id != asked.id else None
-        elsewhere_summoner = None
+        view = await players.view(player, platform, live=False)
+        # Nothing is stored for a shard that is not the home.
+        ranks = [] if view.role == "second" else await players.stored_ranks(player)
     else:
         player = await players.resolve(platform, game_name, tag_line, refresh=refresh)
-        # Where this account's per-shard data actually is, which for an OCE Riot
-        # ID is usually SG2. Asked before the ranks, not after: reading league-v4
-        # on the shard that has no record answers 200 with an empty list, and
-        # that renders as an unranked Challenger.
-        home = await players.effective_platform(player, asked)
-        ranks = await players.ranks(player, home.id, refresh=refresh)
-        elsewhere = home if home.id != asked.id else None
-        # Their level and icon live on that shard, so read them from there
-        # rather than showing a blank avatar for an account that plainly has one.
-        elsewhere_summoner = (
-            await players.summoner_snapshot(player.puuid, elsewhere) if elsewhere else None
-        )
-    # Read from stored ladder snapshots only; no Riot call. On the home shard,
+        view = await players.view(player, platform)
+        if view.role == "second":
+            # Read, shown and not kept: the stored rank is the home's, and a
+            # second shard's answer written over it is how a view of the wrong
+            # shard deleted a Challenger's rank on 2026-09-24.
+            ranks = await players.ranks_on(
+                player.puuid, view.asked, known=view.league, refresh=refresh
+            )
+            read_at = players.league_read_at(player.puuid, view.asked)
+            summoner = await players.summoner_on(player.puuid, view.asked)
+        else:
+            await players.ensure_summoner(player, refresh=refresh)
+            ranks = await players.ranks(player, refresh=refresh)
+    # Read from stored ladder snapshots only; no Riot call. On the shard shown,
     # because a ladder is per shard just like the rank it is ordered by.
     solo = next((r for r in ranks if r.queue_type == "RANKED_SOLO_5x5"), None)
     found = (
-        await ladders.position_of(player.puuid, home, solo.tier) if solo else None
+        await ladders.position_of(player.puuid, view.shown, solo.tier) if solo else None
     )
     ladder = (
         LadderPositionOut(
@@ -137,7 +142,7 @@ async def get_profile(
         else None
     )
     return to_profile(
-        player, ranks, sd, asked.label, elsewhere, elsewhere_summoner, ladder=ladder
+        player, ranks, sd, view, summoner=summoner, read_at=read_at, ladder=ladder
     )
 
 
@@ -159,10 +164,19 @@ async def get_rank_history(
     was, so an empty or short graph reads as young, not as inactive.
     """
     player = await players.resolve(platform, game_name, tag_line)
+    # The same view as the profile's (its league answer is cached and shared),
+    # so the graph is of the shard whose rank the header shows. Only the home's
+    # readings are taken now, so a second shard's graph holds whatever was read
+    # there before that rule.
+    view = await players.view(player, platform)
     rows = (
         await db.execute(
             select(RankHistory)
-            .where(RankHistory.puuid == player.puuid, RankHistory.queue_type == queue)
+            .where(
+                RankHistory.puuid == player.puuid,
+                RankHistory.queue_type == queue,
+                RankHistory.platform == view.shown.id,
+            )
             .order_by(RankHistory.taken_at)
         )
     ).scalars().all()
@@ -211,6 +225,7 @@ async def get_matches(
         player = await players.resolve_stored(platform, game_name, tag_line)
     else:
         player = await players.resolve(platform, game_name, tag_line)
+    view = await players.view(player, platform, live=source != "stored")
     # Read the identifier out of the ORM object now. Storing matches can hit a
     # write race and roll back, and a rollback expires every object in the
     # session -- including this `player`. Touching it afterwards would emit a
@@ -222,7 +237,12 @@ async def get_matches(
 
     if champion is not None or source == "stored":
         stored = await matches.stored_history(
-            puuid, champion_id=champion, queue=queue, start=start, count=count
+            puuid,
+            champion_id=champion,
+            queue=queue,
+            start=start,
+            count=count,
+            platform_ids=view.platform_ids,
         )
         return MatchHistoryResponse(
             puuid=puuid,
@@ -238,7 +258,17 @@ async def get_matches(
             stored_total=stored.total,
         )
 
-    page = await matches.history(puuid, platform, start=start, count=count, queue=queue)
+    # From the regional route of the shard shown: the home's for a URL that
+    # named a shard the account does not play on, which read NA's route for
+    # a EUW player and listed nothing.
+    page = await matches.history(
+        puuid,
+        view.shown.id,
+        start=start,
+        count=count,
+        queue=queue,
+        platform_ids=view.platform_ids,
+    )
     summaries: list[MatchSummary] = []
     for match in page.matches:
         summary = to_match_summary(match, puuid, sd, lanes)
@@ -268,11 +298,16 @@ async def get_mastery(
     """Full champion mastery table: one call to Riot, every champion the player has touched."""
     player = await players.resolve(platform, game_name, tag_line)
     puuid = player.puuid
+    view = await players.view(player, platform)
+    if view.role == "second":
+        # Read from that shard and not kept, like its ranks.
+        masteries = await players.masteries_on(puuid, view.asked)
+        return to_mastery_response(
+            puuid, masteries, sd, platform=view.asked.id, fetched_at=epoch_ms(utcnow())
+        )
     # champion-mastery-v4 on a shard this account has no record on answers 200
-    # with an empty list, so asking the wrong one reports a player who has
-    # never touched a champion.
-    home = await players.effective_platform(player, resolve_platform(platform))
-    masteries = await players.masteries(player, home.id, refresh=refresh)
+    # with an empty list, so the home is read even when the URL named another.
+    masteries = await players.masteries(player, refresh=refresh)
     # Read after the fetch, and safe to: the session keeps objects usable after
     # a commit, and the one path that rolls back refreshes the player itself.
     # The shard is worth saying out loud, because it is often not the one in the
@@ -311,8 +346,11 @@ async def get_analytics(
     else:
         player = await players.resolve(platform, game_name, tag_line)
     puuid = player.puuid
+    view = await players.view(player, platform, live=source != "stored")
 
-    rows = await matches.played_by(puuid, queue=queue, limit=limit)
+    rows = await matches.played_by(
+        puuid, queue=queue, limit=limit, platform_ids=view.platform_ids
+    )
     if not rows:
         # Not an error: a profile nobody has opened yet simply has nothing stored.
         return AnalyticsResponse(puuid=puuid)
@@ -497,26 +535,29 @@ async def get_live_game(
     # history route guards the same way.
     puuid = player.puuid
     # spectator-v5 is per shard as well, and "not in a game" on the wrong shard
-    # is indistinguishable from the truth, so ask the one that holds the
-    # account. The response names the shard actually checked rather than the one
-    # in the URL: reporting `oc1` for a lookup made against `sg2` would be a
-    # quiet lie about where the answer came from.
-    home = await players.effective_platform(player, resolve_platform(platform))
-    game = await live.for_puuid(puuid, home.id)
+    # is indistinguishable from the truth, so ask the shard shown: the home, or
+    # a second shard the account holds a rank or games on. The response names
+    # the shard actually checked rather than the one in the URL: reporting
+    # `oc1` for a lookup made against `sg2` would be a quiet lie about where
+    # the answer came from.
+    view = await players.view(player, platform)
+    game = await live.for_puuid(puuid, view.shown.id)
     # Two storage reads, and only on the branch nobody wanted: 31 production
     # lookups on 2026-09-21 found nobody in a game, so this is the state the
     # page is almost always in, and it used to be an empty box. A game in
     # progress pays for none of it.
     idle = (
         to_idle_summary(
-            await matches.last_stored(puuid), await matches.stored_count(puuid), sd
+            await matches.last_stored(puuid, platform_ids=view.platform_ids),
+            await matches.stored_count(puuid, platform_ids=view.platform_ids),
+            sd,
         )
         if game is None
         else None
     )
     return LiveGameResponse(
         puuid=puuid,
-        platform=home.id,
+        platform=view.shown.id,
         in_game=game is not None,
         game=(
             to_live_game(game, sd, sd.queue_name(game.queue_id))

@@ -69,6 +69,52 @@ async def _schema():
     await init_db()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_caches():
+    """No cached answer or lock survives from one test into the next.
+
+    The TTLs are zeroed above, but a waiter in a flight accepts an answer put
+    during its wait whatever the TTL, and the remembered misses and
+    unconfirmed homes are timed in minutes.
+    """
+    from app.services.flight import clear_all
+    from app.services.players import clear_miss_cache
+
+    clear_all()
+    clear_miss_cache()
+    yield
+    clear_all()
+    clear_miss_cache()
+
+
+@pytest.fixture(autouse=True)
+def _active_region(request, monkeypatch):
+    """Riot's active-region lookup answers "no answer" unless a test asks.
+
+    Every cold Riot ID lookup makes it after account-v1, and most tests are
+    about something else, so by default it is answered here rather than
+    mocked in every module: the row then keeps its shard, or a new one takes
+    the shard of its newest stored game, else the one asked, which is the
+    handled path for a region Riot will not name. A test that is about homes
+    carries ``@pytest.mark.riot_region`` and mocks the endpoint itself.
+    """
+    if request.node.get_closest_marker("riot_region"):
+        return
+
+    async def no_answer(self, puuid, regional):
+        return None
+
+    from app.riot.client import RiotClient
+
+    monkeypatch.setattr(RiotClient, "active_region", no_answer)
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "riot_region: the test mocks the active-region endpoint itself"
+    )
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_db():
     yield

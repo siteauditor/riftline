@@ -13,6 +13,7 @@
     python -m scripts.ingest reviews
     python -m scripts.ingest audit
     python -m scripts.ingest groups --calls 2000
+    python -m scripts.ingest homes --dry-run
 
 ``crawl`` is resumable: stop it whenever and it picks the frontier back up. On a
 development key expect roughly 3,000 matches an hour, and remember the key
@@ -43,6 +44,7 @@ from app.services.aggregate import (
 )
 from app.services.audit import store_audit
 from app.services.groups import delete_empty_groups, warm_all_groups
+from app.services.homes import repair_homes
 from app.services.ingest import (
     Ingestor,
     LobbyRankBackfill,
@@ -583,6 +585,24 @@ async def cmd_groups(args) -> int:
     return 0
 
 
+async def cmd_homes(args) -> int:
+    """Put every player row back on its home shard. No Riot call.
+
+    Run by every deploy right after the migration and first in the nightly, so
+    rows written under the old rule (a view of another shard moved the row and
+    deleted its rank) are repaired before any page is rendered from them.
+    """
+    await init_db()
+    async with SessionLocal() as session:
+        report = await repair_homes(session, dry_run=args.dry_run)
+    print("home repair" + (" (dry run, nothing written)" if args.dry_run else ""))
+    for line in report.lines():
+        print(f"  {line}")
+    for example in report.examples:
+        print(f"    {example}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="ingest", description="Collect and aggregate League match data."
@@ -691,6 +711,14 @@ def main() -> int:
         help="Riot calls to spend at most. Defaults to GROUP_NIGHTLY_CALLS.",
     )
 
+    hm = sub.add_parser(
+        "homes",
+        help="Put player rows back on their home shard. Reads local storage only.",
+    )
+    hm.add_argument(
+        "--dry-run", action="store_true", help="Report what would change and write nothing."
+    )
+
     agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
     agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
     agg.add_argument("--queue", type=int, default=None)
@@ -747,6 +775,8 @@ def main() -> int:
         return asyncio.run(cmd_audit(args))
     if args.command == "groups":
         return asyncio.run(cmd_groups(args))
+    if args.command == "homes":
+        return asyncio.run(cmd_homes(args))
     return 1
 
 

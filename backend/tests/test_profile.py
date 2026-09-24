@@ -340,13 +340,13 @@ async def test_a_refresh_inside_a_minute_is_served_from_the_cache():
     async with SessionLocal() as session:
         players = PlayerService(session, client, settings)
         player = await players.resolve("euw1", "Floorer", "EUW")
-        await players.ranks(player, "euw1", refresh=True)
-        await players.ranks(player, "euw1", refresh=True)
+        await players.ranks(player, refresh=True)
+        await players.ranks(player, refresh=True)
         assert league.call_count == 1
 
         player.league_fetched_at = datetime.now(UTC) - timedelta(minutes=2)
         await session.commit()
-        await players.ranks(player, "euw1", refresh=True)
+        await players.ranks(player, refresh=True)
         assert league.call_count == 2
 
 
@@ -397,12 +397,12 @@ async def test_a_rank_stored_before_history_existed_gets_a_first_reading():
     async with SessionLocal() as session:
         players = PlayerService(session, RiotClient("RGAPI-test-key"), get_settings())
         player = await players.resolve("euw1", "Baseliner", "EUW")
-        await players.ranks(player, "euw1")
+        await players.ranks(player)
         await session.execute(delete(RankHistory).where(RankHistory.puuid == puuid))
         await session.commit()
 
-        await players.ranks(player, "euw1")  # unchanged, but nothing on record
-        await players.ranks(player, "euw1")  # unchanged, and now on record
+        await players.ranks(player)  # unchanged, but nothing on record
+        await players.ranks(player)  # unchanged, and now on record
 
     # One reading per queue in the fixture (solo and flex), then nothing.
     assert len(await history_rows(puuid)) == 2

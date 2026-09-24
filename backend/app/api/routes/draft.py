@@ -491,12 +491,12 @@ async def _personalise(
     try:
         async with asyncio.timeout(PERSONALISE_BUDGET_SECONDS):
             player = await players.resolve(platform.id, name, tag, remember_miss=True)
-            # The home shard, as the mastery page reads it. champion-mastery-v4
-            # answers 200 with an empty list on any other, so an OCE Riot ID
-            # whose account is on SG2 came back "personalised" with no mastery
-            # behind it, and stamped that empty answer as fresh.
-            home = await players.effective_platform(player, platform)
-            await players.masteries(player, home.id)
+            # The home shard's table, whichever shard the board names.
+            # champion-mastery-v4 answers 200 with an empty list on any other,
+            # so an OCE Riot ID whose account is on SG2 came back
+            # "personalised" with no mastery behind it.
+            home = players.home_of(player)
+            await players.masteries(player)
     except PlayerNotFound:
         return None, missing
     except (RiotApiError, TimeoutError):

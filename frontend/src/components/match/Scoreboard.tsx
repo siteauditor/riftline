@@ -15,6 +15,7 @@ import { compact, ordinal, pct, positionLabel, scoreColor } from '../../lib/form
 import ItemIcon from '../items/ItemIcon'
 import { LANE_TEXT, laneColor } from '../story/lanes'
 import Hint from '../Hint'
+import { summonerPath } from '../../lib/profileAddress'
 
 /**
  * The expanded match: every player's game, not just the searched player's.
@@ -256,7 +257,7 @@ function Row({
           />
           {name && tag ? (
             <Link
-              to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+              to={summonerPath(platform, name, tag)}
               className="min-w-0 truncate text-ink-dim transition-colors hover:text-gold-bright"
             >
               {name}

@@ -10,6 +10,7 @@ import StrengthsPanel from '../StrengthsPanel'
 import { laneColor } from '../story/lanes'
 import { COLUMNS, type SortKey } from './sorting'
 import { buttonVariants } from '@/components/ui/button'
+import { summonerPath } from '../../lib/profileAddress'
 
 const SOLO = 'RANKED_SOLO_5x5'
 
@@ -129,7 +130,7 @@ function LaneStrip({ lanes }: { lanes: LaneRecord[] }) {
 
 function profileHref(m: GroupMember): string | null {
   if (!m.game_name || !m.tag_line) return null
-  return `/summoner/${m.platform}/${encodeURIComponent(m.game_name)}/${encodeURIComponent(m.tag_line)}`
+  return summonerPath(m.platform, m.game_name, m.tag_line)
 }
 
 function PlayerCell({ member, cap }: { member: GroupMember; cap: number }) {

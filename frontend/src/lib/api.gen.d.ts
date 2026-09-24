@@ -11,6 +11,11 @@ export interface paths {
         /**
          * Get Profile
          * @description Profile header: level, icon, every ranked queue and the ladder position.
+         *
+         *     ``shard`` says how the platform in the URL relates to the account: its
+         *     home, a second shard where it holds a rank or stored games (read live,
+         *     stored nowhere), or a shard where it holds neither, answered with the
+         *     home's data and ``plays_on`` so the page can move there.
          */
         get: operations["get_profile_api_summoner__platform___game_name___tag_line__get"];
         put?: never;
@@ -3660,6 +3665,16 @@ export interface components {
             platform: string;
             /** Platform Label */
             platform_label: string;
+            /**
+             * Shard
+             * @default home
+             * @enum {string}
+             */
+            shard: "home" | "second" | "absent";
+            /** Home Platform */
+            home_platform: string;
+            /** Home Platform Label */
+            home_platform_label: string;
             /** Summoner Level */
             summoner_level: number | null;
             /** Profile Icon Url */

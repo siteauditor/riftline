@@ -11,7 +11,7 @@
      "summoner"
     ],
     "summary": "Get Profile",
-    "description": "Profile header: level, icon, every ranked queue and the ladder position.",
+    "description": "Profile header: level, icon, every ranked queue and the ladder position.\n\n``shard`` says how the platform in the URL relates to the account: its\nhome, a second shard where it holds a rank or stored games (read live,\nstored nowhere), or a shard where it holds neither, answered with the\nhome's data and ``plays_on`` so the page can move there.",
     "operationId": "get_profile_api_summoner__platform___game_name___tag_line__get",
     "parameters": [
      {
@@ -9491,6 +9491,24 @@
       "type": "string",
       "title": "Platform Label"
      },
+     "shard": {
+      "type": "string",
+      "enum": [
+       "home",
+       "second",
+       "absent"
+      ],
+      "title": "Shard",
+      "default": "home"
+     },
+     "home_platform": {
+      "type": "string",
+      "title": "Home Platform"
+     },
+     "home_platform_label": {
+      "type": "string",
+      "title": "Home Platform Label"
+     },
      "summoner_level": {
       "anyOf": [
        {
@@ -9574,7 +9592,9 @@
      "puuid",
      "riot_id",
      "platform",
-     "platform_label"
+     "platform_label",
+     "home_platform",
+     "home_platform_label"
     ],
     "title": "ProfileResponse"
    },

@@ -407,11 +407,13 @@ async def test_mastery_counts_less_the_longer_ago_the_champion_was_played():
 # ------------------------------------------------------------ personalisation
 
 
+@pytest.mark.riot_region
 @respx.mock
 async def test_personalisation_reads_mastery_on_the_shard_the_account_is_on(client):
     """champion-mastery-v4 answers 200 with an empty list on the wrong shard.
     The draft asked the shard in the request, so an OCE Riot ID whose account
-    lives on SG2 was reported as personalised with no mastery behind it."""
+    lives on SG2 was reported as personalised with no mastery behind it. It
+    reads the home Riot's active-region lookup names, whatever the board says."""
     patch = "D9.00"
     await seed_stat(701, 100, 55, patch=patch)
     await seed_stat(702, 100, 55, patch=patch)
@@ -421,11 +423,8 @@ async def test_personalisation_reads_mastery_on_the_shard_the_account_is_on(clie
             200, json={"puuid": puuid, "gameName": "Drafter", "tagLine": "OCE"}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
-        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
-    )
-    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
-        return_value=httpx.Response(200, json=["SG2_7400000001"])
+    respx.get(url__regex=r".*/riot/account/v1/region/by-game/lol/by-puuid/.*").mock(
+        return_value=httpx.Response(200, json={"puuid": puuid, "game": "lol", "region": "sg2"})
     )
     wrong_shard = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import NavTabs, { type NavTab } from './NavTabs'
 import { api } from '../lib/api'
+import { summonerPath } from '../lib/profileAddress'
 
 /**
  * The Overview / Champions / Mastery / Live nav on a summoner page.
@@ -27,7 +28,7 @@ export default function ProfileTabs({
   // retry settings just races it for the shared query's configuration.
   const health = useQuery({ queryKey: ['health'], queryFn: api.health })
 
-  const base = `/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  const base = summonerPath(platform, name, tag)
   const tabs: NavTab[] = [
     { to: base, label: 'Overview', end: true },
     { to: `${base}/champions`, label: 'Champions' },

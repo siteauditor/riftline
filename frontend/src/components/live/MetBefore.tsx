@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 import type { SharedGames } from '../../lib/api'
 import { timeAgo } from '../../lib/format'
+import { summonerPath } from '../../lib/profileAddress'
 
 /**
  * Whether the searched player has met this one before.
@@ -42,7 +43,7 @@ export default function MetBefore({
 
   return (
     <Link
-      to={`/summoner/${encodeURIComponent(platform)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+      to={summonerPath(platform, name, tag)}
       className="whitespace-nowrap text-[11px] text-ink-dim underline decoration-line underline-offset-2 transition-colors hover:text-gold-bright"
       title={
         `You and this player were both in ${shared.games} stored ${shared.games === 1 ? 'game' : 'games'}: ` +

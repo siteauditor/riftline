@@ -400,3 +400,64 @@ test('an unknown path is the app saying not found, not a blank shell', async ({ 
   await expect(page.getByText('404')).toBeVisible()
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 })
+
+
+/**
+ * The profile API, mocked for one made-up player who plays on EUW, so the
+ * address rules run on any corpus and never reach Riot. `asked` records every
+ * summoner request, to prove nothing is asked under an address being left.
+ */
+async function mockHomePlayer(page: Page, asked: string[]) {
+  const profile = (platform: string, label: string) => ({
+    puuid: 'mover', game_name: 'Mover', tag_line: 'EUW', riot_id: 'Mover#EUW',
+    platform, platform_label: label,
+    shard: platform === 'euw1' ? 'home' : 'absent',
+    home_platform: 'euw1', home_platform_label: 'EUW',
+    summoner_level: 100, profile_icon_url: null, ranks: [],
+    plays_on: platform === 'euw1' ? null : 'euw1',
+    plays_on_label: platform === 'euw1' ? null : 'EUW',
+    identity_from_plays_on: platform !== 'euw1',
+    updated_at: null, ladder: null,
+  })
+  await page.route('**/api/summoner/**', async (route) => {
+    const url = new URL(route.request().url())
+    asked.push(url.pathname + url.search)
+    const [, , , shard, , , rest] = url.pathname.split('/')
+    // The API answers an alias as the shard it names.
+    const platform = shard === 'euw' ? 'euw1' : shard
+    const json =
+      rest === 'matches'
+        ? { puuid: 'mover', matches: [], start: 0, count: 20, has_more: false, source: 'riot', stored_total: null }
+        : rest === 'analytics'
+          ? {
+              puuid: 'mover', basis: 'stored_matches', games_analysed: 0, roles: [], classes: [],
+              activity_utc: [], champions: [], score_profile: [], review: [], lanes: [],
+              totals: { win_rate: 0, kda: 0, avg_kills: 0, avg_deaths: 0, avg_assists: 0, cs_per_min: 0, vision_per_game: 0, damage_per_min: 0 },
+            }
+          : rest === undefined
+            ? profile(platform, platform === 'na1' ? 'NA' : platform.toUpperCase())
+            : null
+    if (json === null) return route.fulfill({ status: 404, json: { detail: 'Not found.' } })
+    return route.fulfill({ json })
+  })
+}
+
+test('a profile opened on a shard the player has nothing on moves to their home, once', async ({ page }) => {
+  const asked: string[] = []
+  await mockHomePlayer(page, asked)
+  const errors = await open(page, '/summoner/na1/Mover/EUW?queue=420')
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW\?queue=420$/)
+  await expect(page.getByText('Mover#EUW plays on EUW.')).toBeVisible()
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /\/summoner\/euw1\/Mover\/EUW$/)
+  // The games are asked once, at the address the page settled on.
+  const histories = asked.filter((a) => a.includes('/matches'))
+  expect(histories.every((a) => a.startsWith('/api/summoner/euw1/'))).toBe(true)
+  expect(hydrationErrors(errors)).toEqual([])
+})
+
+test('an alias or another spelling of a profile moves to its canonical address', async ({ page }) => {
+  await mockHomePlayer(page, [])
+  await open(page, '/summoner/euw/mover/euw')
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW$/)
+  await expect(page.getByText('plays on EUW.')).toHaveCount(0)
+})

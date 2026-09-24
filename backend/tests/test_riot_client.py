@@ -39,6 +39,15 @@ def test_sea_collapses_to_asia_for_account_v1():
     assert oce.account_region is Regional.ASIA
 
 
+def test_a_shards_games_include_the_shards_folded_into_it():
+    from app.riot.routing import platform_ids_for
+
+    assert platform_ids_for("sg2") == frozenset({"SG2", "PH2", "TH2"})
+    assert platform_ids_for("th2") == frozenset({"SG2", "PH2", "TH2"})
+    assert platform_ids_for("euw") == frozenset({"EUW1"})
+    assert platform_ids_for("kr") == frozenset({"KR"})
+
+
 def test_unknown_platform_is_rejected_with_a_useful_message():
     with pytest.raises(UnknownPlatform) as exc:
         resolve_platform("narnia")
@@ -185,6 +194,34 @@ async def test_account_by_riot_id_hits_the_regional_host():
     assert route.called
     assert data["puuid"] == "P1"
     assert route.calls[0].request.headers["X-Riot-Token"] == "fake-key"
+
+
+@pytest.mark.riot_region
+@respx.mock
+async def test_active_region_names_the_home_shard():
+    """The home an account plays on, from any account region: measured on
+    2026-09-24, europe and americas both named euw1 for a EUW account."""
+    route = respx.get(
+        "https://americas.api.riotgames.com/riot/account/v1/region/by-game/lol/by-puuid/P1"
+    ).mock(return_value=httpx.Response(200, json={"puuid": "P1", "game": "lol", "region": "EUW1"}))
+    async with _client() as c:
+        assert await c.active_region("P1", Regional.AMERICAS) == "euw1"
+    assert route.called
+
+
+@pytest.mark.riot_region
+@respx.mock
+async def test_active_region_without_an_answer_is_none():
+    respx.get(url__regex=r".*/region/by-game/lol/by-puuid/P1$").mock(
+        side_effect=[
+            httpx.Response(404),
+            httpx.Response(200, json={"puuid": "P1", "game": "lol"}),
+            httpx.Response(200, json={"puuid": "P1", "game": "lol", "region": "  "}),
+        ]
+    )
+    async with _client() as c:
+        for _ in range(3):
+            assert await c.active_region("P1", Regional.EUROPE) is None
 
 
 @respx.mock

@@ -250,6 +250,27 @@ class RiotClient:
             path_params={"puuid": puuid},
         )
 
+    async def active_region(self, puuid: str, regional: Regional | str) -> str | None:
+        """The shard this account plays League on now, as Riot reports it.
+
+        Any account region answers it: measured on 2026-09-24, europe and
+        americas both named euw1 for a EUW account, and asia named oc1 for an
+        OCE account whose games are on OC1 and sg2 for two whose games are on
+        SG2, matching the platforms of their stored games. It replaces guessing
+        the home from which shard has a summoner record, which a level 30 NA
+        record on a EUW Challenger fooled. None when Riot has no answer.
+        """
+        data = await self.get(
+            regional_host(regional),
+            "/riot/account/v1/region/by-game/{game}/by-puuid/{puuid}",
+            path_params={"game": "lol", "puuid": puuid},
+            allow_404=True,
+        )
+        region = data.get("region") if isinstance(data, dict) else None
+        if not isinstance(region, str) or not region.strip():
+            return None
+        return region.strip().lower()
+
     # ------------------------------------------------ summoner / league (platform)
 
     async def summoner_by_puuid(self, puuid: str, platform: Platform | str) -> dict:

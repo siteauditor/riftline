@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.db.models import ChampionMastery, Match, MatchParticipant, Player, RankedEntry
-from app.riot.routing import Platform
+from app.services.homes import ShardView
 from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
 from app.services.roles import CONFIDENT_AT, MEASURED_ACCURACY, MEASURED_PLAYERS
 from app.services.scores import (
@@ -182,15 +182,22 @@ class ProfileResponse(BaseModel):
     game_name: str | None = None
     tag_line: str | None = None
     riot_id: str
+    # The shard in the URL, in its canonical spelling (th2 is sg2).
     platform: str
     platform_label: str
+    # How the asked shard relates to the account: "home" is where it plays;
+    # "second" is another shard where it holds a rank or stored games, read
+    # live and stored nowhere; "absent" is a shard where it holds neither, and
+    # everything below then describes the home shard.
+    shard: Literal["home", "second", "absent"] = "home"
+    # The shard the account plays on, as Riot's active-region lookup names it.
+    home_platform: str
+    home_platform_label: str
     summoner_level: int | None = None
     profile_icon_url: str | None = None
     ranks: list[RankInfo] = Field(default_factory=list)
-    # Set only when this Riot ID has no summoner record on the platform asked
-    # for. Then the level, the icon and the ranks are all empty not because the
-    # player is new but because they play somewhere else, and saying so is the
-    # difference between an explanation and a blank page.
+    # Set only when `shard` is "absent": the level, the icon and the ranks are
+    # the home shard's, and the page moves to that shard's address.
     plays_on: str | None = None
     plays_on_label: str | None = None
     # True when the level and icon above were read from `plays_on` rather than
@@ -997,40 +1004,49 @@ def to_profile(
     player: Player,
     ranks: list[RankedEntry],
     sd: StaticDataService,
-    platform_label: str,
-    plays_on: Platform | None = None,
-    elsewhere_summoner: dict | None = None,
+    view: ShardView,
+    *,
+    summoner: dict | None = None,
+    read_at: int | None = None,
     ladder: LadderPositionOut | None = None,
 ) -> ProfileResponse:
+    """The profile header for one view of a player.
+
+    ``summoner`` and ``read_at`` are the second shard's record and the time its
+    ranks were read, for a ``second`` view, which stores neither. Every other
+    view shows the home shard's stored record, labelled when the URL named
+    another shard: the player has one face and one level where they play, and
+    a blank avatar would read as a fact about them.
+    """
     infos = [to_rank_info(r) for r in ranks]
     # Solo queue first: it is the rank players mean when they say "my rank".
     infos.sort(key=lambda r: (r.queue != "RANKED_SOLO_5x5", -r.numeric_rank))
+    second = view.role == "second"
+    absent = view.role == "absent"
+    record = summoner or {}
     return ProfileResponse(
         puuid=player.puuid,
         game_name=player.game_name,
         tag_line=player.tag_line,
         riot_id=f"{player.game_name}#{player.tag_line}",
-        platform=player.platform,
-        platform_label=platform_label,
-        # The player has one face and one level; both live on the shard they
-        # actually play on. Showing them, labelled, beats a blank avatar and a
-        # dash, which read as facts about the player rather than about the
-        # region that was searched.
-        summoner_level=(
-            elsewhere_summoner.get("summonerLevel")
-            if elsewhere_summoner
-            else player.summoner_level
-        ),
+        platform=view.asked.id,
+        platform_label=view.asked.label,
+        shard=view.role,
+        home_platform=view.home.id,
+        home_platform_label=view.home.label,
+        summoner_level=record.get("summonerLevel") if second else player.summoner_level,
         profile_icon_url=sd.profile_icon(
-            elsewhere_summoner.get("profileIconId")
-            if elsewhere_summoner
-            else player.profile_icon_id
+            record.get("profileIconId") if second else player.profile_icon_id
         ),
         ranks=infos,
-        plays_on=plays_on.id if plays_on else None,
-        plays_on_label=plays_on.label if plays_on else None,
-        identity_from_plays_on=elsewhere_summoner is not None,
-        updated_at=epoch_ms(player.league_fetched_at or player.summoner_fetched_at),
+        plays_on=view.home.id if absent else None,
+        plays_on_label=view.home.label if absent else None,
+        identity_from_plays_on=absent,
+        updated_at=(
+            read_at
+            if second
+            else epoch_ms(player.league_fetched_at or player.summoner_fetched_at)
+        ),
         ladder=ladder,
     )
 

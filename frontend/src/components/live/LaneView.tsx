@@ -14,6 +14,7 @@ import type {
   RecordBasis,
 } from '../../lib/api'
 import { pct, positionLabel } from '../../lib/format'
+import { summonerPath } from '../../lib/profileAddress'
 
 /**
  * Lane by lane, each blue player facing their red opponent.
@@ -139,7 +140,7 @@ function LaneCard({
         <p className="truncate text-xs leading-snug">
           {linkable ? (
             <Link
-              to={`/summoner/${platform}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`}
+              to={summonerPath(platform, name, tag)}
               className="text-ink-dim transition-colors hover:text-gold-bright"
             >
               {name}

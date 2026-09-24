@@ -17,6 +17,7 @@ import { compact, pct, timeAgo } from '../lib/format'
 import { foldName, useHydratedSearchParams, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
+import { summonerPath } from '../lib/profileAddress'
 
 /** The analytics ceiling the champions tab already asks for. Same key, same
  *  options, so the two pages share one cache entry and one request. */
@@ -124,7 +125,7 @@ export default function Mastery() {
   }
 
   const mastery = masteryQuery.data
-  const base = `/summoner/${encodeURIComponent(platform)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`
+  const base = summonerPath(platform, name, tag)
   const selectedChampion = pool.champions.find((c) => c.id === selected) ?? null
 
   // Riot keeps mastery per shard and answers 200 with an empty list on the

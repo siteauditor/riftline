@@ -368,12 +368,26 @@ class MatchService:
         start: int = 0,
         count: int = 20,
         queue: int | None = None,
+        platform_ids: Collection[str] | None = None,
     ) -> HistoryPage:
+        """One page of Riot's history for this player, stored on the way.
+
+        ``platform_ids`` keeps only the games played on those shards, for the
+        view of a shard that is not the player's home: the regional route lists
+        every shard behind it (EUW and EUNE, OCE and SG), and a game from
+        another shard is neither shown there nor worth a call. ``id_count``
+        still counts Riot's list, so paging goes on past a page it emptied.
+        """
         platform = resolve_platform(platform_name)
         ids = await self.match_ids(
             puuid, platform_name, start=start, count=count, queue=queue
         )
-        matches = await self.ensure_matches(ids, platform.regional)
+        wanted = (
+            ids
+            if platform_ids is None
+            else [i for i in ids if i.split("_", 1)[0].upper() in platform_ids]
+        )
+        matches = await self.ensure_matches(wanted, platform.regional)
         return HistoryPage(matches=matches, id_count=len(ids))
 
     async def stored_history(
@@ -384,6 +398,7 @@ class MatchService:
         queue: int | None = None,
         start: int = 0,
         count: int = 20,
+        platform_ids: Collection[str] | None = None,
     ) -> StoredHistoryPage:
         """This player's games **from storage only**, newest first.
 
@@ -402,6 +417,8 @@ class MatchService:
             conditions.append(MatchParticipant.champion_id == champion_id)
         if queue is not None:
             conditions.append(Match.queue_id == queue)
+        if platform_ids is not None:
+            conditions.append(Match.platform_id.in_(sorted(platform_ids)))
         base = (
             select(Match.match_id)
             .join(MatchParticipant, MatchParticipant.match_id == Match.match_id)
@@ -432,6 +449,7 @@ class MatchService:
         queue: int | None = None,
         queues: Collection[int] | None = None,
         limit: int = 300,
+        platform_ids: Collection[str] | None = None,
     ) -> list[PlayedRow]:
         """This player's games **from storage only**, newest first.
 
@@ -470,9 +488,14 @@ class MatchService:
         if queues is not None:
             # Several queues read as one: a group's "Normal" is draft, blind and quickplay.
             stmt = stmt.where(Match.queue_id.in_(list(queues)))
+        if platform_ids is not None:
+            # A second shard's view: its own games only.
+            stmt = stmt.where(Match.platform_id.in_(sorted(platform_ids)))
         return [PlayedRow(*row) for row in (await self.session.execute(stmt)).all()]
 
-    async def last_stored(self, puuid: str) -> PlayedRow | None:
+    async def last_stored(
+        self, puuid: str, *, platform_ids: Collection[str] | None = None
+    ) -> PlayedRow | None:
         """The newest game we hold for this player, or None if we hold none.
 
         The newest game **we hold**, which is not the newest they played: the
@@ -480,10 +503,12 @@ class MatchService:
         newest one is a median of four days old. Whatever shows this has to say
         so.
         """
-        rows = await self.played_by(puuid, limit=1)
+        rows = await self.played_by(puuid, limit=1, platform_ids=platform_ids)
         return rows[0] if rows else None
 
-    async def stored_count(self, puuid: str) -> int:
+    async def stored_count(
+        self, puuid: str, *, platform_ids: Collection[str] | None = None
+    ) -> int:
         """How many games we hold for this player. Zero is an answer."""
         stmt = (
             select(func.count())
@@ -491,4 +516,6 @@ class MatchService:
             .join(Match, Match.match_id == MatchParticipant.match_id)
             .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))
         )
+        if platform_ids is not None:
+            stmt = stmt.where(Match.platform_id.in_(sorted(platform_ids)))
         return int((await self.session.execute(stmt)).scalar() or 0)

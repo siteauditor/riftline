@@ -4,6 +4,7 @@ import type { ChampionPlayers } from '../../lib/api'
 import Crest from '../Crest'
 import { EmptyState } from '../StateViews'
 import { pct, scoreColor, tierLabel, winRateColor } from '../../lib/format'
+import { summonerPath } from '../../lib/profileAddress'
 
 /**
  * Who does best on this champion, by average Riftline score.
@@ -64,7 +65,7 @@ export default function PlayersPanel({ board, championName }: { board: ChampionP
               const name = p.game_name ?? 'Unnamed player'
               const to =
                 p.game_name && p.tag_line && p.platform
-                  ? `/summoner/${encodeURIComponent(p.platform)}/${encodeURIComponent(p.game_name)}/${encodeURIComponent(p.tag_line)}`
+                  ? summonerPath(p.platform, p.game_name, p.tag_line)
                   : null
               return (
                 <tr key={p.puuid} className="lift border-b border-line-soft">

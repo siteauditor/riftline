@@ -108,6 +108,22 @@ def resolve_platform(value: Platform | str) -> Platform:
         raise UnknownPlatform(value) from None
 
 
+def platform_ids_for(platform: Platform | str) -> frozenset[str]:
+    """The `Match.platform_id` values that count as games on this shard.
+
+    A match id carries the platform that hosted the game, upper case. SG2 also
+    answers for the shards Riot folded into it, whose ids stored games from
+    before the merge still carry (PH2, TH2).
+    """
+    resolved = resolve_platform(platform)
+    folded = {
+        alias.upper()
+        for alias, target in _ALIASES.items()
+        if target == resolved.id and alias[-1].isdigit()
+    }
+    return frozenset({resolved.id.upper(), *folded})
+
+
 def platform_host(platform: Platform | str) -> str:
     return f"https://{resolve_platform(platform).id}.api.riotgames.com"
 

@@ -580,39 +580,47 @@ def test_tiers_are_withheld_when_the_slice_is_too_thin():
     assert all(r.tier is not None for r in wide)
 
 
+REGION_ROUTE = r".*/riot/account/v1/region/by-game/lol/by-puuid/.*"
+
+
+def mock_region(region: str):
+    """Riot's active-region lookup, answering ``region`` for every account."""
+    return respx.get(url__regex=REGION_ROUTE).mock(
+        return_value=httpx.Response(200, json={"puuid": "x", "game": "lol", "region": region})
+    )
+
+
+def not_found():
+    return httpx.Response(404, json={"status": {"message": "Data not found", "status_code": 404}})
+
+
+@pytest.mark.riot_region
 @respx.mock
 async def test_a_profile_on_the_wrong_shard_says_where_the_account_lives(client):
-    """A Riot ID resolves across a whole region, but a summoner record lives on
-    one shard. Searching the wrong one rendered a hollow profile: no avatar,
-    "Level -", and "Unranked this season" for an account that had simply never
-    played there, which reads as three facts about the player.
-
-    A match id is prefixed with the platform that hosted the game, and that is
-    the only thing that can answer this: no endpoint maps a puuid to a shard.
+    """A Riot ID resolves across a whole region, but the account plays on one
+    shard, which Riot's active-region lookup names. A URL naming a shard where
+    it holds neither a rank nor a stored game is answered with the home
+    shard's level, icon and ranks, and says where that is, so the page can
+    move there. It used to render a hollow profile: no avatar, "Level -" and
+    "Unranked this season" for an account that had never played there.
     """
-    # Its own puuid: the suite shares a database, and stored matches are the
-    # first place `home_platform` looks.
+    # Its own puuid: the suite shares a database.
     puuid = "W" * 78
     respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
         return_value=httpx.Response(
             200, json={"puuid": puuid, "gameName": "Shardless", "tagLine": "0403"}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
-        return_value=httpx.Response(
-            404, json={"status": {"message": "Data not found", "status_code": 404}}
-        )
-    )
-    # Not scoped to oc1: the ranked lookup follows the account to the shard it
-    # is actually on, so this has to answer for sg2 as well. This fixture has no
-    # ranked entries anywhere, which is what keeps the test about the borrowed
-    # identity rather than about ranks.
-    respx.get(url__regex=r".*/lol/league/v4/entries/by-puuid/.*").mock(
+    mock_region("sg2")
+    asked_league = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/league/v4/entries/by-puuid/.*"
+    ).mock(return_value=httpx.Response(200, json=[]))
+    asked_record = respx.get(
+        url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*"
+    ).mock(return_value=not_found())
+    respx.get(url__regex=r".*sg2\.api\.riotgames\.com/lol/league/v4/entries/by-puuid/.*").mock(
         return_value=httpx.Response(200, json=[])
     )
-    ids = respx.get(
-        url__regex=r".*sea\.api\.riotgames\.com/lol/match/v5/matches/by-puuid/.*/ids.*"
-    ).mock(return_value=httpx.Response(200, json=["SG2_7412345678"]))
     respx.get(url__regex=r".*sg2\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
         return_value=httpx.Response(
             200,
@@ -629,15 +637,20 @@ async def test_a_profile_on_the_wrong_shard_says_where_the_account_lives(client)
 
     assert response.status_code == 200
     body = response.json()
+    assert body["shard"] == "absent"
+    assert (body["platform"], body["home_platform"]) == ("oc1", "sg2")
     assert body["plays_on"] == "sg2"
     assert body["plays_on_label"] == "SG"
-    assert ids.called
-    # The account has one face and one level, and both live on that shard. A
-    # blank avatar and a dash read as facts about the player, so they are read
-    # from there and flagged as borrowed.
+    # The account has one face and one level, and both live on its home. A
+    # blank avatar and a dash read as facts about the player, so they are the
+    # home's, flagged as such.
     assert body["identity_from_plays_on"] is True
     assert body["summoner_level"] == 72
     assert body["profile_icon_url"].endswith("/profileicon/4794.png")
+    # One question of the asked shard, whether it holds a rank; its record is
+    # never read, because nothing about that shard is shown.
+    assert asked_league.call_count == 1
+    assert not asked_record.called
 
 
 @respx.mock
@@ -690,29 +703,31 @@ def test_no_offered_shard_is_one_riot_has_retired():
     assert {"sg2", "tw2", "vn2", "oc1"} <= set(PLATFORMS)
 
 
+@pytest.mark.riot_region
 @respx.mock
 async def test_the_two_shards_do_not_overwrite_each_other(client):
-    """A level belongs to a platform, and the player row holds one of each.
+    """The row holds one level, one rank and one shard: the home's.
 
-    Stamping the 404 as a fresh fetch cached "no level" against the puuid, so
-    the same account then read as level-less on the shard it really plays on
-    for the whole TTL. Measured on a live account that is on SG, not OCE.
+    Alternating a view of another shard with a view of the home was the case
+    that broke live: whichever page loaded second rewrote the row for its own
+    shard, and on 2026-09-24 a view of NA deleted a EUW Challenger's rank.
     """
+    from app.db.base import SessionLocal
+    from app.db.models import Player
+
     puuid = "X" * 78
     respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
         return_value=httpx.Response(
             200, json={"puuid": puuid, "gameName": "Moved", "tagLine": "0001"}
         )
     )
+    mock_region("sg2")
     respx.get(url__regex=r".*/lol/league/v4/entries/by-puuid/.*").mock(
         return_value=httpx.Response(200, json=[])
     )
-    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
-        return_value=httpx.Response(200, json=["SG2_7412345678"])
-    )
     oc1 = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*"
-    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
+    ).mock(return_value=not_found())
     sg2 = respx.get(
         url__regex=r".*sg2\.api\.riotgames\.com/lol/summoner/v4/.*"
     ).mock(
@@ -727,32 +742,37 @@ async def test_the_two_shards_do_not_overwrite_each_other(client):
         )
     )
 
-    # Alternating the two shards is the case that was broken live: whichever
-    # page was loaded second overwrote the other one's cached level.
     for _ in range(2):
         wrong = (await client.get("/api/summoner/oc1/Moved/0001")).json()
+        assert wrong["shard"] == "absent"
         assert wrong["plays_on"] == "sg2"
         assert wrong["identity_from_plays_on"] is True
         assert wrong["summoner_level"] == 72
         assert wrong["ranks"] == []
 
         right = (await client.get("/api/summoner/sg2/Moved/0001")).json()
+        assert right["shard"] == "home"
         assert right["plays_on"] is None
         # Its own record, not a borrowed one.
         assert right["identity_from_plays_on"] is False
         assert right["summoner_level"] == 72
         assert right["profile_icon_url"].endswith("/profileicon/4794.png")
 
-    assert oc1.called and sg2.called
+    assert sg2.called and not oc1.called
+    async with SessionLocal() as session:
+        row = await session.get(Player, puuid)
+        assert (row.platform, row.summoner_platform, row.league_platform) == ("sg2", "sg2", "sg2")
 
 
+@pytest.mark.riot_region
 @respx.mock
-async def test_the_summoner_cache_is_scoped_to_one_shard():
-    """A cached level belongs to a platform, and the row is keyed by puuid.
+async def test_the_summoner_cache_holds_the_home_record_only():
+    """A cached level belongs to the home, and the row is keyed by puuid.
 
-    Without the scoping, the two shards fought over one cache: stamping the oc1
-    miss cached "no level" for sg2, and stamping the sg2 hit then reported level
-    72 on the oc1 page. Both were measured on a live account that plays on SG.
+    Before the rule, two shards fought over one cache: an oc1 miss cached "no
+    level" for sg2, and the sg2 record was then reported on the oc1 page. Now
+    the stored record is always the home's, and another shard's is read and
+    kept in memory only.
 
     The TTL is zeroed in the test settings, so an end-to-end request cannot tell
     a scoped cache from a cold one. This drives the service directly.
@@ -767,7 +787,7 @@ async def test_the_summoner_cache_is_scoped_to_one_shard():
     puuid = "Y" * 78
     oc1 = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*"
-    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
+    ).mock(return_value=not_found())
     sg2 = respx.get(
         url__regex=r".*sg2\.api\.riotgames\.com/lol/summoner/v4/.*"
     ).mock(
@@ -783,13 +803,14 @@ async def test_the_summoner_cache_is_scoped_to_one_shard():
     )
 
     async with SessionLocal() as session:
+        # A record read on another shard before the rule, stamped a moment ago.
         session.add(
             Player(
                 puuid=puuid,
                 game_name="Stamped",
                 tag_line="0002",
                 search_name="stamped",
-                platform="euw1",
+                platform="sg2",
                 summoner_level=731,
                 profile_icon_id=6090,
                 summoner_platform="euw1",
@@ -803,22 +824,19 @@ async def test_the_summoner_cache_is_scoped_to_one_shard():
             service = PlayerService(session, client, settings)
             player = await session.get(Player, puuid)
 
-            # A fresh stamp from another shard must not satisfy this lookup.
-            await service.ensure_summoner(player, resolve_platform("oc1"))
-            assert oc1.called
-            assert player.summoner_level is None
-            assert player.profile_icon_id is None
-            assert player.summoner_platform == "oc1"
-            # The miss is cached, but only against the shard it happened on.
-            assert player.summoner_fetched_at is not None
-
-            # And the miss must not be served for a different shard.
-            await service.ensure_summoner(player, resolve_platform("sg2"))
+            # A fresh stamp from another shard does not satisfy the home.
+            await service.ensure_summoner(player)
             assert sg2.called
-            assert player.summoner_level == 72
-            assert player.summoner_platform == "sg2"
+            assert (player.summoner_level, player.summoner_platform) == (72, "sg2")
+
+            # Another shard's record is read and not kept.
+            assert await service.summoner_on(puuid, resolve_platform("oc1")) is None
+            assert oc1.called
+            await session.refresh(player)
+            assert (player.summoner_level, player.summoner_platform) == (72, "sg2")
 
 
+@pytest.mark.riot_region
 @respx.mock
 async def test_mastery_reads_the_shard_the_account_is_on(client):
     """champion-mastery-v4 answers 200 with an empty list on the wrong shard.
@@ -836,11 +854,10 @@ async def test_mastery_reads_the_shard_the_account_is_on(client):
             200, json={"puuid": puuid, "gameName": "Mastered", "tagLine": "999"}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
-        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
-    )
-    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
-        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    mock_region("sg2")
+    # The view asks the URL's shard whether it holds a rank: it does not.
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/league/v4/.*").mock(
+        return_value=httpx.Response(200, json=[])
     )
     wrong_shard = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
@@ -881,11 +898,13 @@ async def test_mastery_reads_the_shard_the_account_is_on(client):
     body = response.json()
     assert right_shard.called
     assert not wrong_shard.called
+    assert body["platform"] == "sg2"
     assert body["total_champions_played"] == 2
     assert body["total_points"] == 329_768
     assert [entry["champion"]["id"] for entry in body["entries"]] == [45, 161]
 
 
+@pytest.mark.riot_region
 @respx.mock
 async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
     """spectator-v5 is per shard too, and its answer is a 404 either way.
@@ -899,15 +918,14 @@ async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
             200, json={"puuid": puuid, "gameName": "Playing", "tagLine": "999"}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
-        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
-    )
-    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
-        return_value=httpx.Response(200, json=["SG2_7412345678"])
+    mock_region("sg2")
+    # Asked by the view of the URL's shard: no rank there.
+    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/league/v4/.*").mock(
+        return_value=httpx.Response(200, json=[])
     )
     wrong_shard = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/spectator/v5/.*"
-    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
+    ).mock(return_value=not_found())
     right_shard = respx.get(
         url__regex=r".*sg2\.api\.riotgames\.com/lol/spectator/v5/.*"
     ).mock(
@@ -951,7 +969,7 @@ async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
     ).mock(return_value=httpx.Response(200, json={"championLevel": 25, "championPoints": 249708}))
     mastery_away = respx.get(
         url__regex=r".*oc1\.api\.riotgames\.com/lol/champion-mastery/v4/.*"
-    ).mock(return_value=httpx.Response(404, json={"status": {"status_code": 404}}))
+    ).mock(return_value=not_found())
 
     response = await client.get("/api/summoner/oc1/Playing/999/live")
 
@@ -968,14 +986,14 @@ async def test_a_live_lookup_asks_the_shard_the_account_is_on(client):
     assert body["game"]["queue_id"] == 420
 
 
+@pytest.mark.riot_region
 @respx.mock
 async def test_ranks_come_from_the_shard_the_account_is_on(client):
     """league-v4 on the wrong shard is an empty list, which renders as unranked.
 
-    The profile already borrowed the level and icon from the home shard, so the
-    page showed a level-85 account with a face and "Unranked this season" over
-    a real Bronze III. Two of the three facts were right, which is what made it
-    convincing.
+    The page once showed a level-85 account with a face and "Unranked this
+    season" over a real Bronze III. The URL's shard is asked only whether it
+    holds a rank, and its empty answer is not what the page shows.
     """
     puuid = "R" * 78
     respx.get(url__regex=r".*/riot/account/v1/accounts/by-riot-id/.*").mock(
@@ -983,12 +1001,7 @@ async def test_ranks_come_from_the_shard_the_account_is_on(client):
             200, json={"puuid": puuid, "gameName": "Ranked", "tagLine": "999"}
         )
     )
-    respx.get(url__regex=r".*oc1\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
-        return_value=httpx.Response(404, json={"status": {"status_code": 404}})
-    )
-    respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
-        return_value=httpx.Response(200, json=["SG2_7412345678"])
-    )
+    mock_region("sg2")
     respx.get(url__regex=r".*sg2\.api\.riotgames\.com/lol/summoner/v4/.*").mock(
         return_value=httpx.Response(
             200,
@@ -1028,7 +1041,7 @@ async def test_ranks_come_from_the_shard_the_account_is_on(client):
     assert response.status_code == 200
     body = response.json()
     assert right_shard.called
-    assert not wrong_shard.called
+    assert wrong_shard.call_count == 1
     assert body["plays_on"] == "sg2"
     assert body["summoner_level"] == 85
     assert [(r["tier"], r["division"], r["league_points"]) for r in body["ranks"]] == [
@@ -1036,14 +1049,15 @@ async def test_ranks_come_from_the_shard_the_account_is_on(client):
     ]
 
 
+@pytest.mark.riot_region
 @respx.mock
-async def test_the_mastery_cache_is_scoped_to_one_shard():
-    """An empty mastery table read from the wrong shard must not be cached.
+async def test_the_mastery_cache_holds_the_home_table_only():
+    """An empty mastery table read from another shard is never stored.
 
-    Same shape as the summoner cache above, and the reason it needs its own
-    test: the stamp said "fetched at", nothing said "from where", so the empty
-    OCE answer satisfied the next SG2 lookup for the whole TTL. That is why
-    this outlived the first fix.
+    Same shape as the summoner cache above: the stamp said "fetched at",
+    nothing said "from where", so an empty OCE answer satisfied the next SG2
+    lookup for the whole TTL. The stored table is the home's now, and another
+    shard's is read and returned without a write.
 
     The TTL is zeroed in the test settings, so this drives the service directly
     rather than going through a request, which cannot tell a scoped cache from
@@ -1053,6 +1067,7 @@ async def test_the_mastery_cache_is_scoped_to_one_shard():
     from app.db.base import SessionLocal
     from app.db.models import Player, utcnow
     from app.riot.client import RiotClient
+    from app.riot.routing import resolve_platform
     from app.services.players import PlayerService
 
     # Named rather than the usual repeated letter: the suite shares one
@@ -1072,13 +1087,16 @@ async def test_the_mastery_cache_is_scoped_to_one_shard():
     )
 
     async with SessionLocal() as session:
+        # An empty table read on oc1 before the rule, stamped a moment ago.
         session.add(
             Player(
                 puuid=puuid,
                 game_name="Cached",
                 tag_line="0003",
                 search_name="cached",
-                platform="oc1",
+                platform="sg2",
+                mastery_platform="oc1",
+                mastery_fetched_at=utcnow(),
             )
         )
         await session.commit()
@@ -1088,29 +1106,27 @@ async def test_the_mastery_cache_is_scoped_to_one_shard():
             service = PlayerService(session, riot, settings)
             player = await session.get(Player, puuid)
 
-            empty = await service.masteries(player, "oc1")
-            assert oc1.called
-            assert empty == []
-            # The miss is stamped, but against the shard it happened on.
-            assert player.mastery_platform == "oc1"
-            assert player.mastery_fetched_at is not None
-
-            # Freshly stamped a moment ago, and it must still not answer for
-            # another shard.
-            player.mastery_fetched_at = utcnow()
-            found = await service.masteries(player, "sg2")
+            found = await service.masteries(player)
             assert sg2.called
             assert [m.champion_id for m in found] == [45]
             assert player.mastery_platform == "sg2"
 
+            elsewhere = await service.masteries_on(puuid, resolve_platform("oc1"))
+            assert oc1.called
+            assert elsewhere == []
+            again = await service.masteries(player)
+            assert [m.champion_id for m in again] == [45]
+            assert player.mastery_platform == "sg2"
 
+
+@pytest.mark.riot_region
 @respx.mock
 async def test_the_asked_shard_is_used_when_the_account_is_on_it():
     """The ordinary case must cost nothing.
 
-    Every profile on the right shard would otherwise pay a regional match-ids
-    call to be told what it already knew, and most traffic is on the right
-    shard.
+    Every profile on its home would otherwise pay a call to be told what it
+    already knew, and most traffic is on the home. Another shard costs one
+    league question, and with ``live=False`` (the prerender) none at all.
     """
     from app.config import get_settings
     from app.db.base import SessionLocal
@@ -1120,6 +1136,9 @@ async def test_the_asked_shard_is_used_when_the_account_is_on_it():
     from app.services.players import PlayerService
 
     puuid = "asked-shard-is-used".ljust(78, "0")
+    league = respx.get(url__regex=r".*/lol/league/v4/entries/by-puuid/.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
     ids = respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
         return_value=httpx.Response(200, json=["SG2_7412345678"])
     )
@@ -1142,16 +1161,19 @@ async def test_the_asked_shard_is_used_when_the_account_is_on_it():
         async with RiotClient(settings.riot_api_key) as riot:
             service = PlayerService(session, riot, settings)
             player = await session.get(Player, puuid)
-            euw1 = resolve_platform("euw1")
 
-            assert (await service.effective_platform(player, euw1)).id == "euw1"
+            view = await service.view(player, resolve_platform("euw1"))
+            assert (view.role, view.shown.id) == ("home", "euw1")
+            assert not league.called and not ids.called
+
+            stored_only = await service.view(player, "kr", live=False)
+            assert (stored_only.role, stored_only.shown.id) == ("absent", "euw1")
+            assert not league.called
+
+            elsewhere = await service.view(player, "kr")
+            assert (elsewhere.role, elsewhere.shown.id) == ("absent", "euw1")
+            assert league.call_count == 1
             assert not ids.called
-
-            # With no record on the asked shard it goes looking, and believes
-            # what the match id says.
-            player.summoner_level = None
-            assert (await service.effective_platform(player, euw1)).id == "sg2"
-            assert ids.called
 
 
 # ------------------------------------------------------- champion filter

@@ -15,6 +15,7 @@ import { ErrorView, TableSkeleton } from '../components/StateViews'
 import { compact, pct, tierColor, tierLabel } from '../lib/format'
 import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { Button } from '@/components/ui/button'
+import { summonerPath } from '../lib/profileAddress'
 
 /**
  * Shown while `/leaderboard/slices` is in flight, so the filters are usable on
@@ -322,7 +323,7 @@ export default function Leaderboard() {
                       <td className="py-2.5 pl-4">
                         {name && tagLine ? (
                           <Link
-                            to={`/summoner/${data.platform}/${encodeURIComponent(name)}/${encodeURIComponent(tagLine)}`}
+                            to={summonerPath(data.platform, name, tagLine)}
                             className="display text-[17px] font-600 text-ink transition-colors hover:text-gold-bright"
                           >
                             {name}

@@ -216,6 +216,7 @@ a dead key.
 
 | Stage | Calls Riot | Runs when the key is dead |
 | --- | --- | --- |
+| `homes` | no | **yes** |
 | `crawl` | yes | skipped |
 | `timelines` | yes | skipped |
 | `lobbyranks` | yes | skipped |
@@ -229,6 +230,16 @@ a dead key.
 | `reviews` | no | **yes** |
 | `audit` | no | **yes** |
 | `prerender` | no | **yes** |
+
+`homes` runs first, whatever the key: it puts every player row back on its
+home shard from storage alone (`backend/app/services/homes.py`), so the stages
+after it and the pages rendered at the end read each player where they play.
+It may move a row, drop caches read on another shard and rebuild a rank from
+the history; it may not call Riot, delete a player, or touch the history,
+matches or scores, and a second run changes nothing. `python -m scripts.ingest
+homes --dry-run` prints what it would change. The first release that carried
+it ran the dry run in the deploy, so its report could be read in the deploy
+log before the nightly run made the first repair.
 
 `groups` fills in the players of every group, most recently viewed first:
 ranks, new games, and older history back to `GROUP_HISTORY_CAP` games each. It

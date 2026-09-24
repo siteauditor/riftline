@@ -208,9 +208,12 @@ and `spectator-v5` use platform hosts (`euw1`, `kr`). `account-v1` and `match-v5
 regional hosts (`americas`, `europe`, `asia`, `sea`). Mixing them up produces silent
 404s. `app/riot/routing.py` holds the mapping, including that SEA shards must fall
 back to `asia` for `account-v1`. A Riot ID resolves across a whole region, but the
-account itself lives on one platform, so the platform calls go through
-`PlayerService.effective_platform()`, which reads that platform from the prefix of
-the account's latest match id (see "Things that bite").
+account plays on one platform, its home, which account-v1's active-region lookup
+names. `Player.platform` is that home, only the home's record, ranks and mastery
+are stored, and a page that names another platform is a `ShardView` from
+`PlayerService.view()`: read live and stored nowhere when the account holds a rank
+or games there, answered with the home's data (and moved there by the page) when it
+holds neither (see "Things that bite", and `app/services/homes.py`).
 
 **The rate limiter is proactive.** It blocks locally before sending rather than
 learning from 429s, because Riot tracks violations and suspends keys over them. It
@@ -938,10 +941,19 @@ SG2. Measured on one such account: on `oc1`, summoner-v4 says 404, league-v4 ret
 no entries and champion-mastery-v4 returns no champions; on `sg2`, the same account
 is Bronze III with 100 champions. Only the 404 admits anything is wrong. The other
 two answer 200 with nothing, which rendered a ranked player with a deep champion
-pool as unranked and new. So the platform calls ask the platform the account's
-latest match was played on, and every per-platform cache records which platform it
-was filled from, so an empty answer from the wrong one is never served for the
-right one.
+pool as unranked and new.
+
+**A summoner record is not a home.** The first fix looked for the home only when the
+asked platform had no summoner record, and an account can hold records on several:
+on 2026-09-24 one view of `/summoner/na1/Dekap/EUW`, a EUW Challenger with a level
+30 NA record, moved the player's row to NA, deleted the EUW rank, made the stored
+profile a 404 and moved the prerendered page to the NA path. account-v1 names the
+home outright (`/riot/account/v1/region/by-game/lol/by-puuid/{puuid}`, which works
+on a development key from any account region), so that is what `Player.platform`
+holds, and nothing is stored for any other platform: a view of another one is read
+and shown, and a lobby read on another one stores only the players at home there.
+The `homes` stage repairs rows written under the old rule from storage alone, and
+the history keeps every reading, each naming its own platform.
 
 **PH2 and TH2 no longer exist.** Riot folded both into SG2, and
 `ph2.api.riotgames.com` and `th2.api.riotgames.com` no longer resolve. Listed as

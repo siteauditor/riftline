@@ -16,6 +16,7 @@ import {
   useLastRegion,
   useRecentSearches,
 } from '../lib/storage'
+import { summonerPath } from '../lib/profileAddress'
 
 interface Props {
   size?: 'default' | 'large'
@@ -149,7 +150,7 @@ export default function SearchBar({ size = 'default', initialPlatform, autoFocus
 
   function go(target: string, name: string, tag: string) {
     rememberRegion(target)
-    navigate(`/summoner/${target}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`)
+    navigate(summonerPath(target, name, tag))
     onNavigate?.()
   }
 

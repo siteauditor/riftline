@@ -34,6 +34,14 @@ main() {
   # column reaches the live corpus.
   docker compose exec -T api python -m scripts.migrate
 
+  # Player rows back on their home shard, from storage only (see
+  # backend/app/services/homes.py). A dry run on this release: its report is in
+  # the deploy log to be read before the nightly run makes the first repair,
+  # and a later release runs it for real here. Not fatal, like the stages at
+  # the end: the nightly run makes the repair whatever happens here.
+  docker compose exec -T api python -m scripts.ingest homes --dry-run \
+    || echo "home repair dry run failed; the nightly run makes the repair" >&2
+
   # Every page as HTML, from the API just started, before the new web container
   # takes over. Fatal on purpose: a build that cannot prerender must not be
   # switched to, and the web container still running is the last build with

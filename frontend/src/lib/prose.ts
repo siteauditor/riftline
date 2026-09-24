@@ -126,7 +126,9 @@ export function itemSummary(item: ItemDetail): string[] {
  */
 export function profileSummary(profile: Profile, analytics?: Analytics): string[] {
   const id = profile.riot_id
-  const region = profile.platform_label
+  // The shard the numbers are from: the home, for an answer about a shard the
+  // account never played on, whose ranks are the home's.
+  const region = profile.shard === 'absent' ? profile.home_platform_label : profile.platform_label
   const out: string[] = []
 
   const solo = profile.ranks.find((r) => r.queue === 'RANKED_SOLO_5x5' && r.tier)

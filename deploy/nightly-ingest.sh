@@ -59,6 +59,11 @@ fi
 
 failures=0
 
+# First, and whatever the key's state: player rows back on their home shard,
+# from storage only, so every stage after it and the pages rendered at the end
+# read each player on the shard they play on (backend/app/services/homes.py).
+run_stage "homes" python -m scripts.ingest homes || failures=$((failures+1))
+
 # Is the key alive? Asked by making the cheapest real call there is rather than
 # by reading the clock: a key can also be revoked, and the answer we want is
 # "will Riot talk to us", not "is it probably still fresh".

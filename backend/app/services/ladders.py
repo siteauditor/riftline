@@ -37,7 +37,7 @@ from app.riot.client import RiotClient
 from app.riot.errors import RiotApiError, RiotNotFound
 from app.riot.limiter import SEARCH_RESERVE, wait_deadline
 from app.riot.routing import Platform, resolve_platform
-from app.services.players import normalize_riot_name
+from app.services.players import claim_riot_id, normalize_riot_name
 from app.services.ranks import RankCache, is_fresh
 
 log = logging.getLogger(__name__)
@@ -678,6 +678,9 @@ class LadderService:
                 # not find the row and will pay for the same account-v1 call a
                 # second time. That is the whole "paid once per player" claim.
                 player.search_name = normalize_riot_name(name)
+                # Riot just said this account holds the name, so a row left
+                # holding it from before a rename stops answering for it.
+                await claim_riot_id(self.session, puuid, name, tag)
         for puuid in absent:
             player = players.get(puuid)
             if player is not None and not player.game_name:
