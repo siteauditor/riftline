@@ -16,8 +16,13 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Match, MatchParticipant
 from app.services.aggregate import POSITIONS
 from app.services.matches import PlayedRow
+from app.services.queues import SCOPE_QUEUES
 from app.services.scores import COMPONENT_LABELS, COMPONENTS
 
 # Below this many scored games in a role, an average percentile moves by ten
@@ -129,6 +134,35 @@ class ChampionTotals:
         return self.positions.most_common(1)[0][0] if self.positions else None
 
 
+async def profile_floor(session: AsyncSession) -> dict[str, int]:
+    """The players who get a page, each with the time of their newest such game.
+
+    ``MIN_SCORED_FOR_PROFILE`` scored ranked games in one role: the floor the
+    page's own score breakdown needs, over the games the page opens on. Scored
+    games in any queue and any role used to count, so a player with five games
+    in each of two roles, or ten ARAM games, had a page that showed no
+    breakdown at all.
+    """
+    rows = (
+        await session.execute(
+            select(MatchParticipant.puuid, func.max(Match.game_creation))
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(
+                MatchParticipant.performance_score.is_not(None),
+                MatchParticipant.team_position.in_(POSITIONS),
+                Match.is_remake.is_(False),
+                Match.queue_id.in_(sorted(SCOPE_QUEUES["ranked"] or ())),
+            )
+            .group_by(MatchParticipant.puuid, MatchParticipant.team_position)
+            .having(func.count() >= MIN_SCORED_FOR_PROFILE)
+        )
+    ).all()
+    out: dict[str, int] = {}
+    for puuid, newest in rows:
+        out[puuid] = max(out.get(puuid, 0), int(newest or 0))
+    return out
+
+
 def champion_totals(rows: Iterable[PlayedRow]) -> list[ChampionTotals]:
     """Per champion, most played first."""
     by_champion: dict[int, ChampionTotals] = {}
@@ -162,5 +196,6 @@ __all__ = [
     "ComponentAverage",
     "RoleScoreProfile",
     "champion_totals",
+    "profile_floor",
     "score_profile",
 ]

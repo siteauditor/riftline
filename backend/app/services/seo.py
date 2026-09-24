@@ -31,9 +31,10 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ChampionStat, ItemStat, Match, MatchParticipant, Player
+from app.db.models import ChampionStat, ItemStat, Match, Player
 from app.services.aggregate import ALL_BRACKETS, POSITIONS, SETTLED_MIN_MATCHES, TIER_MIN_GAMES
-from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
+from app.services.homes import canonical
+from app.services.profile_stats import profile_floor
 from app.services.static_data import StaticDataService
 
 INDEX_QUEUE = 420
@@ -262,55 +263,53 @@ async def pages(session: AsyncSession, sd: StaticDataService) -> tuple[str | Non
 
 
 async def profile_pages(session: AsyncSession) -> list[Page]:
-    """One page per player with enough scored games in storage.
+    """One page per player with enough scored ranked games in storage.
 
-    The floor is the profile's own (`MIN_SCORED_FOR_PROFILE`): below it the
-    page withholds its score breakdown, and a profile that is a rank and a
-    list of games is what every other site already has. `lastmod` is the
-    newest stored game, which is when the page's numbers last moved.
+    The floor is the profile's own (`profile_floor`: `MIN_SCORED_FOR_PROFILE`
+    scored ranked games in one role): below it the page withholds its score
+    breakdown, and a profile that is a rank and a list of games is what every
+    other site already has. `lastmod` is the newest of those games, which is
+    when the page's numbers last moved. The path is the player's home shard,
+    so a player has one page however many shards they were seen on.
 
     A row whose `search_name` was retired (the player renamed, someone else
     took the name) is skipped: its URL would not resolve, stored or live.
     """
+    floor = await profile_floor(session)
+    if not floor:
+        return []
     rows = (
         await session.execute(
-            select(
-                Player.platform,
-                Player.game_name,
-                Player.tag_line,
-                func.count(),
-                func.max(Match.game_creation),
-            )
-            .join(MatchParticipant, MatchParticipant.puuid == Player.puuid)
-            .join(Match, Match.match_id == MatchParticipant.match_id)
-            .where(
+            select(Player.puuid, Player.platform, Player.game_name, Player.tag_line).where(
+                Player.puuid.in_(list(floor)),
                 Player.game_name.is_not(None),
                 Player.tag_line.is_not(None),
                 Player.search_name.is_not(None),
-                MatchParticipant.performance_score.is_not(None),
-                Match.is_remake.is_(False),
             )
-            .group_by(Player.puuid)
-            .having(func.count() >= MIN_SCORED_FOR_PROFILE)
         )
     ).all()
-    out: list[Page] = []
-    for platform, game_name, tag_line, _scored, newest in sorted(
-        rows, key=lambda r: (r[1].casefold(), r[2])
+    out: dict[str, Page] = {}
+    for puuid, platform, game_name, tag_line in sorted(
+        rows, key=lambda r: (r.game_name.casefold(), r.tag_line, -floor[r.puuid])
     ):
-        if not (path_safe(game_name) and path_safe(tag_line)):
+        home = canonical(platform)
+        if home is None or not (path_safe(game_name) and path_safe(tag_line)):
             continue
-        out.append(
+        path = f"/summoner/{home}/{game_name}/{tag_line}"
+        newest = floor[puuid]
+        # One page per address: two rows spelled alike keep the newer.
+        out.setdefault(
+            path,
             Page(
-                path=f"/summoner/{platform}/{game_name}/{tag_line}",
+                path=path,
                 kind="profile",
                 indexable=True,
                 lastmod=datetime.fromtimestamp(newest / 1000, tz=UTC) if newest else None,
                 changefreq="daily",
                 reason=None,
-            )
+            ),
         )
-    return out
+    return list(out.values())
 
 
 def sitemap_xml(origin: str, entries: list[Page]) -> str:

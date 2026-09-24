@@ -24,6 +24,7 @@ import {
 } from '../lib/format'
 import Hint from './Hint'
 import { summonerPath } from '../lib/profileAddress'
+import { WITHHELD, withheldText } from '../lib/withheld'
 
 /**
  * One game in the history feed.
@@ -50,6 +51,9 @@ export default function MatchRow({
   const [opened, setOpened] = useState(false)
   const now = useNow()
   const { win, is_remake: remake } = match
+  // Why there is no score, in words: the API's reason, in scoring's order.
+  const withheld =
+    match.score === null ? (withheldText(match.score_withheld) ?? WITHHELD.not_scored_yet) : null
 
   const edge = remake
     ? 'var(--color-ink-faint)'
@@ -194,14 +198,15 @@ export default function MatchRow({
             </p>
           )}
           {/*
-            A withheld score is a dash with a reason, never a blank and never a
-            zero. Leaving it out entirely told a reader with a page of ARAM
-            games nothing about why the column was empty.
+            A withheld score is its reason in words, never a blank and never a
+            zero. Leaving it out told a reader with a page of ARAM games nothing
+            about why the column was empty, and the dash that followed was 1.3
+            to 1 against the page.
           */}
-          {match.score === null && (
-            <Hint text={`No Riftline score: ${withheldReason(match)}.`}>
+          {withheld && (
+            <Hint text={withheld.long}>
               <p tabIndex={0} className="mt-1 text-xs text-ink-faint outline-none">
-                Score <span className="text-line">-</span>
+                {withheld.short}
               </p>
             </Hint>
           )}
@@ -361,19 +366,6 @@ export default function MatchRow({
     </div>
     </article>
   )
-}
-
-/**
- * Why this game has no score, from what the row already knows.
- *
- * The same three cases the detail endpoint reports, phrased for a tooltip. Kept
- * here rather than fetched: a row should not have to open a request to explain
- * an empty cell.
- */
-function withheldReason(match: MatchSummary): string {
-  if (match.is_remake) return 'this game was a remake'
-  if (!match.position) return 'this mode has no lane roles to measure against'
-  return 'it has not been scored yet'
 }
 
 function TeamMember({ p, platform }: { p: ParticipantBrief; platform: string }) {

@@ -593,6 +593,18 @@ class mix, a 24-hour activity histogram and per-champion aggregates. It reads
 limited. The trade is that it describes the games we have fetched rather than a
 whole season, which `basis = "stored_matches"` states rather than implying.
 
+Every figure covers one **queue scope** (`scope`: ranked, solo, flex, normal,
+swiftplay, aram or all; ranked by default) and one window of games, the newest
+thousand in the scope, which the answer names (`queues`, `window`,
+`stored_total`, and the games held per scope in `scope_games`). Pooling every
+queue read one player at 62% and a 4.47 KDA where their ranked games said 50%
+and 3.85, and the review and the lanes each read their own newest games, so one
+page's panels described different games. The strengths sentence claims only
+what falls outside the middle band (35 to 65), because at a profile's depth a
+gap inside it is noise: the old sentence gave 17 of 20 players a weakness from
+inside it. A game without a score says which of five reasons it is
+(`score_withheld`), and "not scored yet" only when that is true.
+
 The same endpoint feeds the profile's other stored-data views:
 
 - **How they play**: per role, the average score and placement, MVP and ACE

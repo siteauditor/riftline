@@ -407,8 +407,13 @@ async def review_profile(
     queue_id: int | None = None,
     *,
     queues: Collection[int] | None = None,
+    match_ids: Collection[str] | None = None,
 ) -> list[RoleReviewProfile]:
-    """A player's review rates per role, against the role, from stored games."""
+    """A player's review rates per role, against the role, from stored games.
+
+    ``match_ids`` limits it to one window of games, so a profile's review
+    covers the games its other panels do.
+    """
     stmt = select(ParticipantReview).where(
         ParticipantReview.puuid == puuid, ParticipantReview.team_position.in_(POSITIONS)
     )
@@ -416,6 +421,8 @@ async def review_profile(
         stmt = stmt.where(ParticipantReview.queue_id == queue_id)
     if queues is not None:
         stmt = stmt.where(ParticipantReview.queue_id.in_(list(queues)))
+    if match_ids is not None:
+        stmt = stmt.where(ParticipantReview.match_id.in_(list(match_ids)))
     rows = (await session.execute(stmt)).scalars().all()
     if not rows:
         return []

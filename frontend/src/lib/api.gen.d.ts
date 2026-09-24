@@ -757,6 +757,31 @@ export interface components {
         AnalyticsResponse: {
             /** Puuid */
             puuid: string;
+            /** Game Name */
+            game_name: string | null;
+            /** Tag Line */
+            tag_line: string | null;
+            /** Platform */
+            platform: string | null;
+            /**
+             * Scope
+             * @default ranked
+             */
+            scope: ("ranked" | "solo" | "flex" | "normal" | "swiftplay" | "aram" | "all") | null;
+            /** Queues */
+            queues: number[];
+            /**
+             * Window
+             * @default 0
+             */
+            window: number;
+            /**
+             * Stored Total
+             * @default 0
+             */
+            stored_total: number;
+            /** Scope Games */
+            scope_games: components["schemas"]["ScopeGamesOut"][];
             /**
              * Basis
              * @default stored_matches
@@ -2933,6 +2958,10 @@ export interface components {
         MasteryResponse: {
             /** Puuid */
             puuid: string;
+            /** Game Name */
+            game_name: string | null;
+            /** Tag Line */
+            tag_line: string | null;
             /**
              * Total Points
              * @default 0
@@ -3001,6 +3030,8 @@ export interface components {
             source: string;
             /** Stored Total */
             stored_total: number | null;
+            /** Scope */
+            scope: ("ranked" | "solo" | "flex" | "normal" | "swiftplay" | "aram" | "all") | null;
         };
         /**
          * MatchResolveResponse
@@ -3162,6 +3193,8 @@ export interface components {
             score: number | null;
             /** Placement */
             placement: number | null;
+            /** Score Withheld */
+            score_withheld: ("remake" | "not_ten" | "no_roles" | "thin_queue" | "not_scored_yet") | null;
             /** Badges */
             badges: components["schemas"]["BadgeOut"][];
             /** Score Components */
@@ -4058,6 +4091,18 @@ export interface components {
              */
             basis: string;
         };
+        /** ScopeGamesOut */
+        ScopeGamesOut: {
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "ranked" | "solo" | "flex" | "normal" | "swiftplay" | "aram" | "all";
+            /** Label */
+            label: string;
+            /** Games */
+            games: number;
+        };
         /**
          * ScoreAuditOut
          * @description The nightly audit of the score against wins, as `scripts.ingest audit`
@@ -4864,7 +4909,9 @@ export interface operations {
             query?: {
                 start?: number;
                 count?: number;
-                /** @description Riot queue id, e.g. 420 for Solo/Duo. */
+                /** @description Queues as a word, as the profile's chips name them. Absent: every queue. */
+                scope?: ("ranked" | "solo" | "flex" | "normal" | "swiftplay" | "aram" | "all") | null;
+                /** @description One Riot queue id, e.g. 420 for Solo/Duo, instead of a scope. */
                 queue?: number | null;
                 /** @description Champion id. Read from stored games: Riot cannot filter by it. */
                 champion?: number | null;
@@ -4939,9 +4986,11 @@ export interface operations {
     get_analytics_api_summoner__platform___game_name___tag_line__analytics_get: {
         parameters: {
             query?: {
-                /** @description Riot queue id, e.g. 420. */
+                /** @description Queues as a word, as the profile's chips name them. */
+                scope?: "ranked" | "solo" | "flex" | "normal" | "swiftplay" | "aram" | "all";
+                /** @description One Riot queue id, e.g. 420, instead of a scope. */
                 queue?: number | null;
-                /** @description Stored games to analyse. */
+                /** @description The newest stored games to analyse. */
                 limit?: number;
                 /** @description live (default) asks Riot where the cache is stale; stored reads storage only. */
                 source?: string;

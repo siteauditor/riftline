@@ -1,5 +1,6 @@
 import type { Analytics, ChampionDetail, ItemDetail, Profile } from './api'
 import { pct, positionLabel, tierLabel } from './format'
+import { gamesCovered } from './profileScope'
 
 /**
  * Sentences built from a page's own numbers.
@@ -145,8 +146,10 @@ export function profileSummary(profile: Profile, analytics?: Analytics): string[
   const games = analytics.games_analysed
   const role = analytics.roles[0]
   const t = analytics.totals
+  // The games named, so a number from ranked games is not read as everything.
+  const covered = gamesCovered({ games, total: analytics.stored_total, scope: analytics.scope })
   out.push(
-    `Over the ${n(games)} ${games === 1 ? 'game' : 'games'} Riftline holds, ${profile.game_name ?? id} ` +
+    `Over ${covered.startsWith('the newest') ? covered : `the ${covered}`} Riftline holds, ${profile.game_name ?? id} ` +
       (role ? `plays ${positionLabel(role.position).toLowerCase()} in ${pct(role.share)} of games and ` : '') +
       `wins ${pct(t.win_rate)}, at a ${t.kda.toFixed(2)} KDA and ${t.cs_per_min.toFixed(1)} CS a minute.`,
   )

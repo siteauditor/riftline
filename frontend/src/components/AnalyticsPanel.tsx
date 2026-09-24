@@ -1,6 +1,7 @@
 import type { Analytics } from '../lib/api'
 import { useLocalOffsetHours } from '../lib/clock'
 import { pct, positionLabel } from '../lib/format'
+import { gamesCovered } from '../lib/profileScope'
 
 /**
  * Play style: which roles, which champion classes, and when they play.
@@ -115,8 +116,8 @@ export default function AnalyticsPanel({ data }: { data: Analytics | undefined }
         </dl>
 
         <p className="text-[11px] leading-relaxed text-ink-faint">
-          From {data.games_analysed} stored games, not the full season. Loading more
-          match history deepens this.
+          From {gamesCovered({ games: data.games_analysed, total: data.stored_total, scope: data.scope })}{' '}
+          Riftline holds, not the full season. Loading more match history deepens this.
         </p>
       </div>
     </section>

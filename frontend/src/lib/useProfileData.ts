@@ -2,16 +2,12 @@ import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { api, ApiError } from './api'
+import { ApiError, type QueueScope } from './api'
 import { canonicalPlatform, movedFrom, profileRedirect } from './profileAddress'
 import { queries } from './queries'
 import { useHydrated } from './searchParams'
 import { rememberSearch } from './storage'
 import { useMatchHistory } from './useMatchHistory'
-
-/** The analytics endpoint's ceiling, and the key the champions tab and the
- *  mastery page already use, so the three share one stored-games answer. */
-export const PLAYED_LIMIT = 1000
 
 /**
  * Everything the profile page reads, and when it reads it.
@@ -34,7 +30,7 @@ export function useProfileData(
   platform: string,
   name: string,
   tag: string,
-  { queue, champion }: { queue: number | null; champion: number | null },
+  { scope, champion }: { scope: QueueScope; champion: number | null },
 ) {
   const queryClient = useQueryClient()
   const hydrated = useHydrated()
@@ -64,13 +60,13 @@ export function useProfileData(
   })
   const storedProfile = storedProfileQuery.data
   const storedAnalytics = useQuery({
-    ...queries.analyticsStored(platform, name, tag),
+    ...queries.analyticsStored(platform, name, tag, scope),
     enabled: storedMode,
     staleTime: Infinity,
     retry: false,
   }).data
   const heldMatches = () =>
-    queryClient.getQueryData(queries.matchesStored(platform, name, tag).queryKey)
+    queryClient.getQueryData(queries.matchesStored(platform, name, tag, scope).queryKey)
 
   // One address per player. A shard the account holds nothing on moves to
   // its home (a view of NA for a EUW player used to be the page that deleted
@@ -115,63 +111,55 @@ export function useProfileData(
   // Anything but a stored answer is Riot's: an API from before `source`
   // existed (a rollback) answers without it.
   const liveAnswered = live !== undefined && live.source !== 'stored' && !moving
-  const unfiltered = queue === null && champion === null
 
   // The live page reads the same history, so the query lives in one hook: two
   // configurations of one cache key is a race between whichever page mounts
   // first. In stored mode the same hook reads storage, filters included.
   const { query: matchesQuery, matches } = useMatchHistory(platform, name, tag, {
-    queue,
+    scope,
     champion,
     source: storedMode ? 'stored' : undefined,
     enabled: hydrated && (storedMode || liveAnswered),
-    // The stored page is the unfiltered one.
-    placeholder: unfiltered ? heldMatches : undefined,
+    // The stored page is the one without a champion filter.
+    placeholder: champion === null ? heldMatches : undefined,
   })
   const storedList = matchesQuery.data?.pages[0]?.source === 'stored'
   const storedTotal = matchesQuery.data?.pages[0]?.stored_total ?? null
 
   // When the live history fails and the profile did not, the games held for
   // the page stay on screen under a line that says so, rather than an error
-  // where the games were. Only for the unfiltered list, which is the one that
-  // was stored.
+  // where the games were. Only without a champion filter, which is the list
+  // that was stored.
   const storedPage =
-    !storedMode && matchesQuery.isError && matches.length === 0 && unfiltered ? heldMatches() : undefined
+    !storedMode && matchesQuery.isError && matches.length === 0 && champion === null
+      ? heldMatches()
+      : undefined
   const rows = storedPage?.matches ?? matches
 
-  // The champions this player has stored games on, for the champion filter.
-  // Storage only, so it costs no Riot call.
-  const playedQuery = useQuery({
-    // The live key is the one the champions tab and the mastery page share.
-    queryKey: storedMode
-      ? ['analytics', platform, name, tag, { queue: null, limit: PLAYED_LIMIT }, 'stored']
-      : ['analytics', platform, name, tag, { queue: null, limit: PLAYED_LIMIT }],
-    queryFn: () =>
-      api.analytics(platform, name, tag, {
-        queue: null,
-        limit: PLAYED_LIMIT,
-        source: storedMode ? 'stored' : undefined,
-      }),
-    enabled: storedMode || liveAnswered,
-    retry: false,
-  })
-
-  // Read after the history, not beside it. The analytics describe stored games,
-  // and loading history is what stores them: on a first visit, asked in
-  // parallel, they described nothing. Keyed on when the history last loaded,
-  // so every new page is reflected, with the previous answer held meanwhile.
-  //
-  // Not while the history is still the placeholder: that would describe the
-  // stored games before the live page has been stored, and ask again a
-  // moment later. The stored analytics stand in until then.
+  // Every number on the page, the champion filter's list and the champions
+  // tab read this one answer, over one window of games in the scope. It is
+  // read after the history, not beside it: loading history is what stores the
+  // games, and on a first visit, asked in parallel, it described nothing. Each
+  // later page of history stores more, so the answer is asked again then,
+  // with the previous one shown meanwhile.
   const analyticsQuery = useQuery({
-    queryKey: ['analytics', platform, name, tag, matchesQuery.dataUpdatedAt],
-    queryFn: () => api.analytics(platform, name, tag),
+    ...queries.analytics(platform, name, tag, scope),
     enabled: !storedMode && matchesQuery.isSuccess && !matchesQuery.isPlaceholderData,
-    placeholderData: (previous) =>
-      previous ?? queryClient.getQueryData(queries.analyticsStored(platform, name, tag).queryKey),
+    placeholderData: () =>
+      queryClient.getQueryData(queries.analyticsStored(platform, name, tag, scope).queryKey),
     retry: false,
   })
+  const historyStoredAt = matchesQuery.isPlaceholderData ? 0 : matchesQuery.dataUpdatedAt
+  useEffect(() => {
+    if (!historyStoredAt || storedMode) return
+    const key = queries.analytics(platform, name, tag, scope).queryKey
+    // The first page enabled the query, which then asks by itself; an answer
+    // older than a later page is asked again.
+    const answeredAt = queryClient.getQueryState(key)?.dataUpdatedAt ?? 0
+    if (answeredAt > 0 && answeredAt < historyStoredAt) {
+      void queryClient.invalidateQueries({ queryKey: key, exact: true })
+    }
+  }, [historyStoredAt, storedMode, platform, name, tag, scope, queryClient])
   const analytics = storedMode ? storedAnalytics : analyticsQuery.data
 
   return {
@@ -190,7 +178,6 @@ export function useProfileData(
     storedList,
     storedTotal,
     storedPage,
-    playedQuery,
     analytics,
   }
 }

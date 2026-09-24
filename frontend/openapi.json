@@ -237,6 +237,33 @@
       }
      },
      {
+      "name": "scope",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "enum": [
+          "ranked",
+          "solo",
+          "flex",
+          "normal",
+          "swiftplay",
+          "aram",
+          "all"
+         ],
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "description": "Queues as a word, as the profile's chips name them. Absent: every queue.",
+       "title": "Scope"
+      },
+      "description": "Queues as a word, as the profile's chips name them. Absent: every queue."
+     },
+     {
       "name": "queue",
       "in": "query",
       "required": false,
@@ -249,10 +276,10 @@
          "type": "null"
         }
        ],
-       "description": "Riot queue id, e.g. 420 for Solo/Duo.",
+       "description": "One Riot queue id, e.g. 420 for Solo/Duo, instead of a scope.",
        "title": "Queue"
       },
-      "description": "Riot queue id, e.g. 420 for Solo/Duo."
+      "description": "One Riot queue id, e.g. 420 for Solo/Duo, instead of a scope."
      },
      {
       "name": "champion",
@@ -419,6 +446,27 @@
       }
      },
      {
+      "name": "scope",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "enum": [
+        "ranked",
+        "solo",
+        "flex",
+        "normal",
+        "swiftplay",
+        "aram",
+        "all"
+       ],
+       "type": "string",
+       "description": "Queues as a word, as the profile's chips name them.",
+       "default": "ranked",
+       "title": "Scope"
+      },
+      "description": "Queues as a word, as the profile's chips name them."
+     },
+     {
       "name": "queue",
       "in": "query",
       "required": false,
@@ -431,10 +479,10 @@
          "type": "null"
         }
        ],
-       "description": "Riot queue id, e.g. 420.",
+       "description": "One Riot queue id, e.g. 420, instead of a scope.",
        "title": "Queue"
       },
-      "description": "Riot queue id, e.g. 420."
+      "description": "One Riot queue id, e.g. 420, instead of a scope."
      },
      {
       "name": "limit",
@@ -444,11 +492,11 @@
        "type": "integer",
        "maximum": 1000,
        "minimum": 10,
-       "description": "Stored games to analyse.",
-       "default": 300,
+       "description": "The newest stored games to analyse.",
+       "default": 1000,
        "title": "Limit"
       },
-      "description": "Stored games to analyse."
+      "description": "The newest stored games to analyse."
      },
      {
       "name": "source",
@@ -2229,6 +2277,84 @@
      "puuid": {
       "type": "string",
       "title": "Puuid"
+     },
+     "game_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Game Name"
+     },
+     "tag_line": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tag Line"
+     },
+     "platform": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Platform"
+     },
+     "scope": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "ranked",
+         "solo",
+         "flex",
+         "normal",
+         "swiftplay",
+         "aram",
+         "all"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scope",
+      "default": "ranked"
+     },
+     "queues": {
+      "items": {
+       "type": "integer"
+      },
+      "type": "array",
+      "title": "Queues"
+     },
+     "window": {
+      "type": "integer",
+      "title": "Window",
+      "default": 0
+     },
+     "stored_total": {
+      "type": "integer",
+      "title": "Stored Total",
+      "default": 0
+     },
+     "scope_games": {
+      "items": {
+       "$ref": "#/components/schemas/ScopeGamesOut"
+      },
+      "type": "array",
+      "title": "Scope Games"
      },
      "basis": {
       "type": "string",
@@ -7795,6 +7921,28 @@
       "type": "string",
       "title": "Puuid"
      },
+     "game_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Game Name"
+     },
+     "tag_line": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tag Line"
+     },
      "total_points": {
       "type": "integer",
       "title": "Total Points",
@@ -7981,6 +8129,26 @@
        }
       ],
       "title": "Stored Total"
+     },
+     "scope": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "ranked",
+         "solo",
+         "flex",
+         "normal",
+         "swiftplay",
+         "aram",
+         "all"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Scope"
      }
     },
     "type": "object",
@@ -8417,6 +8585,24 @@
        }
       ],
       "title": "Placement"
+     },
+     "score_withheld": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "remake",
+         "not_ten",
+         "no_roles",
+         "thin_queue",
+         "not_scored_yet"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Score Withheld"
      },
      "badges": {
       "items": {
@@ -10396,6 +10582,38 @@
     ],
     "title": "SameTeamPairOut",
     "description": "Two players in this lobby who keep appearing on the same side.\n\nNot called a duo, here or anywhere else on the wire. Two players in the same\nsmall ranked pool meet constantly without ever pressing invite, so this is a\npattern in stored games and nothing more. Nothing is persisted: the pairing\nis computed per request and lives in this response."
+   },
+   "ScopeGamesOut": {
+    "properties": {
+     "scope": {
+      "type": "string",
+      "enum": [
+       "ranked",
+       "solo",
+       "flex",
+       "normal",
+       "swiftplay",
+       "aram",
+       "all"
+      ],
+      "title": "Scope"
+     },
+     "label": {
+      "type": "string",
+      "title": "Label"
+     },
+     "games": {
+      "type": "integer",
+      "title": "Games"
+     }
+    },
+    "type": "object",
+    "required": [
+     "scope",
+     "label",
+     "games"
+    ],
+    "title": "ScopeGamesOut"
    },
    "ScoreAuditOut": {
     "properties": {

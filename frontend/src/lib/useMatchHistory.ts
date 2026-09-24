@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 
-import { api, type MatchHistory, type MatchSummary } from './api'
+import { api, type MatchHistory, type MatchSummary, type QueueScope } from './api'
 
 /** Twenty is what Riot's match-v5 hands back in one call, and what a page of
  *  history costs in rate limit. */
@@ -24,13 +24,14 @@ export function useMatchHistory(
   name: string,
   tag: string,
   {
-    queue = null,
+    scope = 'all',
     champion = null,
     source,
     enabled = true,
     placeholder,
   }: {
-    queue?: number | null
+    /** The queues listed; every queue unless the page asks for fewer. */
+    scope?: QueueScope
     champion?: number | null
     /** `stored` reads storage alone: the profile's fallback while Riot
      *  cannot be asked. Its own key, so it never stands in for Riot's list. */
@@ -49,13 +50,19 @@ export function useMatchHistory(
       platform,
       name,
       tag,
-      queue,
+      scope,
       ...(champion ? [champion] : []),
       ...(source ? [source] : []),
     ],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      api.matches(platform, name, tag, { start: pageParam, count: MATCH_PAGE, queue, champion, source }),
+      api.matches(platform, name, tag, {
+        start: pageParam,
+        count: MATCH_PAGE,
+        scope: scope === 'all' ? null : scope,
+        champion,
+        source,
+      }),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * MATCH_PAGE : undefined,
     enabled,

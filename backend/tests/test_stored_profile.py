@@ -141,3 +141,60 @@ async def test_the_manifest_lists_players_with_enough_scored_games(client, playe
     locs = {u.find("s:loc", ns).text for u in sitemap.findall("s:url", ns)}
     assert f"{body['origin']}/summoner/euw1/Stored%20Player/SEO" in locs
     assert not any("Thin" in loc for loc in locs)
+
+
+# -------------------------------------------------------------- the floor
+
+
+async def _named(puuid: str, name: str, platform: str = "euw1") -> None:
+    async with SessionLocal() as session:
+        if await session.get(Player, puuid):
+            return
+        session.add(
+            Player(puuid=puuid, game_name=name, tag_line="FLR", platform=platform,
+                   search_name=normalize_riot_name(name))
+        )
+        await session.commit()
+
+
+def _scored_in(puuid: str, position: str) -> list[dict]:
+    me = participant(AHRI, position, 100, True, performance_score=55.0)
+    me["puuid"] = puuid
+    return [me]
+
+
+async def test_a_page_needs_ten_scored_ranked_games_in_one_role():
+    """The page's own breakdown needs ten scored games in a role, so that is
+    the floor for having a page: five in each of two roles, or ten normal
+    games, made a page that showed no breakdown at all."""
+    from sqlalchemy import func, select
+
+    from app.db.models import Match
+    from app.services.seo import profile_pages
+
+    split = "floor-split".ljust(78, "0")
+    normal = "floor-normal".ljust(78, "0")
+    alias = "floor-alias".ljust(78, "0")
+    await _named(split, "Split Roles")
+    await _named(normal, "Normals Only")
+    await _named(alias, "Merged Shard", platform="th2")
+    async with SessionLocal() as session:
+        seeded = (await session.execute(
+            select(func.count(Match.match_id)).where(Match.patch == "FLR1.00")
+        )).scalar()
+    if not seeded:
+        await seed("FLR1.00", [_scored_in(split, "MIDDLE") for _ in range(5)]
+                   + [_scored_in(split, "TOP") for _ in range(5)], game_creation=OLDER_MS)
+        await seed("FLR1.01", [_scored_in(normal, "MIDDLE") for _ in range(10)],
+                   queue_id=400, game_creation=OLDER_MS)
+        await seed("FLR1.02", [_scored_in(alias, "JUNGLE") for _ in range(10)],
+                   game_creation=OLDER_MS)
+
+    async with SessionLocal() as session:
+        paths = [p.path for p in await profile_pages(session)]
+    assert "/summoner/euw1/Split Roles/FLR" not in paths
+    assert "/summoner/euw1/Normals Only/FLR" not in paths
+    # The home's canonical id: SG2, which Riot folded TH2 into.
+    assert "/summoner/sg2/Merged Shard/FLR" in paths
+    assert len(paths) == len(set(paths)), "one page per address"
+

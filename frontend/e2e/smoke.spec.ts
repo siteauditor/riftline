@@ -445,8 +445,8 @@ async function mockHomePlayer(page: Page, asked: string[]) {
 test('a profile opened on a shard the player has nothing on moves to their home, once', async ({ page }) => {
   const asked: string[] = []
   await mockHomePlayer(page, asked)
-  const errors = await open(page, '/summoner/na1/Mover/EUW?queue=420')
-  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW\?queue=420$/)
+  const errors = await open(page, '/summoner/na1/Mover/EUW?queue=solo')
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW\?queue=solo$/)
   await expect(page.getByText('Mover#EUW plays on EUW.')).toBeVisible()
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', /\/summoner\/euw1\/Mover\/EUW$/)
   // The games are asked once, at the address the page settled on.
@@ -455,9 +455,29 @@ test('a profile opened on a shard the player has nothing on moves to their home,
   expect(hydrationErrors(errors)).toEqual([])
 })
 
+test("an older link's queue id becomes the word the page now uses", async ({ page }) => {
+  await mockHomePlayer(page, [])
+  await open(page, '/summoner/euw1/Mover/EUW?queue=420')
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW\?queue=solo$/)
+  await expect(page.getByRole('button', { name: 'Solo/Duo', pressed: true })).toBeVisible()
+})
+
 test('an alias or another spelling of a profile moves to its canonical address', async ({ page }) => {
   await mockHomePlayer(page, [])
   await open(page, '/summoner/euw/mover/euw')
   await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW$/)
   await expect(page.getByText('plays on EUW.')).toHaveCount(0)
+})
+
+test('a player with no ranked games is offered every queue, and the chips move the list with the numbers', async ({ page }) => {
+  const asked: string[] = []
+  await mockHomePlayer(page, asked)
+  await open(page, '/summoner/euw1/Mover/EUW')
+  await expect(page.getByText('No ranked games here')).toBeVisible()
+  await page.getByRole('button', { name: 'Show all queues' }).click()
+  await expect(page).toHaveURL(/\/summoner\/euw1\/Mover\/EUW\?queue=all$/)
+  await expect(page.getByRole('button', { name: 'All', exact: true, pressed: true })).toBeVisible()
+  // Ranked first, then every queue: the history and the numbers asked alike.
+  expect(asked.some((a) => a.includes('/matches') && a.includes('scope=ranked'))).toBe(true)
+  expect(asked.some((a) => a.includes('/analytics') && a.includes('scope=all'))).toBe(true)
 })

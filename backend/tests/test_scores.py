@@ -791,3 +791,48 @@ async def test_a_component_with_no_breakpoints_means_the_distributions_need_a_re
             await session.execute(RoleMetricStat.__table__.insert(), kept)
             await session.commit()
         assert await service.has_distributions()
+
+
+# ------------------------------------------------------------- withheld
+
+
+def test_a_missing_score_says_why_in_the_order_scoring_checks():
+    """The page called every unscored game "not scored yet", including the
+    normal and Swiftplay games a thin queue withholds for good."""
+    from datetime import UTC, datetime
+
+    from app.api.schemas import withheld_sentence
+    from app.db.models import Match, MatchParticipant
+    from app.services.scores import withheld_reason
+
+    def lobby(size=10, position="MIDDLE", remake=False):
+        m = Match(match_id="TW_1", platform_id="EUW1", queue_id=400, game_creation=1,
+                  game_duration=1800, is_remake=remake)
+        m.participants = [
+            MatchParticipant(match_id="TW_1", participant_index=i + 1, puuid=f"w{i}",
+                             champion_id=1, team_id=100, win=True, team_position=position)
+            for i in range(size)
+        ]
+        return m
+
+    remake = lobby(remake=True)
+    assert withheld_reason(remake, remake.participants[0]) == "remake"
+    arena = lobby(size=16, position="")
+    assert withheld_reason(arena, arena.participants[0]) == "not_ten"
+    aram = lobby(position="")
+    assert withheld_reason(aram, aram.participants[0]) == "no_roles"
+
+    waiting = lobby()
+    assert withheld_reason(waiting, waiting.participants[0]) == "not_scored_yet"
+    thin = lobby()
+    for p in thin.participants:
+        p.performance_scored_at = datetime(2026, 9, 24, tzinfo=UTC)
+        p.time_dead = 30
+    assert withheld_reason(thin, thin.participants[0]) == "thin_queue"
+    thin.participants[0].performance_score = 61.0
+    assert withheld_reason(thin, thin.participants[0]) is None
+
+    assert withheld_sentence("not_scored_yet", 10) == "This game has not been scored yet."
+    assert withheld_sentence(None, 10) is None
+    assert "16 players" in withheld_sentence("not_ten", 16)
+

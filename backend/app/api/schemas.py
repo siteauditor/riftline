@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 from app.db.models import ChampionMastery, Match, MatchParticipant, Player, RankedEntry
 from app.services.homes import ShardView
 from app.services.profile_stats import MIN_SCORED_FOR_PROFILE
+from app.services.queues import QueueScope
 from app.services.roles import CONFIDENT_AT, MEASURED_ACCURACY, MEASURED_PLAYERS
 from app.services.scores import (
     BADGES_BY_ID,
@@ -26,7 +27,9 @@ from app.services.scores import (
     MIN_GAMES_FOR_SCORE,
     WEIGHTS,
     WEIGHTS_VERSION,
+    ScoreWithheld,
     badge_detail,
+    withheld_reason,
 )
 from app.services.static_data import StaticDataService, static_data
 
@@ -325,6 +328,9 @@ class MatchSummary(BaseModel):
     # the honest rendering; a 5.0 would be a claim.
     score: float | None = None
     placement: int | None = None
+    # Why `score` is null, when it is: the page words each reason, and says
+    # "not scored yet" only when it is true.
+    score_withheld: ScoreWithheld | None = None
     badges: list[BadgeOut] = Field(default_factory=list)
     # The seven components behind the score, and the sample they were measured
     # against, so the number can be taken apart in the UI.
@@ -451,6 +457,8 @@ class MatchHistoryResponse(BaseModel):
     source: str = "riot"
     # With "stored": how many games match in all.
     stored_total: int | None = None
+    # The queues asked for, as a word; null for one queue id or for every queue.
+    scope: QueueScope | None = None
 
 
 class MasteryEntry(BaseModel):
@@ -483,6 +491,9 @@ class MasteryResponse(BaseModel):
     """
 
     puuid: str
+    # The player's own spelling, so the tab can title itself from its answer.
+    game_name: str | None = None
+    tag_line: str | None = None
     total_points: int = 0
     total_champions_played: int = 0
     # The shard the table was actually read from, which is not always the one in
@@ -1176,6 +1187,24 @@ def _score_components_out(participant) -> list[ScoreComponentOut]:
 LaneLabel = Callable[[int | None, str | None, float | None], str | None]
 
 
+
+def withheld_sentence(reason: ScoreWithheld | None, players: int) -> str | None:
+    """The scoreboard's line for a game with no score."""
+    return {
+        "remake": "This game was a remake, so there is nothing to score.",
+        "not_ten": (
+            f"This mode puts {players} players in a lobby, and the score is a percentile "
+            "within a lane role, so there is no scale to place them on."
+        ),
+        "no_roles": (
+            "This mode has no lane roles, and every component of the score is measured "
+            "against a role, so it is withheld rather than guessed."
+        ),
+        "thin_queue": "Our corpus holds too few games in this queue to be a percentile of.",
+        "not_scored_yet": "This game has not been scored yet.",
+        None: None,
+    }[reason]
+
 def to_match_summary(
     match: Match, puuid: str, sd: StaticDataService, lanes: LaneLabel | None = None
 ) -> MatchSummary | None:
@@ -1301,6 +1330,7 @@ def to_match_summary(
         # runs eight. Hardcoding two rendered Arena games with no players at all.
         score=me.performance_score,
         placement=me.performance_rank,
+        score_withheld=withheld_reason(match, me),
         badges=_badges_out(me, match),
         score_components=_score_components_out(me),
         score_sample=(me.performance_detail or {}).get("sample"),
@@ -1315,6 +1345,8 @@ def to_mastery_response(
     *,
     platform: str | None = None,
     fetched_at: int | None = None,
+    game_name: str | None = None,
+    tag_line: str | None = None,
 ) -> MasteryResponse:
     entries: list[MasteryEntry] = []
 
@@ -1342,6 +1374,8 @@ def to_mastery_response(
 
     return MasteryResponse(
         puuid=puuid,
+        game_name=game_name,
+        tag_line=tag_line,
         total_points=sum(m.champion_points for m in masteries),
         total_champions_played=len(masteries),
         platform=platform,
@@ -1467,6 +1501,12 @@ class LaneRecordOut(BaseModel):
     lost_big: int = 0
 
 
+class ScopeGamesOut(BaseModel):
+    scope: QueueScope
+    label: str
+    games: int
+
+
 class AnalyticsResponse(BaseModel):
     """Play style over the matches we hold.
 
@@ -1476,6 +1516,23 @@ class AnalyticsResponse(BaseModel):
     """
 
     puuid: str
+    # The player's own spelling and the shard the games are from, so a tab can
+    # title itself from its own answer.
+    game_name: str | None = None
+    tag_line: str | None = None
+    platform: str | None = None
+    # Which games every figure below covers. `scope` is the word the page's
+    # chips use, null when one queue id was asked for; `queues` the ids behind
+    # it, empty for every queue. Every panel reads the same window: the newest
+    # `window` games in the scope, of `stored_total` held. A profile once
+    # pooled every queue and read 62% and a 4.47 KDA where the ranked games
+    # said 50% and 3.85.
+    scope: QueueScope | None = "ranked"
+    queues: list[int] = Field(default_factory=list)
+    window: int = 0
+    stored_total: int = 0
+    # Stored games in each scope, for the chips' counts.
+    scope_games: list[ScopeGamesOut] = Field(default_factory=list)
     basis: str = "stored_matches"
     games_analysed: int = 0
     roles: list[RoleShare] = Field(default_factory=list)
@@ -1839,26 +1896,13 @@ def to_match_detail(
             )
         )
 
-    # Say why, rather than showing a scoreboard of dashes with no explanation.
+    # Say why, rather than showing a scoreboard of dashes with no explanation:
+    # the same reasons, in the same order, as each row of a history.
     withheld: str | None = None
-    if all(p.performance_score is None for p in match.participants):
-        if match.is_remake:
-            withheld = "This game was a remake, so there is nothing to score."
-        elif len(match.participants) != 10:
-            withheld = (
-                f"This mode puts {len(match.participants)} players in a lobby, and the "
-                "score is a percentile within a lane role, so there is no scale to "
-                "place them on."
-            )
-        elif any(not p.team_position for p in match.participants):
-            withheld = (
-                "This mode has no lane roles, and every component of the score is "
-                "measured against a role, so it is withheld rather than guessed."
-            )
-        else:
-            withheld = (
-                "Our corpus holds too few games in this queue to be a percentile of."
-            )
+    if match.participants and all(p.performance_score is None for p in match.participants):
+        withheld = withheld_sentence(
+            withheld_reason(match, match.participants[0]), len(match.participants)
+        )
 
     return MatchDetailResponse(
         match_id=match.match_id,

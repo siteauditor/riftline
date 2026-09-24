@@ -111,6 +111,7 @@ export default function RankCard({
                   <span className="text-win">{rank.wins}W</span>
                   <span className="mx-1 text-ink-faint">/</span>
                   <span className="text-loss">{rank.losses}L</span>
+                  <span className="ml-1.5 text-ink-faint">this season</span>
                 </span>
                 <span className="tnum">{pct(rank.win_rate)}</span>
               </div>

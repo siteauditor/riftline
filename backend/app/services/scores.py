@@ -50,7 +50,7 @@ import json
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -266,6 +266,31 @@ def _unlifted():
         MatchParticipant.physical_damage_to_champions.is_(None),
     )
 
+
+
+# Why a game has no score, in the order `score_match` checks, for the page to
+# word (frontend/src/lib/withheld.ts). "not_scored_yet" only while the lobby has
+# not been looked at: the page used to call every unscored game that, including
+# the normal and Swiftplay games a thin queue withholds for good.
+ScoreWithheld = Literal["remake", "not_ten", "no_roles", "thin_queue", "not_scored_yet"]
+
+
+def withheld_reason(match: Match, participant: MatchParticipant) -> ScoreWithheld | None:
+    """Why this player's game has no score, or None when it has one."""
+    if participant.performance_score is not None:
+        return None
+    if match.is_remake:
+        return "remake"
+    if len(match.participants) != 10:
+        return "not_ten"
+    if any(p.team_position not in POSITIONS for p in match.participants):
+        return "no_roles"
+    # Stamped means considered: a lobby with every role and no score after
+    # that was withheld for a queue our corpus is too thin to measure. A row
+    # not yet lifted from its payload is scored once it is.
+    if participant.performance_scored_at is None or participant.time_dead is None:
+        return "not_scored_yet"
+    return "thin_queue"
 
 # ------------------------------------------------------------- the components
 
@@ -709,6 +734,8 @@ class ScoreService:
 
     async def score_match(self, match: Match) -> int:
         """Score one lobby, or withhold and say why.
+
+        The checks run in the order `withheld_reason` reports them.
 
         Returns the number of participants scored, which is 0 or the whole
         lobby: a score is a placement within the ten, so scoring some of them

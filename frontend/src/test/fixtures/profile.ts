@@ -39,12 +39,21 @@ export const emptyHistory = {
   has_more: false,
   source: 'riot',
   stored_total: null,
+  scope: 'ranked',
 } satisfies MatchHistory
 
 export const storedHistory = { ...emptyHistory, source: 'stored', stored_total: 0 } satisfies MatchHistory
 
 export const emptyAnalytics = {
   puuid: 'hydra',
+  game_name: 'Hydra',
+  tag_line: 'EUW',
+  platform: 'euw1',
+  scope: 'ranked',
+  queues: [420, 440],
+  window: 1000,
+  stored_total: 0,
+  scope_games: [],
   basis: 'stored_matches',
   games_analysed: 0,
   roles: [],

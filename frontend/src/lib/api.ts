@@ -240,6 +240,8 @@ export type ItemDetail = S['ItemDetail']
 // --- player analytics ------------------------------------------------------
 
 export type Analytics = S['AnalyticsResponse']
+/** The queues a profile's games and numbers cover; see `profileScope.ts`. */
+export type QueueScope = NonNullable<Analytics['scope']>
 
 export type LaneLabel = 'won_big' | 'won' | 'even' | 'lost' | 'lost_big'
 
@@ -466,6 +468,7 @@ export const api = {
     opts: {
       start?: number
       count?: number
+      scope?: QueueScope | null
       queue?: number | null
       champion?: number | null
       source?: 'stored'
@@ -474,6 +477,7 @@ export const api = {
     const params = new URLSearchParams()
     if (opts.start) params.set('start', String(opts.start))
     if (opts.count) params.set('count', String(opts.count))
+    if (opts.scope) params.set('scope', opts.scope)
     if (opts.queue) params.set('queue', String(opts.queue))
     if (opts.champion) params.set('champion', String(opts.champion))
     if (opts.source) params.set('source', opts.source)
@@ -530,9 +534,10 @@ export const api = {
     platform: string,
     name: string,
     tag: string,
-    opts: { queue?: number | null; limit?: number; source?: 'stored' } = {},
+    opts: { scope?: QueueScope; queue?: number | null; limit?: number; source?: 'stored' } = {},
   ) => {
     const params = new URLSearchParams()
+    if (opts.scope) params.set('scope', opts.scope)
     if (opts.queue) params.set('queue', String(opts.queue))
     if (opts.limit) params.set('limit', String(opts.limit))
     if (opts.source) params.set('source', opts.source)

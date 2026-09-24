@@ -3,6 +3,7 @@ import { useState } from 'react'
 import PositionIcon from './PositionIcon'
 import type { RoleScoreProfile } from '../lib/api'
 import { positionLabel, scoreColor } from '../lib/format'
+import { band, STRONG_FROM, strengthsClaim, WEAK_TO } from '../lib/strengths'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import CountUp from './CountUp'
 import Hint from './Hint'
@@ -38,8 +39,7 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
   }
 
   const role = ready.find((p) => p.position === picked) ?? ready[0]
-  const strongest = role.components[0]
-  const weakest = role.components[role.components.length - 1]
+  const claim = strengthsClaim(role.components)
 
   return (
     <section className="frame">
@@ -97,8 +97,8 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
 
         <div className="min-w-0">
           <p className="text-sm text-ink">
-            Strongest at {strongest.label.toLowerCase()}, weakest at{' '}
-            {weakest.label.toLowerCase()}.
+            {claim ??
+              `Every part sits between ${WEAK_TO} and ${STRONG_FROM}, where a gap between two is noise.`}
           </p>
           <ul className={`${expanded ? '' : 'hidden'} mt-3 space-y-2 sm:block`}>
             {role.components.map((c) => (
@@ -130,14 +130,13 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
 
 function ComponentBar({ component }: { component: RoleScoreProfile['components'][number] }) {
   const value = Math.round(component.avg_percentile * 100)
-  // Gold for a real strength, red for a real weakness, grey for the middle.
-  // The middle band is wide on purpose: 55 against 45 is noise at this depth.
-  const colour =
-    value >= 65
-      ? 'var(--color-gold-bright)'
-      : value <= 35
-        ? 'var(--color-loss)'
-        : 'var(--color-ink-dim)'
+  // Gold for a real strength, red for a real weakness, grey for the middle:
+  // the bands the sentence above claims by (`strengths.ts`).
+  const colour = {
+    strong: 'var(--color-gold-bright)',
+    weak: 'var(--color-loss)',
+    middle: 'var(--color-ink-dim)',
+  }[band(value)]
   return (
     <Hint text={component.measures}>
     <li

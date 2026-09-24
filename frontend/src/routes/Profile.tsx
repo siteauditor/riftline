@@ -36,21 +36,18 @@ import {
   winRateColor,
 } from '../lib/format'
 import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
+import {
+  DEFAULT_SCOPE,
+  gamesCovered,
+  type QueueScope,
+  SCOPES,
+  scopeNoun,
+  scopeParam,
+  useScope,
+} from '../lib/profileScope'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import Hint from '../components/Hint'
 
-
-// Riot's history filter takes one queue id. Arena is left out because Riot
-// splits it across several (1700, 1710, 1750), so a chip for one would miss
-// games from the others.
-const QUEUE_FILTERS = [
-  { id: null, label: 'All' },
-  { id: 420, label: 'Solo/Duo' },
-  { id: 440, label: 'Flex' },
-  { id: 400, label: 'Normal' },
-  { id: 480, label: 'Swiftplay' },
-  { id: 450, label: 'ARAM' },
-]
 
 // Matches the server's refresh floor (REFRESH_FLOOR_SECONDS): an Update inside
 // it would be answered from the cache, so the button waits it out instead of
@@ -83,10 +80,19 @@ export default function Profile() {
   // In the URL, so a filtered history survives a reload, a shared link, and
   // the way back from an item or another player opened out of a game.
   const [search, setSearch] = useHydratedSearchParams()
-  const queue = intParam(search, 'queue', 0) || null
+  // One scope for the games and every number beside them: ranked unless the
+  // URL says otherwise (`profileScope.ts`).
+  const scope = useScope()
   const championFilter = intParam(search, 'champion', 0) || null
-  const setFilter = (patch: { queue?: number | null; champion?: number | null }) =>
-    setSearch((prev) => withParams(prev, patch), { replace: true })
+  const setFilter = (patch: { scope?: QueueScope; champion?: number | null }) =>
+    setSearch(
+      (prev) =>
+        withParams(prev, {
+          ...('scope' in patch ? { queue: scopeParam(patch.scope ?? DEFAULT_SCOPE) } : {}),
+          ...('champion' in patch ? { champion: patch.champion } : {}),
+        }),
+      { replace: true },
+    )
   const queryClient = useQueryClient()
   const {
     profileQuery,
@@ -100,9 +106,9 @@ export default function Profile() {
     storedList: stored,
     storedTotal,
     storedPage,
-    playedQuery,
     analytics,
-  } = useProfileData(platform, name, tag, { queue, champion: championFilter })
+  } = useProfileData(platform, name, tag, { scope, champion: championFilter })
+  const scopeLabel = SCOPES.find((s) => s.id === scope)?.label ?? 'Ranked'
 
   // The header's art is the champion they play most, from the games we hold:
   // the subject of the page rather than a backdrop.
@@ -228,7 +234,7 @@ export default function Profile() {
             </div>
           </div>
 
-          <ProfileTabs platform={platform} name={name} tag={tag} />
+          <ProfileTabs platform={platform} name={name} tag={tag} scope={scope} />
         </div>
       </ArtHeader>
 
@@ -329,15 +335,15 @@ export default function Profile() {
               ))}
             </section>
 
-            {matches.length > 0 && <FormStrip matches={matches} />}
+            {matches.length > 0 && <FormStrip matches={matches} scope={scope} />}
 
             {analytics && <StrengthsPanel profiles={analytics.score_profile} />}
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
               <ChipGroup label="Queue">
-                {QUEUE_FILTERS.map((f) => (
-                  <Chip key={f.label} active={queue === f.id} onClick={() => setFilter({ queue: f.id })}>
-                    {f.label}
+                {SCOPES.map((s) => (
+                  <Chip key={s.id} active={scope === s.id} onClick={() => setFilter({ scope: s.id })}>
+                    {s.label}
                   </Chip>
                 ))}
               </ChipGroup>
@@ -351,10 +357,10 @@ export default function Profile() {
                   { value: ALL_CHAMPIONS, label: 'All champions' },
                   // A link can name a champion with no stored games yet.
                   ...(championFilter &&
-                  !playedQuery.data?.champions.some((c) => c.champion.id === championFilter)
+                  !analytics?.champions.some((c) => c.champion.id === championFilter)
                     ? [{ value: String(championFilter), label: championName }]
                     : []),
-                  ...(playedQuery.data?.champions ?? []).map((c) => ({
+                  ...(analytics?.champions ?? []).map((c) => ({
                     value: String(c.champion.id),
                     label: `${c.champion.name} (${c.games})`,
                   })),
@@ -366,7 +372,7 @@ export default function Profile() {
             {championFilter && stored && storedTotal !== null && (
               <p className="border-l-2 border-gold/50 py-1 pl-3 text-xs leading-relaxed text-ink-dim">
                 {storedTotal.toLocaleString('en-US')} {championName} {storedTotal === 1 ? 'game' : 'games'}{' '}
-                we hold{queue ? ` in ${QUEUE_FILTERS.find((f) => f.id === queue)?.label ?? 'this queue'}` : ''}.
+                we hold{scope === 'all' ? '' : ` in ${scopeLabel}`}.
                 Riot cannot filter history by champion, so older games show here once more of
                 the history has been loaded.{' '}
                 <button
@@ -404,11 +410,26 @@ export default function Profile() {
 
             {matchesQuery.isSuccess && matches.length === 0 && (
               <EmptyState
-                title={championFilter ? `No stored ${championName} games here` : 'No games here'}
+                title={
+                  championFilter
+                    ? `No stored ${championName} games here`
+                    : scope === 'all'
+                      ? 'No games here'
+                      : `No ${scopeNoun(scope)} games here`
+                }
                 body={
                   championFilter
-                    ? 'Nothing stored for this champion in this queue. Load more history under All champions, or pick another queue.'
-                    : 'Nothing in this queue yet. Try a different filter, or check another region.'
+                    ? 'Nothing stored for this champion in these queues. Load more history under All champions, or pick another queue.'
+                    : scope === 'all'
+                      ? 'Riot lists no games for this player yet.'
+                      : `Riot lists no ${scopeNoun(scope)} games for this player. Their other games are under All.`
+                }
+                action={
+                  scope !== 'all' ? (
+                    <Button variant="outline" size="sm" onClick={() => setFilter({ scope: 'all', champion: null })}>
+                      Show all queues
+                    </Button>
+                  ) : undefined
                 }
               />
             )}
@@ -576,7 +597,7 @@ function MostPlayed({
     <section className="frame">
       <header className="flex items-baseline justify-between border-b border-line-soft px-4 py-2.5">
         <h2 className="eyebrow">
-          Most played, {analytics.games_analysed} stored games
+          Most played, {gamesCovered({ games: analytics.games_analysed, total: analytics.stored_total, scope: analytics.scope })}
         </h2>
       </header>
       <ul className="divide-y divide-line-soft">

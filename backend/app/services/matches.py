@@ -138,10 +138,11 @@ class MatchService:
         start: int = 0,
         count: int = 20,
         queue: int | None = None,
+        type_: str | None = None,
     ) -> list[str]:
         platform = resolve_platform(platform_name)
         return await self.client.match_ids(
-            puuid, platform.regional, start=start, count=count, queue=queue
+            puuid, platform.regional, start=start, count=count, queue=queue, type_=type_
         )
 
     async def known_ids(self, match_ids: Sequence[str]) -> set[str]:
@@ -368,6 +369,7 @@ class MatchService:
         start: int = 0,
         count: int = 20,
         queue: int | None = None,
+        type_: str | None = None,
         platform_ids: Collection[str] | None = None,
     ) -> HistoryPage:
         """One page of Riot's history for this player, stored on the way.
@@ -380,7 +382,7 @@ class MatchService:
         """
         platform = resolve_platform(platform_name)
         ids = await self.match_ids(
-            puuid, platform_name, start=start, count=count, queue=queue
+            puuid, platform_name, start=start, count=count, queue=queue, type_=type_
         )
         wanted = (
             ids
@@ -396,6 +398,7 @@ class MatchService:
         *,
         champion_id: int | None = None,
         queue: int | None = None,
+        queues: Collection[int] | None = None,
         start: int = 0,
         count: int = 20,
         platform_ids: Collection[str] | None = None,
@@ -417,6 +420,8 @@ class MatchService:
             conditions.append(MatchParticipant.champion_id == champion_id)
         if queue is not None:
             conditions.append(Match.queue_id == queue)
+        if queues is not None:
+            conditions.append(Match.queue_id.in_(sorted(queues)))
         if platform_ids is not None:
             conditions.append(Match.platform_id.in_(sorted(platform_ids)))
         base = (
@@ -507,7 +512,11 @@ class MatchService:
         return rows[0] if rows else None
 
     async def stored_count(
-        self, puuid: str, *, platform_ids: Collection[str] | None = None
+        self,
+        puuid: str,
+        *,
+        queues: Collection[int] | None = None,
+        platform_ids: Collection[str] | None = None,
     ) -> int:
         """How many games we hold for this player. Zero is an answer."""
         stmt = (
@@ -516,6 +525,23 @@ class MatchService:
             .join(Match, Match.match_id == MatchParticipant.match_id)
             .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))
         )
+        if queues is not None:
+            stmt = stmt.where(Match.queue_id.in_(sorted(queues)))
         if platform_ids is not None:
             stmt = stmt.where(Match.platform_id.in_(sorted(platform_ids)))
         return int((await self.session.execute(stmt)).scalar() or 0)
+
+    async def stored_by_queue(
+        self, puuid: str, *, platform_ids: Collection[str] | None = None
+    ) -> dict[int, int]:
+        """This player's stored games per queue id, for a page's scope counts."""
+        stmt = (
+            select(Match.queue_id, func.count())
+            .select_from(MatchParticipant)
+            .join(Match, Match.match_id == MatchParticipant.match_id)
+            .where(MatchParticipant.puuid == puuid, Match.is_remake.is_(False))
+            .group_by(Match.queue_id)
+        )
+        if platform_ids is not None:
+            stmt = stmt.where(Match.platform_id.in_(sorted(platform_ids)))
+        return {int(q): int(n) for q, n in (await self.session.execute(stmt)).all()}

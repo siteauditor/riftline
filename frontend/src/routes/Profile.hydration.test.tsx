@@ -19,7 +19,8 @@ import Profile from './Profile'
  * URL's filters read as empty until hydration has finished. The history used
  * to be asked for at once, so the unfiltered page was fetched and then the
  * filtered one. It is asked now only after hydration and after Riot has
- * answered for the profile, once, with the filters the link carries.
+ * answered for the profile, once, with the filters the link carries: an older
+ * link's queue id as the scope word it now means (420 is solo).
  */
 
 const { platform, name, tag } = PLAYER
@@ -105,7 +106,7 @@ describe('a prerendered profile hydrating a filtered link', () => {
     expect(recoverable).toEqual([])
     const histories = requests.filter((r) => r.includes('/matches'))
     expect(histories).toHaveLength(1)
-    expect(histories[0]).toContain('queue=420')
+    expect(histories[0]).toContain('scope=solo')
     expect(histories[0]).toContain('champion=412')
   })
 

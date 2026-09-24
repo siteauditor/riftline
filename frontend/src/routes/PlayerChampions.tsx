@@ -7,7 +7,16 @@ import Head from '../components/Head'
 import PositionIcon from '../components/PositionIcon'
 import ProfileTabs from '../components/ProfileTabs'
 import { EmptyState, ErrorView, TableSkeleton } from '../components/StateViews'
-import { api, type ChampionPlayed } from '../lib/api'
+import type { ChampionPlayed, QueueScope } from '../lib/api'
+import {
+  DEFAULT_SCOPE,
+  gamesCovered,
+  SCOPES,
+  scopeNoun,
+  scopeParam,
+  useScope,
+} from '../lib/profileScope'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import {
   kdaColor,
@@ -17,21 +26,10 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
-import { championPath, intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
+import { championPath, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import { summonerPath } from '../lib/profileAddress'
-
-const QUEUES = [
-  { id: null, label: 'All' },
-  { id: 420, label: 'Solo/Duo' },
-  { id: 440, label: 'Flex' },
-  { id: 450, label: 'ARAM' },
-]
-
-// The analytics endpoint's ceiling. A champion table is where a long history
-// pays off, so it asks for all of it rather than the Overview's 300.
-const LIMIT = 1000
 
 type SortKey = 'games' | 'win_rate' | 'kda' | 'cs' | 'damage' | 'score' | 'gold'
 
@@ -82,17 +80,27 @@ export default function PlayerChampions() {
   // In the URL, so the table comes back as it was left after opening a
   // champion or a filtered history.
   const [search, setSearch] = useHydratedSearchParams()
-  const queue = intParam(search, 'queue', 0) || null
+  // The overview's scope and its answer: the same games, ranked unless the
+  // URL says otherwise, so a champion's row here is the one there.
+  const scope = useScope()
   const sort: SortKey = COLUMNS.find((c) => c.key === search.get('sort'))?.key ?? 'games'
   const descending = search.get('dir') !== 'asc'
-  const setView = (patch: { queue?: number | null; sort?: SortKey; dir?: 'asc' | 'desc' }) =>
-    setSearch((prev) => withParams(prev, patch, { sort: 'games', dir: 'desc' }), { replace: true })
+  const setView = (patch: { scope?: QueueScope; sort?: SortKey; dir?: 'asc' | 'desc' }) =>
+    setSearch(
+      (prev) =>
+        withParams(
+          prev,
+          {
+            ...('scope' in patch ? { queue: scopeParam(patch.scope ?? DEFAULT_SCOPE) } : {}),
+            ...('sort' in patch ? { sort: patch.sort } : {}),
+            ...('dir' in patch ? { dir: patch.dir } : {}),
+          },
+          { sort: 'games', dir: 'desc' },
+        ),
+      { replace: true },
+    )
 
-  const query = useQuery({
-    queryKey: ['analytics', platform, name, tag, { queue, limit: LIMIT }],
-    queryFn: () => api.analytics(platform, name, tag, { queue, limit: LIMIT }),
-    retry: false,
-  })
+  const query = useQuery({ ...queries.analytics(platform, name, tag, scope), retry: false })
 
   const rows = useMemo(() => {
     const list = [...(query.data?.champions ?? [])]
@@ -115,29 +123,32 @@ export default function PlayerChampions() {
   const base = summonerPath(platform, name, tag)
   const heroArt = useChampionArt(query.data?.champions[0]?.champion.id)
   const data = query.data
+  // The player's own spelling once the answer has it, not the URL's.
+  const riotName = data?.game_name ?? name
+  const riotTag = data?.tag_line ?? tag
 
   return (
     <div>
-      <Head {...heads.profileTab(`${name}#${tag}`, platform, 'champions')} />
+      <Head {...heads.profileTab(`${riotName}#${riotTag}`, platform, 'champions')} />
       <ArtHeader art={heroArt}>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
           <div className="min-w-0">
             <p className="eyebrow">Champions played</p>
             <h1 className="display mt-1 text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
-              {name}
-              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
+              {riotName}
+              <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{riotTag}</span>
             </h1>
           </div>
-          <ProfileTabs platform={platform} name={name} tag={tag} />
+          <ProfileTabs platform={platform} name={name} tag={tag} scope={scope} />
         </div>
       </ArtHeader>
 
       <div className="mx-auto max-w-[1280px] px-4 py-6">
 
       <ChipGroup label="Queue" className="mt-5 text-sm">
-        {QUEUES.map((q) => (
-          <Chip key={q.label} active={queue === q.id} onClick={() => setView({ queue: q.id })}>
-            {q.label}
+        {SCOPES.map((s) => (
+          <Chip key={s.id} active={scope === s.id} onClick={() => setView({ scope: s.id })}>
+            {s.label}
           </Chip>
         ))}
       </ChipGroup>
@@ -161,7 +172,7 @@ export default function PlayerChampions() {
       {data && rows.length === 0 && (
         <div className="py-6">
           <EmptyState
-            title="No stored games here"
+            title={scope === 'all' ? 'No stored games here' : `No stored ${scopeNoun(scope)} games here`}
             body="Open the Overview to fetch recent games, or try another queue."
           />
         </div>
@@ -208,7 +219,7 @@ export default function PlayerChampions() {
                     row={row}
                     historyHref={`${base}?${withParams(new URLSearchParams(), {
                       champion: row.champion.id,
-                      queue,
+                      queue: scopeParam(scope),
                     }).toString()}`}
                   />
                 ))}
@@ -216,7 +227,8 @@ export default function PlayerChampions() {
             </table>
           </div>
           <p className="mt-3 text-xs leading-relaxed text-ink-faint">
-            From {data.games_analysed.toLocaleString('en-US')} stored games, not the whole
+            From {gamesCovered({ games: data.games_analysed, total: data.stored_total, scope: data.scope })}{' '}
+            Riftline holds, not the whole
             season. Scores and gold at 14 cover only the games that were scored or have a
             timeline, and each shows how many. The{' '}
             <Link to={base} className="underline decoration-line underline-offset-2 hover:text-ink">

@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 
-import type { MatchSummary } from '../lib/api'
+import type { MatchSummary, QueueScope } from '../lib/api'
+import { scopeNoun } from '../lib/profileScope'
 import {
   duration,
   ordinal,
-  pct,
   positionLabel,
   scoreColor,
 } from '../lib/format'
@@ -34,9 +34,11 @@ const SCORE_CEILING = 10
 
 interface Props {
   matches: MatchSummary[]
+  /** The queues the list covers, for the heading. */
+  scope?: QueueScope | null
 }
 
-export default function FormStrip({ matches }: Props) {
+export default function FormStrip({ matches, scope }: Props) {
   const [hovered, setHovered] = useState<number | null>(null)
 
   // Oldest on the left: the strip reads as a timeline.
@@ -59,7 +61,6 @@ export default function FormStrip({ matches }: Props) {
     return {
       wins,
       losses: games.length - wins,
-      winRate: games.length ? wins / games.length : 0,
       kda: deaths === 0 ? kills + assists : (kills + assists) / deaths,
     }
   }, [games])
@@ -75,15 +76,17 @@ export default function FormStrip({ matches }: Props) {
     >
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="display text-base font-600 text-ink">
-          Last {games.length} games
+          Last {games.length} {scopeNoun(scope) ? `${scopeNoun(scope)} ` : ''}
+          {games.length === 1 ? 'game' : 'games'}
         </h2>
+        {/* Wins and losses, and no percentage: over twenty games one game
+            moves it five points, which reads as a trend and is not one. */}
         <div className="flex items-baseline gap-3 text-xs text-ink-dim">
           <span>
             <span className="tnum text-win">{summary.wins}W</span>
             <span className="mx-1 text-ink-faint">/</span>
             <span className="tnum text-loss">{summary.losses}L</span>
           </span>
-          <span className="tnum">{pct(summary.winRate)}</span>
           <span className="tnum">{summary.kda.toFixed(2)} KDA</span>
         </div>
       </div>

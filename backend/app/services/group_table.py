@@ -54,20 +54,20 @@ from app.services.groups import MAX_MEMBERS
 from app.services.lanes import lane_labeler, lane_records
 from app.services.matches import MatchService, PlayedRow
 from app.services.profile_stats import MIN_SCORED_FOR_PROFILE, champion_totals, score_profile
+from app.services.queues import ARENA_QUEUES, SCOPE_LABELS, SCOPE_QUEUES
 from app.services.reviews import LOWER_IS_BETTER, MIN_PROFILE_GAMES, review_profile
 from app.services.reviews import METRIC_LABELS as REVIEW_LABELS
 from app.services.static_data import StaticDataService
 
-# The queue filters a group page offers, and the Riot queue ids behind each.
-# None is every queue, customs and all.
+# The queue filters a group page offers, and the Riot queue ids behind each,
+# from the one vocabulary the profile uses (`app/services/queues.py`). None is
+# every queue, customs and all. Arena is a group page's alone.
 QUEUE_FILTERS: dict[str, tuple[str, frozenset[int] | None]] = {
-    "all": ("All queues", None),
-    "solo": ("Ranked Solo/Duo", frozenset({420})),
-    "flex": ("Ranked Flex", frozenset({440})),
-    "normal": ("Normal", frozenset({400, 430, 490})),
-    "swiftplay": ("Swiftplay", frozenset({480})),
-    "aram": ("ARAM", frozenset({450, 2400})),
-    "arena": ("Arena", frozenset({1700, 1710, 1740, 1750})),
+    **{
+        key: (SCOPE_LABELS[key], SCOPE_QUEUES[key])
+        for key in ("all", "solo", "flex", "normal", "swiftplay", "aram")
+    },
+    "arena": ("Arena", ARENA_QUEUES),
 }
 # No lanes and no roles, so the Riftline score, the review and lane labels do
 # not exist for these: said as such rather than shown empty.

@@ -136,12 +136,14 @@ async def lane_records(
     queues: Collection[int] | None = None,
     limit: int = 300,
     labeler: LaneLabeler | None = None,
+    match_ids: Collection[str] | None = None,
 ) -> list[LaneRecord]:
     """Won, even and lost lanes per role, over the newest games with a timeline.
 
     ``queues`` narrows to several queues at once (a group's "Normal" is three).
-    A caller labelling many players passes one ``labeler`` rather than reading
-    the breakpoints once per player.
+    ``match_ids`` limits it to one window of games, so a profile's lanes cover
+    the games its other panels do. A caller labelling many players passes one
+    ``labeler`` rather than reading the breakpoints once per player.
     """
     stmt = (
         select(Match.queue_id, MatchParticipant.team_position, MatchParticipant.laning_score)
@@ -158,6 +160,8 @@ async def lane_records(
         stmt = stmt.where(Match.queue_id == queue)
     if queues is not None:
         stmt = stmt.where(Match.queue_id.in_(list(queues)))
+    if match_ids is not None:
+        stmt = stmt.where(Match.match_id.in_(list(match_ids)))
     labeler = labeler or await lane_labeler(session)
     records: dict[str, LaneRecord] = {}
     for queue_id, position, score in (await session.execute(stmt)).all():

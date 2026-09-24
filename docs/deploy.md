@@ -485,7 +485,9 @@ The manifest of pages, and which of them are indexable, is `GET
 /api/meta/pages`; the sitemap nginx serves at `/sitemap.xml` is `GET
 /api/meta/sitemap.xml`, the same list filtered. `SITE_ORIGIN` in `.env` is the
 absolute origin both are written with. Profile pages are in the manifest
-for players with ten scored games and a known Riot ID, and are rendered
+for players with ten scored ranked games in one role (the floor the page's
+own score breakdown needs) and a known Riot ID, at their home shard's address,
+and are rendered
 with `?source=stored`, so the prerender never spends the Riot key however
 many players it lists; their number grows with the players people look up.
 

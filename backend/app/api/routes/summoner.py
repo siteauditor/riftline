@@ -11,6 +11,7 @@ import logging
 import re
 import time
 from collections import Counter
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
@@ -44,6 +45,7 @@ from app.api.schemas import (
     RoleReviewOut,
     RoleScoreProfileOut,
     RoleShare,
+    ScopeGamesOut,
     epoch_ms,
     numeric_rank,
     to_idle_summary,
@@ -65,6 +67,7 @@ from app.services.profile_stats import (
     champion_totals,
     score_profile,
 )
+from app.services.queues import LIVE_FILTER, SCOPE_LABELS, SCOPE_QUEUES, QueueScope, scope_queues
 from app.services.reviews import LOWER_IS_BETTER, MIN_PROFILE_GAMES, review_profile
 from app.services.reviews import METRIC_LABELS as REVIEW_LABELS
 from app.services.static_data import StaticDataService
@@ -88,6 +91,12 @@ SOURCE_PATTERN = "^(live|stored)$"
 # minutes, on one request. The page asks 20 at a time; the stored paths, which
 # cost nothing, still take up to 100.
 LIVE_PAGE_MAX = 20
+
+# The stored games every panel of a profile reads: the newest thousand in the
+# queues asked for. Measured on 2026-09-24, a thousand stored games answer in
+# 45 to 75 ms, and the page used to read 300 for one panel and 1,000 for
+# another, so two numbers on one screen covered different games.
+ANALYTICS_WINDOW = 1000
 
 # Calls kept free when the live renderer asks for a profile (`spare`). 69
 # profiles are listed, each up to four calls when cold (account, region,
@@ -270,7 +279,13 @@ async def get_matches(
     sd: StaticDep,
     start: int = Query(0, ge=0, le=900),
     count: int = Query(20, ge=1, le=100),
-    queue: int | None = Query(None, description="Riot queue id, e.g. 420 for Solo/Duo."),
+    scope: Annotated[
+        QueueScope | None,
+        Query(description="Queues as a word, as the profile's chips name them. Absent: every queue."),
+    ] = None,
+    queue: int | None = Query(
+        None, description="One Riot queue id, e.g. 420 for Solo/Duo, instead of a scope."
+    ),
     champion: int | None = Query(
         None, ge=1, description="Champion id. Read from stored games: Riot cannot filter by it."
     ),
@@ -297,11 +312,17 @@ async def get_matches(
     # Lane labels read the role spreads once for the whole page.
     lanes = await lane_labeler(matches.session)
 
+    # One queue id wins over a scope; `scope` alone is echoed.
+    if queue is not None:
+        scope = None
+    queues = scope_queues(scope) if scope is not None else None
+
     if champion is not None or source == "stored":
         stored = await matches.stored_history(
             puuid,
             champion_id=champion,
             queue=queue,
+            queues=queues,
             start=start,
             count=count,
             platform_ids=view.platform_ids,
@@ -318,9 +339,13 @@ async def get_matches(
             has_more=start + count < stored.total,
             source="stored",
             stored_total=stored.total,
+            scope=scope,
         )
 
     count = min(count, LIVE_PAGE_MAX)
+    # Riot's list takes one queue id or a type: ranked is `type=ranked`, and a
+    # scope of several unranked queues asks for its main one (LIVE_FILTER).
+    live_queue, live_type = (queue, None) if scope is None else LIVE_FILTER[scope]
     # From the regional route of the shard shown: the home's for a URL that
     # named a shard the account does not play on, which read NA's route for
     # a EUW player and listed nothing.
@@ -329,7 +354,8 @@ async def get_matches(
         view.shown.id,
         start=start,
         count=count,
-        queue=queue,
+        queue=live_queue,
+        type_=live_type,
         platform_ids=view.platform_ids,
     )
     summaries: list[MatchSummary] = []
@@ -346,6 +372,7 @@ async def get_matches(
         # render: a single unfetchable match must not truncate the rest of
         # the player's history.
         has_more=page.id_count >= count,
+        scope=scope,
     )
 
 
@@ -366,7 +393,13 @@ async def get_mastery(
         # Read from that shard and not kept, like its ranks.
         masteries = await players.masteries_on(puuid, view.asked)
         return to_mastery_response(
-            puuid, masteries, sd, platform=view.asked.id, fetched_at=epoch_ms(utcnow())
+            puuid,
+            masteries,
+            sd,
+            platform=view.asked.id,
+            fetched_at=epoch_ms(utcnow()),
+            game_name=player.game_name,
+            tag_line=player.tag_line,
         )
     # champion-mastery-v4 on a shard this account has no record on answers 200
     # with an empty list, so the home is read even when the URL named another.
@@ -381,6 +414,8 @@ async def get_mastery(
         sd,
         platform=player.mastery_platform,
         fetched_at=epoch_ms(player.mastery_fetched_at),
+        game_name=player.game_name,
+        tag_line=player.tag_line,
     )
 
 
@@ -392,8 +427,13 @@ async def get_analytics(
     players: PlayerServiceDep,
     matches: MatchServiceDep,
     sd: StaticDep,
-    queue: int | None = Query(None, description="Riot queue id, e.g. 420."),
-    limit: int = Query(300, ge=10, le=1000, description="Stored games to analyse."),
+    scope: Annotated[
+        QueueScope, Query(description="Queues as a word, as the profile's chips name them.")
+    ] = "ranked",
+    queue: int | None = Query(None, description="One Riot queue id, e.g. 420, instead of a scope."),
+    limit: int = Query(
+        ANALYTICS_WINDOW, ge=10, le=1000, description="The newest stored games to analyse."
+    ),
     source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
 ) -> AnalyticsResponse:
     """Play style: role share, champion class mix, and when this player plays.
@@ -410,13 +450,35 @@ async def get_analytics(
         player = await players.resolve(platform, game_name, tag_line)
     puuid = player.puuid
     view = await players.view(player, platform, live=source != "stored")
+    covered = frozenset({queue}) if queue is not None else scope_queues(scope)
+    by_queue = await matches.stored_by_queue(puuid, platform_ids=view.platform_ids)
+    frame = {
+        "game_name": player.game_name,
+        "tag_line": player.tag_line,
+        "platform": view.shown.id,
+        "scope": None if queue is not None else scope,
+        "queues": sorted(covered) if covered is not None else [],
+        "window": limit,
+        "stored_total": _held(by_queue, covered),
+        "scope_games": [
+            ScopeGamesOut(scope=word, label=SCOPE_LABELS[word], games=_held(by_queue, ids))
+            for word, ids in SCOPE_QUEUES.items()
+        ],
+    }
 
     rows = await matches.played_by(
-        puuid, queue=queue, limit=limit, platform_ids=view.platform_ids
+        puuid,
+        queues=covered,
+        limit=limit,
+        platform_ids=view.platform_ids,
     )
     if not rows:
         # Not an error: a profile nobody has opened yet simply has nothing stored.
-        return AnalyticsResponse(puuid=puuid)
+        return AnalyticsResponse(puuid=puuid, **frame)
+    # Every panel reads this window of games, the review and the lanes too:
+    # they read their own 300 newest before, so the panels of one page
+    # described different games.
+    window = [row.match_id for row in rows]
 
     role_games: Counter[str] = Counter()
     role_wins: Counter[str] = Counter()
@@ -453,6 +515,7 @@ async def get_analytics(
 
     return AnalyticsResponse(
         puuid=puuid,
+        **frame,
         games_analysed=played,
         roles=[
             RoleShare(
@@ -516,11 +579,11 @@ async def get_analytics(
                 contests=r.contests,
                 contests_won=r.contests_won,
             )
-            for r in await review_profile(matches.session, puuid, queue)
+            for r in await review_profile(matches.session, puuid, match_ids=window)
         ],
         lanes=[
             LaneRecordOut.model_validate(r, from_attributes=True)
-            for r in await lane_records(matches.session, puuid, queue=queue, limit=limit)
+            for r in await lane_records(matches.session, puuid, match_ids=window, limit=limit)
         ],
         score_profile=[
             RoleScoreProfileOut(
@@ -556,6 +619,11 @@ async def get_analytics(
             damage_per_min=totals["damage"] / totals["minutes"],
         ),
     )
+
+
+def _held(by_queue: dict[int, int], queues: frozenset[int] | None) -> int:
+    """Stored games in these queues; every queue for None."""
+    return sum(n for q, n in by_queue.items() if queues is None or q in queues)
 
 
 @router.get("/{platform}/{game_name}/{tag_line}/live", response_model=LiveGameResponse)

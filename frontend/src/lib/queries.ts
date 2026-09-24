@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 
-import { api, type SliceQuery } from './api'
+import { api, type QueueScope, type SliceQuery } from './api'
+import { DEFAULT_SCOPE } from './profileScope'
 import { MATCH_PAGE } from './useMatchHistory'
 
 /**
@@ -44,6 +45,10 @@ export const TIERLIST_MIN_GAMES = 20
 
 /** The champion page's sample floor, and the default its URL leaves out. */
 export const CHAMPION_MIN_GAMES = 5
+
+/** The stored games a profile's numbers read: the newest thousand in the
+ *  scope, the API's ceiling and its default (ANALYTICS_WINDOW). */
+export const ANALYTICS_LIMIT = 1000
 
 export const queries = {
   meta: (opts: SliceQuery) =>
@@ -89,14 +94,25 @@ export const queries = {
       queryKey: ['profile-stored', platform, name, tag],
       queryFn: () => api.profile(platform, name, tag, { source: 'stored' }),
     }),
-  matchesStored: (platform: string, name: string, tag: string) =>
+  // Keyed by scope; the prerenderer asks for the default, which is the page a
+  // bare profile address opens on.
+  matchesStored: (platform: string, name: string, tag: string, scope: QueueScope = DEFAULT_SCOPE) =>
     queryOptions({
-      queryKey: ['matches-stored', platform, name, tag],
-      queryFn: () => api.matches(platform, name, tag, { count: MATCH_PAGE, source: 'stored' }),
+      queryKey: ['matches-stored', platform, name, tag, scope],
+      queryFn: () => api.matches(platform, name, tag, { count: MATCH_PAGE, source: 'stored', scope }),
     }),
-  analyticsStored: (platform: string, name: string, tag: string) =>
+  analyticsStored: (platform: string, name: string, tag: string, scope: QueueScope = DEFAULT_SCOPE) =>
     queryOptions({
-      queryKey: ['analytics-stored', platform, name, tag],
-      queryFn: () => api.analytics(platform, name, tag, { source: 'stored' }),
+      queryKey: ['analytics-stored', platform, name, tag, scope],
+      queryFn: () =>
+        api.analytics(platform, name, tag, { source: 'stored', scope, limit: ANALYTICS_LIMIT }),
+    }),
+
+  // A profile's numbers in one scope: every panel, the champions tab and the
+  // champion filter read this one answer, so they cover the same games.
+  analytics: (platform: string, name: string, tag: string, scope: QueueScope) =>
+    queryOptions({
+      queryKey: ['analytics', platform, name, tag, scope],
+      queryFn: () => api.analytics(platform, name, tag, { scope, limit: ANALYTICS_LIMIT }),
     }),
 }

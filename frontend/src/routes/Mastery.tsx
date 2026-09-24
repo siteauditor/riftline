@@ -12,16 +12,13 @@ import { LEGEND_STEPS } from '../components/mastery/scale'
 import { Stat, StatCell, StatStrip } from '../components/Stat'
 import { EmptyState, ErrorView, GridSkeleton } from '../components/StateViews'
 import { api } from '../lib/api'
+import { queries } from '../lib/queries'
 import { heads } from '../lib/seo'
 import { compact, pct, timeAgo } from '../lib/format'
 import { foldName, useHydratedSearchParams, useSearchText, withParams } from '../lib/searchParams'
 import { useChampionArt } from '../lib/useChampionArt'
 import CountUp from '../components/CountUp'
 import { summonerPath } from '../lib/profileAddress'
-
-/** The analytics ceiling the champions tab already asks for. Same key, same
- *  options, so the two pages share one cache entry and one request. */
-const ANALYTICS_LIMIT = 1000
 
 export default function Mastery() {
   const { platform = '', name = '', tag = '' } = useParams()
@@ -47,14 +44,12 @@ export default function Mastery() {
     queryFn: api.champions,
     staleTime: 6 * 60 * 60 * 1000,
   })
-  // What our own stored games say about these champions. Storage only, so it
-  // costs no Riot call, and it is never allowed to block the page: a player
-  // with nothing stored is the normal first visit.
-  const recordsQuery = useQuery({
-    queryKey: ['analytics', platform, name, tag, { queue: null, limit: ANALYTICS_LIMIT }],
-    queryFn: () => api.analytics(platform, name, tag, { queue: null, limit: ANALYTICS_LIMIT }),
-    retry: false,
-  })
+  // What our own stored games say about these champions, over every queue:
+  // mastery is lifetime, so a champion's record here is every game on it, not
+  // the overview's ranked ones. Storage only, so it costs no Riot call, and it
+  // is never allowed to block the page: a player with nothing stored is the
+  // normal first visit.
+  const recordsQuery = useQuery({ ...queries.analytics(platform, name, tag, 'all'), retry: false })
 
   const pool = useMemo(
     () =>
@@ -82,15 +77,18 @@ export default function Mastery() {
   const shownIds = useMemo(() => new Set(shown.map((c) => c.id)), [shown])
   const inBand = (band: PoolChampion[]) => band.filter((c) => shownIds.has(c.id))
 
+  // The player's own spelling once an answer has it, not the URL's.
+  const riotName = masteryQuery.data?.game_name ?? name
+  const riotTag = masteryQuery.data?.tag_line ?? tag
   const header = (
     <ArtHeader art={heroArt}>
-      <Head {...heads.profileTab(`${name}#${tag}`, platform, 'mastery')} />
+      <Head {...heads.profileTab(`${riotName}#${riotTag}`, platform, 'mastery')} />
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <div className="min-w-0">
           <p className="eyebrow">Champion mastery</p>
           <h1 className="display mt-1 text-[clamp(1.9rem,4.5vw,2.9rem)] font-800 uppercase leading-none tracking-[-0.01em] text-ink">
-            {name}
-            <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{tag}</span>
+            {riotName}
+            <span className="ml-2 text-[0.5em] font-600 text-ink-faint">#{riotTag}</span>
           </h1>
         </div>
         <ProfileTabs platform={platform} name={name} tag={tag} />

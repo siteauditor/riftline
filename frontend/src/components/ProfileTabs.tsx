@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 
 import NavTabs, { type NavTab } from './NavTabs'
-import { api } from '../lib/api'
+import { api, type QueueScope } from '../lib/api'
 import { summonerPath } from '../lib/profileAddress'
+import { scopeParam } from '../lib/profileScope'
 
 /**
  * The Overview / Champions / Mastery / Live nav on a summoner page.
@@ -18,10 +19,14 @@ export default function ProfileTabs({
   platform,
   name,
   tag,
+  scope,
 }: {
   platform: string
   name: string
   tag: string
+  /** Carried between the overview and the champions tab, which read the same
+   *  games; mastery and the live game are not about a set of games. */
+  scope?: QueueScope
 }) {
   // No options of its own. `App` already mounts `['health']` with a 30s poll
   // for the whole session, and a second observer with different staleTime and
@@ -29,9 +34,11 @@ export default function ProfileTabs({
   const health = useQuery({ queryKey: ['health'], queryFn: api.health })
 
   const base = summonerPath(platform, name, tag)
+  const word = scope ? scopeParam(scope) : null
+  const carried = word ? `?queue=${word}` : ''
   const tabs: NavTab[] = [
-    { to: base, label: 'Overview', end: true },
-    { to: `${base}/champions`, label: 'Champions' },
+    { to: `${base}${carried}`, label: 'Overview', end: true },
+    { to: `${base}/champions${carried}`, label: 'Champions' },
     { to: `${base}/mastery`, label: 'Mastery' },
   ]
   // Shown unless health has positively said the feature is off. Gating on a

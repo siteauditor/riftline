@@ -1300,3 +1300,34 @@ async def test_a_champion_filter_reads_stored_games_and_calls_riot_for_no_match(
 
     assert match_calls() == before, "a champion filter spends no match call"
 
+
+# ------------------------------------------------------------ queue scopes
+
+
+@respx.mock
+async def test_a_history_scope_asks_riot_for_its_queue_or_its_type(client):
+    """Riot's list filters by one queue id or by a type: ranked is both ranked
+    queues as `type=ranked`, a single queue its id, and a queue id asked for
+    wins over a scope."""
+    ids = respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    mock_riot()
+
+    ranked = (await client.get("/api/summoner/euw1/Caps/EUW/matches?scope=ranked")).json()
+    params = ids.calls.last.request.url.params
+    assert (params.get("type"), params.get("queue")) == ("ranked", None)
+    assert ranked["scope"] == "ranked"
+
+    await client.get("/api/summoner/euw1/Caps/EUW/matches?scope=solo")
+    params = ids.calls.last.request.url.params
+    assert (params.get("type"), params.get("queue")) == (None, "420")
+
+    both = (await client.get("/api/summoner/euw1/Caps/EUW/matches?scope=aram&queue=440")).json()
+    assert ids.calls.last.request.url.params.get("queue") == "440"
+    assert both["scope"] is None
+
+    every = (await client.get("/api/summoner/euw1/Caps/EUW/matches")).json()
+    params = ids.calls.last.request.url.params
+    assert (params.get("type"), params.get("queue"), every["scope"]) == (None, None, None)
+
