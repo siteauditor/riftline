@@ -155,11 +155,9 @@ _corpus_held: tuple[float, CorpusResponse] | None = None
 
 @router.get("/corpus", response_model=CorpusResponse)
 async def get_corpus(db: DbDep, settings: SettingsDep) -> CorpusResponse:
-    """What data has actually been aggregated. Useful before trusting a tier list.
-
-    Kept for `ttl_corpus` seconds: the tier list, the draft and every slice
-    control ask for it, and it took 0.57 s on production (2026-09-24).
-    """
+    """What data has actually been aggregated. Useful before trusting a tier list."""
+    # Kept for `ttl_corpus` seconds: the tier list, the draft and every slice
+    # control ask for it, and it took 0.57 s on production (2026-09-24).
     global _corpus_held
     now = time.monotonic()
     if _corpus_held is not None and now - _corpus_held[0] < settings.ttl_corpus:
