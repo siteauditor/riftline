@@ -65,6 +65,18 @@
        "title": "Source"
       },
       "description": "live (default) asks Riot where the cache is stale; stored reads storage only."
+     },
+     {
+      "name": "spare",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "boolean",
+       "description": "For the live renderer: answer from storage when the key is busy.",
+       "default": false,
+       "title": "Spare"
+      },
+      "description": "For the live renderer: answer from storage when the key is busy."
      }
     ],
     "responses": {
@@ -5670,6 +5682,28 @@
       "type": "boolean",
       "title": "Riot Key Configured"
      },
+     "riot_key_ok": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Riot Key Ok"
+     },
+     "riot_key_checked_at": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Riot Key Checked At"
+     },
      "static_data_version": {
       "anyOf": [
        {
@@ -9585,6 +9619,15 @@
         "type": "null"
        }
       ]
+     },
+     "source": {
+      "type": "string",
+      "enum": [
+       "live",
+       "stored"
+      ],
+      "title": "Source",
+      "default": "live"
      }
     },
     "type": "object",

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("app")
+
+# The same Riot failure is logged at most this often: a dead key fails every
+# lookup, and a log line per request buried everything else in it.
+OPERATOR_LOG_SECONDS = 60.0
 
 
 class RiotWaitBudget:
@@ -128,6 +133,21 @@ def create_app() -> FastAPI:
     def problem(status: int, detail: str, **extra) -> ORJSONResponse:
         return ORJSONResponse({"detail": detail, **extra}, status_code=status)
 
+    # The details below are what a visitor reads, so they say what happened in
+    # the site's words and never how to fix the server: pages told visitors to
+    # put a key in backend/.env until 2026-09-24. What the operator needs goes
+    # to the log instead, at most once a minute per kind, naming the host and
+    # never the URL, whose path carries a player's Riot ID.
+    last_logged: dict[str, float] = {}
+
+    def tell_operator(kind: str, message: str, exc: RiotApiError) -> None:
+        now = time.monotonic()
+        if now - last_logged.get(kind, -OPERATOR_LOG_SECONDS) < OPERATOR_LOG_SECONDS:
+            return
+        last_logged[kind] = now
+        host = urlsplit(exc.url).hostname if exc.url else None
+        log.warning("%s (%s)", message, host or "no host")
+
     @app.exception_handler(PlayerNotFound)
     async def _player_not_found(_: Request, exc: PlayerNotFound):
         return problem(404, str(exc))
@@ -144,19 +164,30 @@ def create_app() -> FastAPI:
     async def _riot_forbidden(_: Request, exc: RiotForbidden):
         # 403, not 503: the key works, this endpoint does not. Sending the
         # expired-key hint here would have people regenerating a fine key.
-        return problem(403, exc.message, hint="endpoint_unavailable")
+        tell_operator("forbidden", exc.message, exc)
+        return problem(403, "This lookup is not available right now.", hint="endpoint_unavailable")
 
     @app.exception_handler(RiotUnauthorized)
     async def _riot_unauthorized(_: Request, exc: RiotUnauthorized):
         # 503, not 401: the caller did nothing wrong, our key is the problem.
-        return problem(503, exc.message, hint="expired_api_key")
+        tell_operator(
+            "key",
+            "Riot rejected the API key. A development key expires 24 hours after it is "
+            "issued: see docs/deploy.md, 'Rotating the Riot key'",
+            exc,
+        )
+        return problem(
+            503,
+            "Live lookups are paused right now. Stored profiles and statistics still work.",
+            hint="expired_api_key",
+        )
 
     @app.exception_handler(RiotRateLimited)
     async def _riot_rate_limited(_: Request, exc: RiotRateLimited):
+        tell_operator("rate", f"Riot rate limit, {exc.scope} scope, {exc.retry_after:.0f}s", exc)
         response = problem(
             429,
-            "Riot rate limit reached. This is expected on a development key "
-            "(100 requests per 2 minutes).",
+            "Too many lookups at once. Try again in a few seconds.",
             retry_after=exc.retry_after,
             scope=exc.scope,
         )
@@ -165,15 +196,18 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RiotGone)
     async def _riot_gone(_: Request, exc: RiotGone):
-        return problem(410, exc.message)
+        tell_operator("gone", exc.message, exc)
+        return problem(410, "Riot no longer offers this lookup.")
 
     @app.exception_handler(RiotUnavailable)
     async def _riot_unavailable(_: Request, exc: RiotUnavailable):
+        tell_operator("unavailable", exc.message, exc)
         return problem(502, "Riot's API is not responding right now.")
 
     @app.exception_handler(RiotApiError)
     async def _riot_error(_: Request, exc: RiotApiError):
-        return problem(502, exc.message)
+        tell_operator("error", exc.message, exc)
+        return problem(502, "Riot's API answered with an error. Try again in a moment.")
 
     # --- routes ------------------------------------------------------------
     app.include_router(summoner_routes.router)
@@ -192,9 +226,14 @@ def create_app() -> FastAPI:
 
     @app.get("/api/health", response_model=HealthResponse, tags=["meta"])
     async def health(request: Request) -> HealthResponse:
+        riot = request.app.state.riot
         return HealthResponse(
             status="ok",
             riot_key_configured=settings.has_key,
+            riot_key_ok=riot.key_ok,
+            riot_key_checked_at=(
+                int(riot.key_checked_at * 1000) if riot.key_checked_at is not None else None
+            ),
             static_data_version=static_data.version,
             rate_limit=request.app.state.riot.limiter.snapshot(),
             spectator_enabled=settings.enable_spectator,

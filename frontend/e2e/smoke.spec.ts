@@ -417,7 +417,7 @@ async function mockHomePlayer(page: Page, asked: string[]) {
     plays_on: platform === 'euw1' ? null : 'euw1',
     plays_on_label: platform === 'euw1' ? null : 'EUW',
     identity_from_plays_on: platform !== 'euw1',
-    updated_at: null, ladder: null,
+    updated_at: null, ladder: null, source: 'live',
   })
   await page.route('**/api/summoner/**', async (route) => {
     const url = new URL(route.request().url())

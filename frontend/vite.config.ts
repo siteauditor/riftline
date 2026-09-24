@@ -31,7 +31,7 @@ export default defineConfig(({ isSsrBuild }) => ({
   },
   test: {
     environment: 'jsdom',
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'prerender/**/*.test.mjs'],
     css: false,
   },
 }))

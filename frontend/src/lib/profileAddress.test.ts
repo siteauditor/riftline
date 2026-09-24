@@ -21,6 +21,7 @@ const answer = (over: Partial<Profile> = {}): Profile => ({
   identity_from_plays_on: false,
   updated_at: null,
   ladder: null,
+  source: 'live',
   ...over,
 })
 

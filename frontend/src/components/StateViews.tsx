@@ -3,6 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { ApiError } from '../lib/api'
+import { operatorHint, publicErrorText } from '../lib/errors'
 
 export function Spinner({ label }: { label?: string }) {
   return (
@@ -139,54 +140,20 @@ export function ErrorView({
   context?: string
 }) {
   const api = error instanceof ApiError ? error : null
-
-  let title = 'Something went wrong'
-  let body = api?.message ?? 'An unexpected error occurred.'
-  let action: ReactNode = null
-
-  if (api?.kind === 'not_found' && context) {
-    title = 'No player found'
-    body = `${context} doesn't exist on that region. Check the tag after the # and the region, since the same name can exist on several regions with different tags.`
-  } else if (api?.kind === 'not_found') {
-    // Not every 404 is a missing player. The meta and draft endpoints answer
-    // 404 for "not enough data yet" and their own message already says what to
-    // do about it, so pass it through instead of guessing.
-    title = 'Nothing to show yet'
-    body = api.message
-  } else if (api?.kind === 'rate_limited') {
-    title = 'Riot rate limit reached'
-    body =
-      'A development key allows 100 requests every 2 minutes, and this lookup used them up. It clears on its own.'
-    action = api.retryAfter ? (
+  const { title, body } = publicErrorText(error, context)
+  const hint = operatorHint(error)
+  const action: ReactNode =
+    api?.kind === 'rate_limited' && api.retryAfter ? (
       <p className="text-sm text-ink-dim">
         Try again in <Countdown key={api.retryAfter} seconds={api.retryAfter} />
       </p>
     ) : null
-  } else if (api?.kind === 'expired_key') {
-    title = 'The API key needs renewing'
-    body =
-      'Riot development keys expire every 24 hours. Generate a new one at developer.riotgames.com, put it in backend/.env as RIOT_API_KEY, and restart the server.'
-  } else if (api?.kind === 'gone') {
-    title = 'Riot removed this endpoint'
-    body = api.message
-  } else if (api?.kind === 'unavailable') {
-    // Distinct from expired_key on purpose: the key is fine, so telling anyone
-    // to regenerate it would send them after the wrong problem.
-    title = 'Not available'
-    body = api.message
-  } else if (api?.kind === 'upstream' && (api.status === 504 || api.status === 524)) {
-    // A gateway gave up waiting for us. Blaming Riot here would be a guess.
-    title = 'That took too long'
-    body = 'The server did not answer in time. Try again in a moment.'
-  } else if (api?.kind === 'upstream') {
-    title = "Riot's API isn't responding"
-    body = "This is on Riot's side. It usually clears within a few minutes."
-  }
 
   return (
     <div className="accent-edge rounded-r-lg border-y border-r border-line bg-panel px-5 py-6">
       <h2 className="display text-xl font-700 text-ink">{title}</h2>
       <p className="mt-2 max-w-prose text-sm leading-relaxed text-ink-dim">{body}</p>
+      {hint && <p className="mt-2 max-w-prose text-xs text-ink-faint">Development: {hint}</p>}
       {action && <div className="mt-3">{action}</div>}
       {onRetry && (
         <Button variant="outline" size="sm" onClick={onRetry} className="mt-4 text-ink">

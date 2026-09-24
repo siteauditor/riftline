@@ -441,16 +441,18 @@ export const api = {
   method: () => request<MethodReport>('/api/method'),
 
   /** `source: 'stored'` answers from storage alone, with no Riot call and no
-   *  refresh: what the prerenderer asks for. */
+   *  refresh: what the prerenderer asks for. `spare` is the live renderer's:
+   *  storage too when the key is busy, said by the answer's `source`. */
   profile: (
     platform: string,
     name: string,
     tag: string,
-    opts: { refresh?: boolean; source?: 'stored' } = {},
+    opts: { refresh?: boolean; source?: 'stored'; spare?: boolean } = {},
   ) => {
     const params = new URLSearchParams()
     if (opts.refresh) params.set('refresh', 'true')
     if (opts.source) params.set('source', opts.source)
+    if (opts.spare) params.set('spare', 'true')
     const qs = params.toString()
     return request<Profile>(
       `/api/summoner/${enc(platform)}/${enc(name)}/${enc(tag)}${qs ? `?${qs}` : ''}`,

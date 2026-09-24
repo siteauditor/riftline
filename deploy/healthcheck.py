@@ -83,9 +83,13 @@ def main() -> int:
 
     body = ready or {}
     stored = matches()
+    # Whether Riot took the key on its latest answer; a process that has not
+    # asked Riot anything yet cannot say.
+    accepted = {True: "yes", False: "no, rotate it"}.get(body.get("riot_key_ok"), "not asked yet")
     print(
         "api ok"
         f" | riot key configured: {body.get('riot_key_configured')}"
+        f" | riot key accepted: {accepted}"
         f" | data dragon: {body.get('static_data_version')}"
         f" | spectator: {body.get('spectator_enabled')}"
         f" | matches stored: {stored if stored is not None else 'unknown'}"

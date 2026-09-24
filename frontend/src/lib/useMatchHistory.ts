@@ -26,11 +26,15 @@ export function useMatchHistory(
   {
     queue = null,
     champion = null,
+    source,
     enabled = true,
     placeholder,
   }: {
     queue?: number | null
     champion?: number | null
+    /** `stored` reads storage alone: the profile's fallback while Riot
+     *  cannot be asked. Its own key, so it never stands in for Riot's list. */
+    source?: 'stored'
     enabled?: boolean
     /** A first page to show until the real one loads: the prerendered
      *  profile's stored page, so the list is there before the fetch. */
@@ -40,12 +44,18 @@ export function useMatchHistory(
   const query = useInfiniteQuery({
     // The champion is last, so the unfiltered history keeps the key the live
     // page shares.
-    queryKey: champion
-      ? ['matches', platform, name, tag, queue, champion]
-      : ['matches', platform, name, tag, queue],
+    queryKey: [
+      'matches',
+      platform,
+      name,
+      tag,
+      queue,
+      ...(champion ? [champion] : []),
+      ...(source ? [source] : []),
+    ],
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
-      api.matches(platform, name, tag, { start: pageParam, count: MATCH_PAGE, queue, champion }),
+      api.matches(platform, name, tag, { start: pageParam, count: MATCH_PAGE, queue, champion, source }),
     getNextPageParam: (last, pages) =>
       last.has_more ? pages.length * MATCH_PAGE : undefined,
     enabled,

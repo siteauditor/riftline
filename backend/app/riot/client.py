@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Mapping
 from types import TracebackType
 from typing import Any
@@ -62,6 +63,12 @@ class RiotClient:
         self.api_key = api_key
         self.limiter = limiter or RateLimiter()
         self.max_retries = max_retries
+        # Whether Riot accepted the key on its latest answer, and when (epoch
+        # seconds). None until the first answer. /api/health reports it, so a
+        # page can say live data is paused before a visitor's lookup fails on
+        # it, and the deploy's health check prints it.
+        self.key_ok: bool | None = None
+        self.key_checked_at: float | None = None
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout),
             headers={
@@ -148,6 +155,7 @@ class RiotClient:
 
             await self.limiter.observe(method_key, response.headers)
             status = response.status_code
+            self._note_key(status, response.headers)
 
             if status == 200:
                 return response.json()
@@ -226,6 +234,18 @@ class RiotClient:
             f"Riot unreachable after {self.max_retries + 1} attempts: {last_error}",
             url=url,
         )
+
+    def _note_key(self, status: int, headers: Mapping[str, str]) -> None:
+        """What an answer says about the key. A 403 without rate-limit headers
+        is an endpoint refused at Riot's edge and says nothing about it, and
+        neither does a 5xx."""
+        if status in (401, 403) and (status == 401 or _has_rate_limit_headers(headers)):
+            self.key_ok = False
+        elif status < 500 and status not in (401, 403):
+            self.key_ok = True
+        else:
+            return
+        self.key_checked_at = time.time()
 
     @staticmethod
     async def _backoff(attempt: int) -> None:

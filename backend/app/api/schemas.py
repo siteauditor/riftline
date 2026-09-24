@@ -206,6 +206,9 @@ class ProfileResponse(BaseModel):
     # Epoch ms of the rank reading shown, so the page can say how old it is.
     updated_at: int | None = None
     ladder: LadderPositionOut | None = None
+    # "stored" when the answer was read from storage alone: asked for, or
+    # given to a render that found the key too busy to spend on it.
+    source: Literal["live", "stored"] = "live"
 
 
 class BadgeOut(BaseModel):
@@ -862,6 +865,13 @@ class RateLimitOut(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     riot_key_configured: bool
+    # Whether Riot accepted the key on its latest answer: null until the API
+    # has asked Riot anything since it started. A development key expires 24
+    # hours after it is issued, and this is how the page learns live data is
+    # paused without waiting for a lookup to fail.
+    riot_key_ok: bool | None = None
+    # Epoch ms of that answer.
+    riot_key_checked_at: int | None = None
     static_data_version: str | None = None
     rate_limit: RateLimitOut = Field(default_factory=RateLimitOut)
     spectator_enabled: bool = True
@@ -1009,6 +1019,7 @@ def to_profile(
     summoner: dict | None = None,
     read_at: int | None = None,
     ladder: LadderPositionOut | None = None,
+    source: Literal["live", "stored"] = "live",
 ) -> ProfileResponse:
     """The profile header for one view of a player.
 
@@ -1048,6 +1059,7 @@ def to_profile(
             else epoch_ms(player.league_fetched_at or player.summoner_fetched_at)
         ),
         ladder=ladder,
+        source=source,
     )
 
 

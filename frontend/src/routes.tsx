@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { RouteObject } from 'react-router-dom'
 
 import App from './App'
+import { api } from './lib/api'
 import { positionFromRole, sliceFromParams } from './lib/searchParams'
 import { CHAMPION_MIN_GAMES, DEFAULT_LADDER, queries, TIERLIST_MIN_GAMES } from './lib/queries'
 import NotFound, { RouteError } from './routes/NotFound'
@@ -105,11 +106,22 @@ export const routes: RouteObject[] = [
             queryClient.prefetchQuery(queries.profileStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.matchesStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.analyticsStored(platform, name, tag)),
-            live ? queryClient.prefetchQuery(current) : null,
+            // Under the page's own key, asked with `spare`: a crawler asking
+            // for every profile in a minute would otherwise spend the calls a
+            // visitor's search needs, so the API answers from storage when the
+            // key is busy, and says so.
+            live
+              ? queryClient.prefetchQuery({
+                  ...current,
+                  queryFn: () => api.profile(platform, name, tag, { spare: true }),
+                })
+              : null,
           ])
-          // Too slow, rate limited, or an expired key: the stored answer
-          // stands, as it does in the file, and the browser asks again.
-          if (queryClient.getQueryState(current.queryKey)?.status === 'error') {
+          // Too slow, rate limited, an expired key, or storage standing in for
+          // Riot: the stored answer stands, as it does in the file, and the
+          // browser asks Riot itself.
+          const state = queryClient.getQueryState(current.queryKey)
+          if (state?.status === 'error' || (state?.data && state.data.source !== 'live')) {
             queryClient.removeQueries({ queryKey: current.queryKey, exact: true })
           }
         }),

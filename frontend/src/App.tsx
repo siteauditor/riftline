@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
+import Hint from './components/Hint'
 import SearchBar from './components/SearchBar'
 import { api } from './lib/api'
 
@@ -133,10 +134,27 @@ export default function App() {
                 Patch {health.static_data_version}
               </span>
             )}
-            {health && !health.riot_key_configured && (
-              <span className="rounded-sm border border-loss/40 bg-loss-deep px-2 py-1 text-loss">
-                No API key
-              </span>
+            {/* Riot refused the key (or there is none): searches and live
+                pages will fail until it is rotated, and saying so up front
+                beats letting each visitor find out from a lookup. The exact
+                state is for whoever runs the server. */}
+            {health && (!health.riot_key_configured || health.riot_key_ok === false) && (
+              <Hint
+                text={
+                  import.meta.env.DEV
+                    ? health.riot_key_configured
+                      ? 'Riot rejected the API key. Put a new one in backend/.env and restart.'
+                      : 'RIOT_API_KEY is not set in backend/.env.'
+                    : 'Riftline cannot ask Riot for live data right now. Stored pages still work.'
+                }
+              >
+                <span
+                  tabIndex={0}
+                  className="rounded-sm border border-loss/40 bg-loss-deep px-2 py-1 text-loss"
+                >
+                  Live data paused
+                </span>
+              </Hint>
             )}
           </div>
         </div>

@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 import { api } from '../../lib/api'
 import { useSavedGroups } from '../../lib/groups'
+import { publicErrorText } from '../../lib/errors'
 
 /**
  * Put the player on this profile into one of the groups this browser can
@@ -33,11 +34,9 @@ export default function AddToGroup({
       setStatus({ slug, ok: true, text: `Added to ${name}.` })
       toast.success(`Added to ${name}`)
     } catch (error) {
-      setStatus({
-        slug,
-        ok: false,
-        text: error instanceof Error ? error.message : 'Could not add them.',
-      })
+      // The group's own answers ("already in this group") are its message;
+      // anything from Riot is said in the site's words.
+      setStatus({ slug, ok: false, text: publicErrorText(error).body })
     } finally {
       setBusy(null)
     }

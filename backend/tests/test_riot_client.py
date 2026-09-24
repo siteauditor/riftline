@@ -10,7 +10,13 @@ import pytest
 import respx
 
 from app.riot.client import RiotClient
-from app.riot.errors import RiotNotFound, RiotRateLimited, RiotUnauthorized, RiotUnavailable
+from app.riot.errors import (
+    RiotForbidden,
+    RiotNotFound,
+    RiotRateLimited,
+    RiotUnauthorized,
+    RiotUnavailable,
+)
 from app.riot.limiter import RateLimiter, SlidingWindow, parse_limit_header
 from app.riot.routing import Regional, UnknownPlatform, resolve_platform
 
@@ -222,6 +228,29 @@ async def test_active_region_without_an_answer_is_none():
     async with _client() as c:
         for _ in range(3):
             assert await c.active_region("P1", Regional.EUROPE) is None
+
+
+@respx.mock
+async def test_the_client_remembers_whether_riot_accepted_the_key():
+    respx.get(url__regex=r".*by-riot-id/Dead/.*").mock(
+        return_value=httpx.Response(401, headers={"X-App-Rate-Limit": "20:1"})
+    )
+    respx.get(url__regex=r".*by-riot-id/Edge/.*").mock(return_value=httpx.Response(403))
+    respx.get(url__regex=r".*by-riot-id/Live/.*").mock(
+        return_value=httpx.Response(200, json={"puuid": "P1"})
+    )
+    async with _client() as c:
+        assert c.key_ok is None and c.key_checked_at is None
+        with pytest.raises(RiotUnauthorized):
+            await c.account_by_riot_id("Dead", "0000", Regional.EUROPE)
+        assert c.key_ok is False and c.key_checked_at is not None
+        # Refused at Riot's edge, with no rate-limit headers: says nothing
+        # about the key either way.
+        with pytest.raises(RiotForbidden):
+            await c.account_by_riot_id("Edge", "0000", Regional.EUROPE)
+        assert c.key_ok is False
+        await c.account_by_riot_id("Live", "0000", Regional.EUROPE)
+        assert c.key_ok is True
 
 
 @respx.mock

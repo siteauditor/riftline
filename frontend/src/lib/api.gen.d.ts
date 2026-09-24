@@ -2093,6 +2093,10 @@ export interface components {
             status: string;
             /** Riot Key Configured */
             riot_key_configured: boolean;
+            /** Riot Key Ok */
+            riot_key_ok: boolean | null;
+            /** Riot Key Checked At */
+            riot_key_checked_at: number | null;
             /** Static Data Version */
             static_data_version: string | null;
             rate_limit: components["schemas"]["RateLimitOut"];
@@ -3693,6 +3697,12 @@ export interface components {
             /** Updated At */
             updated_at: number | null;
             ladder: components["schemas"]["LadderPositionOut"] | null;
+            /**
+             * Source
+             * @default live
+             * @enum {string}
+             */
+            source: "live" | "stored";
         };
         /**
          * PublishedComponentOut
@@ -4780,6 +4790,8 @@ export interface operations {
                 refresh?: boolean;
                 /** @description live (default) asks Riot where the cache is stale; stored reads storage only. */
                 source?: string;
+                /** @description For the live renderer: answer from storage when the key is busy. */
+                spare?: boolean;
             };
             header?: never;
             path: {

@@ -55,8 +55,11 @@ from app.api.schemas import (
 from app.api.schemas import ChampionRef as ChampionRefSchema
 from app.db.models import Match, MatchParticipant, RankHistory, utcnow
 from app.riot.errors import RiotForbidden
+from app.riot.limiter import SEARCH_RESERVE, wait_deadline
 from app.riot.routing import resolve_platform
+from app.services.ladders import LadderService
 from app.services.lanes import lane_labeler, lane_records
+from app.services.players import PlayerService
 from app.services.profile_stats import (
     MIN_SCORED_FOR_PROFILE,
     champion_totals,
@@ -64,6 +67,7 @@ from app.services.profile_stats import (
 )
 from app.services.reviews import LOWER_IS_BETTER, MIN_PROFILE_GAMES, review_profile
 from app.services.reviews import METRIC_LABELS as REVIEW_LABELS
+from app.services.static_data import StaticDataService
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +83,22 @@ PLATFORM_DESC = "Platform shard: na1, euw1, kr, eun1, br1, oc1, ..."
 SOURCE_DESC = "live (default) asks Riot where the cache is stale; stored reads storage only."
 SOURCE_PATTERN = "^(live|stored)$"
 
+# A page of live history, at most. Each game not yet stored is one call, so the
+# 100 the endpoint used to accept could spend 101 calls, the key's whole two
+# minutes, on one request. The page asks 20 at a time; the stored paths, which
+# cost nothing, still take up to 100.
+LIVE_PAGE_MAX = 20
+
+# Calls kept free when the live renderer asks for a profile (`spare`). 69
+# profiles are listed, each up to four calls when cold (account, region,
+# summoner, league), and a crawler can ask for all of them in a minute: the
+# render then answers from storage and leaves this many calls, the searches'
+# reserve and ten more, for the visitors behind it.
+RENDER_RESERVE = SEARCH_RESERVE + 10
+# How long a render's Riot calls may wait for the limiter, inside the
+# renderer's own three seconds (LIVE_BUDGET_MS in prerender/live.mjs).
+RENDER_WAIT_SECONDS = 2.5
+
 
 @router.get("/{platform}/{game_name}/{tag_line}", response_model=ProfileResponse)
 async def get_profile(
@@ -93,6 +113,10 @@ async def get_profile(
         description="Re-fetch from Riot, once the cached answer is at least a minute old.",
     ),
     source: str = Query("live", pattern=SOURCE_PATTERN, description=SOURCE_DESC),
+    spare: bool = Query(
+        False,
+        description="For the live renderer: answer from storage when the key is busy.",
+    ),
 ) -> ProfileResponse:
     """Profile header: level, icon, every ranked queue and the ladder position.
 
@@ -101,6 +125,37 @@ async def get_profile(
     stored nowhere), or a shard where it holds neither, answered with the
     home's data and ``plays_on`` so the page can move there.
     """
+    token = None
+    if spare and source != "stored":
+        if players.client.limiter.spare() < RENDER_RESERVE:
+            source = "stored"
+        else:
+            token = wait_deadline.set(
+                min(
+                    wait_deadline.get() or float("inf"),
+                    time.monotonic() + RENDER_WAIT_SECONDS,
+                )
+            )
+    try:
+        return await _profile(
+            platform, game_name, tag_line, players, ladders, sd, refresh=refresh, source=source
+        )
+    finally:
+        if token is not None:
+            wait_deadline.reset(token)
+
+
+async def _profile(
+    platform: str,
+    game_name: str,
+    tag_line: str,
+    players: PlayerService,
+    ladders: LadderService,
+    sd: StaticDataService,
+    *,
+    refresh: bool,
+    source: str,
+) -> ProfileResponse:
     summoner: dict | None = None
     read_at: int | None = None
     if source == "stored":
@@ -142,7 +197,14 @@ async def get_profile(
         else None
     )
     return to_profile(
-        player, ranks, sd, view, summoner=summoner, read_at=read_at, ladder=ladder
+        player,
+        ranks,
+        sd,
+        view,
+        summoner=summoner,
+        read_at=read_at,
+        ladder=ladder,
+        source="stored" if source == "stored" else "live",
     )
 
 
@@ -258,6 +320,7 @@ async def get_matches(
             stored_total=stored.total,
         )
 
+    count = min(count, LIVE_PAGE_MAX)
     # From the regional route of the shard shown: the home's for a URL that
     # named a shard the account does not play on, which read NA's route for
     # a EUW player and listed nothing.

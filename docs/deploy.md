@@ -328,7 +328,9 @@ no arbitrary command, no sha from outside `main`.
 Re-running an old deploy from the Actions tab deploys that old commit, which is
 the rollback.
 
-`deploy/healthcheck.py` waits for `/api/health` to say `ok`, then counts the
+`deploy/healthcheck.py` waits for `/api/health` to say `ok`, prints whether
+Riot accepted the key on its latest answer (`riot_key_ok`: "not asked yet" in
+a process that has not called Riot since it started), then counts the
 rows in the live database. The second half earns its keep: a container comes up
 perfectly healthy against an empty database, and the only symptom would be a
 site that looks right and shows nothing. `make health` runs the same check by
@@ -401,12 +403,15 @@ that work.
   2026-09-23.)
 - **Each kept build's files stay reachable.** The prerender job copies the
   build's hashed files (`dist/assets`) into `_shared/assets` in the pages
-  volume and lists them in the build's `_assets.json`, and nginx serves
-  `/assets/` from its own image first and from there second. A page served
-  from the edge cache, or a tab left open across a deploy, asks for the files
-  of the build that rendered it, which the new image no longer holds; without
-  them such a page arrived unstyled and without its script. A file goes when
-  no kept build names it, so the folder holds two builds' files at most.
+  volume and names them in the build's record, `_shared/builds/<id>.json`,
+  and nginx serves `/assets/` from its own image first and from there
+  second. A page served from a cache, or a tab left open across a deploy,
+  asks for the files of the build that rendered it, which the new image no
+  longer holds; without them such a page arrived unstyled and without its
+  script. The records of the current build, the two newest others and every
+  build rendered in the last week are kept (`frontend/prerender/retention.mjs`),
+  and a file goes when no kept record names it. Page folders are still two:
+  the current build's and the one before.
 - **The order of a deploy**: build, start the api, migrate, **prerender**,
   then start the web container. The prerender is fatal on purpose: a build
   that cannot render its pages is not switched to, and the web container
@@ -452,6 +457,12 @@ rule is added by hand, after a deploy that includes the kept files above:
   `(http.host eq "www.rhasta.space" and not starts_with(http.request.uri.path, "/api/"))`
 - Cache eligibility: **Eligible for cache**. Edge TTL: **Use cache-control
   header if present, bypass cache if not**. Browser TTL: **Respect origin**.
+- Caching > Configuration > Browser Cache TTL: **Respect existing headers**.
+  With a zone TTL set there, Cloudflare rewrote every page's `max-age=0` to
+  `max-age=14400` (measured 2026-09-24), so a browser kept a page four hours
+  and could ask for files of a build no longer kept. Check with
+  `curl -sI https://www.rhasta.space/tierlist | grep -i cache-control`, which
+  should show `max-age=0`.
 
 What the origin says then decides everything: the shell, which answers any
 path that has no page, is `no-store` and never held; a profile from the live

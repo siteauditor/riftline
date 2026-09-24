@@ -199,6 +199,7 @@ jobs:
             set -e
             test -s /pages/ci/_assets.json
             test -n "$(ls /pages/_shared/assets)"
+            grep -q "\"id\":\"ci\"" /pages/_shared/builds/ci.json
             echo kept > /pages/_shared/assets/kept-ci.js'
           curl -sf -D headers.txt -o /dev/null http://127.0.0.1:6124/assets/kept-ci.js
           grep -qi '^cache-control: public, max-age=31536000, immutable' headers.txt

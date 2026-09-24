@@ -78,15 +78,42 @@ async def test_bad_platform_is_rejected_with_the_valid_list(client):
     assert "na1" in response.json()["detail"]
 
 
+# What a visitor must never be told: how to fix the server. Pages said "put a
+# key in backend/.env as RIOT_API_KEY" to anyone until 2026-09-24.
+OPERATOR_WORDS = ("RIOT_API_KEY", "backend/.env", "developer.riotgames", "development key", "24 hours")
+
+
 @respx.mock
-async def test_expired_key_surfaces_as_an_actionable_503(client):
+async def test_expired_key_surfaces_as_a_503_in_the_sites_words(client):
     """A dead key gets 401 from Riot, verified live. See test_riot_client."""
     respx.get(url__regex=r".*").mock(return_value=httpx.Response(401))
     response = await client.get("/api/summoner/euw1/Caps/EUW")
     assert response.status_code == 503
     body = response.json()
     assert body["hint"] == "expired_api_key"
-    assert "24 hours" in body["detail"]
+    assert body["detail"].startswith("Live lookups are paused")
+    assert not any(word in body["detail"] for word in OPERATOR_WORDS)
+
+
+@respx.mock
+async def test_the_health_answer_says_whether_riot_accepts_the_key(client):
+    from app.main import app
+
+    app.state.riot.key_ok = None
+    app.state.riot.key_checked_at = None
+    before = (await client.get("/api/health")).json()
+    assert (before["riot_key_ok"], before["riot_key_checked_at"]) == (None, None)
+
+    respx.get(url__regex=r".*").mock(return_value=httpx.Response(401))
+    await client.get("/api/summoner/euw1/Caps/EUW")
+    dead = (await client.get("/api/health")).json()
+    assert dead["riot_key_ok"] is False
+    assert isinstance(dead["riot_key_checked_at"], int)
+
+    respx.routes.clear()
+    mock_riot()
+    await client.get("/api/summoner/euw1/Caps/EUW")
+    assert (await client.get("/api/health")).json()["riot_key_ok"] is True
 
 
 @respx.mock
@@ -102,7 +129,7 @@ async def test_a_withdrawn_endpoint_does_not_blame_the_users_key(client):
     assert response.status_code == 403
     body = response.json()
     assert body["hint"] == "endpoint_unavailable"
-    assert "24 hours" not in body["detail"]
+    assert not any(word in body["detail"] for word in OPERATOR_WORDS)
 
 
 @respx.mock
@@ -114,6 +141,45 @@ async def test_rate_limit_is_reported_with_a_retry_after(client):
     assert response.status_code == 429
     assert response.headers["Retry-After"] == "7"
     assert response.json()["retry_after"] == pytest.approx(7.0)
+    assert not any(word in response.json()["detail"] for word in OPERATOR_WORDS)
+
+
+@respx.mock
+async def test_a_live_history_page_is_twenty_games_however_many_are_asked(client):
+    """Each game not yet stored is a call, so `count=100` could spend 101 calls
+    of the key's 100 in two minutes on one request."""
+    ids = respx.get(url__regex=r".*/lol/match/v5/matches/by-puuid/.*/ids.*").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    mock_riot()
+    response = await client.get("/api/summoner/euw1/Caps/EUW/matches?count=100")
+    assert response.status_code == 200
+    assert response.json()["count"] == 20
+    assert ids.calls.last.request.url.params["count"] == "20"
+
+
+@respx.mock
+async def test_a_render_that_finds_the_key_busy_answers_from_storage(client, monkeypatch):
+    """The live renderer asks with `spare`: below the reserve, the profile is
+    the stored one, says so, and costs no call."""
+    from app.api.routes.summoner import RENDER_RESERVE
+    from app.main import app
+
+    mock_riot()
+    first = await client.get("/api/summoner/euw1/Caps/EUW")
+    assert first.json()["source"] == "live"
+    calls = len(respx.calls)
+
+    monkeypatch.setattr(app.state.riot.limiter, "spare", lambda: RENDER_RESERVE - 1)
+    busy = await client.get("/api/summoner/euw1/Caps/EUW?spare=true")
+    assert busy.status_code == 200
+    assert busy.json()["source"] == "stored"
+    assert busy.json()["riot_id"] == "Caps#EUW"
+    assert len(respx.calls) == calls
+
+    monkeypatch.setattr(app.state.riot.limiter, "spare", lambda: RENDER_RESERVE)
+    free = await client.get("/api/summoner/euw1/Caps/EUW?spare=true")
+    assert free.json()["source"] == "live"
 
 
 # ------------------------------------------------------- riot id folding

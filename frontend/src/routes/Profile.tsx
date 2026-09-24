@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import AnalyticsPanel from '../components/AnalyticsPanel'
@@ -21,9 +21,10 @@ import { api, type Analytics, type Profile as ProfileData } from '../lib/api'
 import { useNow } from '../lib/clock'
 import { profileSummary } from '../lib/prose'
 import { queries } from '../lib/queries'
-import { canonicalPlatform, movedFrom, profileRedirect, summonerPath } from '../lib/profileAddress'
+import { canonicalPlatform, summonerPath } from '../lib/profileAddress'
+import { publicErrorText } from '../lib/errors'
 import { heads } from '../lib/seo'
-import { useMatchHistory } from '../lib/useMatchHistory'
+import { useProfileData } from '../lib/useProfileData'
 import {
   compact,
   ordinal,
@@ -34,8 +35,7 @@ import {
   timeAgo,
   winRateColor,
 } from '../lib/format'
-import { intParam, useHydrated, useHydratedSearchParams, withParams } from '../lib/searchParams'
-import { rememberSearch } from '../lib/storage'
+import { intParam, useHydratedSearchParams, withParams } from '../lib/searchParams'
 import { Chip, ChipGroup } from '@/components/ui/chips'
 import Hint from '../components/Hint'
 
@@ -51,10 +51,6 @@ const QUEUE_FILTERS = [
   { id: 480, label: 'Swiftplay' },
   { id: 450, label: 'ARAM' },
 ]
-
-// The analytics endpoint's ceiling, and the key the champions tab and the
-// mastery page already use, so the three share one stored-games answer.
-const PLAYED_LIMIT = 1000
 
 // Matches the server's refresh floor (REFRESH_FLOOR_SECONDS): an Update inside
 // it would be answered from the cache, so the button waits it out instead of
@@ -92,119 +88,21 @@ export default function Profile() {
   const setFilter = (patch: { queue?: number | null; champion?: number | null }) =>
     setSearch((prev) => withParams(prev, patch), { replace: true })
   const queryClient = useQueryClient()
-
-  // A prerendered profile carries the answers storage gave the prerenderer,
-  // under keys of their own (`queries.*Stored`). Each live query shows that
-  // answer as its placeholder: the page is complete on first render, the
-  // same on the server and in the browser, and moves to Riot's fresher
-  // answer when it arrives. A profile that was not prerendered has no such
-  // entries and loads as it always did.
-  const profileQuery = useQuery({
-    ...queries.profile(platform, name, tag),
-    placeholderData: () =>
-      queryClient.getQueryData(queries.profileStored(platform, name, tag).queryKey),
-  })
-
-  // Riot's answer, not the stored one standing in for it.
-  const live = profileQuery.isPlaceholderData ? undefined : profileQuery.data
-  const hydrated = useHydrated()
-  const location = useLocation()
-  const navigate = useNavigate()
-
-  // Remembered only once Riot has answered, so a mistyped ID never becomes a
-  // "recent" search: the stored answer a prerendered page opens with is not
-  // one. Stored with the name as Riot spells it, not as typed, and under the
-  // address the page settles on.
-  useEffect(() => {
-    if (!live?.game_name || !live.tag_line) return
-    rememberSearch({
-      platform: canonicalPlatform(live),
-      gameName: live.game_name,
-      tagLine: live.tag_line,
-      iconUrl: live.profile_icon_url,
-    })
-  }, [live])
-
-  // One address per player. A shard the account holds nothing on moves to
-  // its home (a view of NA for a EUW player used to be the page that deleted
-  // their rank), and an alias or another spelling moves to the canonical
-  // address. After hydration, so a prerendered page hydrates as the HTML it
-  // was served, and on Riot's answer only. The answer is seeded under the new
-  // address, so the page there does not ask again.
-  useEffect(() => {
-    if (!hydrated || !live) return
-    const move = profileRedirect({
-      params: { platform, name, tag },
-      search: location.search,
-      profile: live,
-      state: location.state,
-    })
-    if (!move) return
-    const { seed } = move
-    queryClient.setQueryData(queries.profile(seed.platform, seed.name, seed.tag).queryKey, seed.profile)
-    navigate(move.to, { replace: true, state: move.state })
-  }, [hydrated, live, platform, name, tag, location.search, location.state, queryClient, navigate])
-  // History state is the browser's alone, so it is read once the page is hydrated.
-  const movedFromLabel = hydrated ? movedFrom(location.state) : null
-  // While a move is pending, nothing is asked under the address being left:
-  // the history of a view of NA was fetched twice, once there and once at
-  // the EUW address it moved to.
-  const moving =
-    hydrated &&
-    live !== undefined &&
-    profileRedirect({ params: { platform, name, tag }, search: location.search, profile: live, state: location.state }) !== null
-
-  // The live page reads the same history, so the query lives in one hook: two
-  // configurations of one cache key is a race between whichever page mounts
-  // first.
-  const { query: matchesQuery, matches } = useMatchHistory(platform, name, tag, {
-    queue,
-    champion: championFilter,
-    enabled: profileQuery.isSuccess && !moving,
-    // The stored page is the unfiltered one.
-    placeholder:
-      queue === null && championFilter === null
-        ? () => queryClient.getQueryData(queries.matchesStored(platform, name, tag).queryKey)
-        : undefined,
-  })
-  const stored = matchesQuery.data?.pages[0]?.source === 'stored'
-  const storedTotal = matchesQuery.data?.pages[0]?.stored_total ?? null
-
-  // As with the header: when the live history fails on a prerendered page,
-  // the stored games it was rendered with stay on screen under a line that
-  // says so, rather than an error where the games were. Only for the
-  // unfiltered list, which is the one that was stored.
-  const storedPage =
-    matchesQuery.isError && matches.length === 0 && queue === null && championFilter === null
-      ? queryClient.getQueryData(queries.matchesStored(platform, name, tag).queryKey)
-      : undefined
-  const rows = storedPage?.matches ?? matches
-
-  // The champions this player has stored games on, for the champion filter.
-  // Storage only, so it costs no Riot call.
-  const playedQuery = useQuery({
-    queryKey: ['analytics', platform, name, tag, { queue: null, limit: PLAYED_LIMIT }],
-    queryFn: () => api.analytics(platform, name, tag, { queue: null, limit: PLAYED_LIMIT }),
-    enabled: profileQuery.isSuccess && !moving,
-    retry: false,
-  })
-
-  // Read after the history, not beside it. The analytics describe stored games,
-  // and loading history is what stores them: on a first visit, asked in
-  // parallel, they described nothing. Keyed on when the history last loaded,
-  // so every new page is reflected, with the previous answer held meanwhile.
-  //
-  // Not while the history is still the placeholder: that would describe the
-  // stored games before the live page has been stored, and ask again a
-  // moment later. The stored analytics stand in until then.
-  const analyticsQuery = useQuery({
-    queryKey: ['analytics', platform, name, tag, matchesQuery.dataUpdatedAt],
-    queryFn: () => api.analytics(platform, name, tag),
-    enabled: matchesQuery.isSuccess && !matchesQuery.isPlaceholderData,
-    placeholderData: (previous) =>
-      previous ?? queryClient.getQueryData(queries.analyticsStored(platform, name, tag).queryKey),
-    retry: false,
-  })
+  const {
+    profileQuery,
+    storedMode,
+    storedProfile,
+    storedProfilePending,
+    movedFromLabel,
+    matchesQuery,
+    matches,
+    rows,
+    storedList: stored,
+    storedTotal,
+    storedPage,
+    playedQuery,
+    analytics,
+  } = useProfileData(platform, name, tag, { queue, champion: championFilter })
 
   // The header's art is the champion they play most, from the games we hold:
   // the subject of the page rather than a backdrop.
@@ -216,7 +114,7 @@ export default function Profile() {
   const championName =
     champions.data?.champions.find((c) => c.id === championFilter)?.name ?? 'this champion'
 
-  if (profileQuery.isLoading) {
+  if (profileQuery.isPending || (storedMode && !profileQuery.data && storedProfilePending)) {
     return (
       <>
         <Head {...heads.profile(`${name}#${tag}`, platform)} />
@@ -225,10 +123,9 @@ export default function Profile() {
     )
   }
 
-  // The stored answer a prerendered page carries outlives a failed live
-  // fetch: Riot being down, or a key that has expired, is worth a line over
-  // the page, not a blank page over data we hold.
-  const storedProfile = queryClient.getQueryData(queries.profileStored(platform, name, tag).queryKey)
+  // The stored answer outlives a failed live fetch: Riot being down, or a key
+  // that has expired, is worth a line over the page, not a blank page over
+  // data we hold.
   if (profileQuery.isError && !storedProfile) {
     return (
       <div className="mx-auto max-w-[1280px] px-4 py-10">
@@ -248,7 +145,7 @@ export default function Profile() {
   const headline = profile.ranks.find((r) => r.tier) ?? null
   const accent = tierColor(headline?.tier)
   const player = { platform, name, tag }
-  const topChampion = analyticsQuery.data?.champions[0]?.champion.id
+  const topChampion = analytics?.champions[0]?.champion.id
   const heroArt =
     champions.data?.champions.find((c) => c.id === topChampion)?.art_url ?? null
 
@@ -270,7 +167,7 @@ export default function Profile() {
   const ranks = profile.ranks.length > 0 ? profile.ranks : [UNRANKED_SOLO]
   const riotName = profile.game_name ?? name
   const riotTag = profile.tag_line ?? tag
-  const summary = profileSummary(profile, analyticsQuery.data)
+  const summary = profileSummary(profile, analytics)
 
   return (
     <div style={{ '--accent': accent } as CSSProperties}>
@@ -342,7 +239,7 @@ export default function Profile() {
           no avatar, "Level -" and "Unranked this season": three blanks that
           looked like facts about the player rather than about the search.
         */}
-        {profileQuery.isError && !profileQuery.data && (
+        {storedMode && (
           <p className="accent-edge mb-5 py-2 pl-4 text-sm leading-relaxed text-ink-dim">
             <span className="text-ink">Live data is unavailable right now.</span> This is the
             profile as Riftline last stored it.{' '}
@@ -434,9 +331,7 @@ export default function Profile() {
 
             {matches.length > 0 && <FormStrip matches={matches} />}
 
-            {analyticsQuery.data && (
-              <StrengthsPanel profiles={analyticsQuery.data.score_profile} />
-            )}
+            {analytics && <StrengthsPanel profiles={analytics.score_profile} />}
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
               <ChipGroup label="Queue">
@@ -484,7 +379,7 @@ export default function Profile() {
               </p>
             )}
 
-            {matchesQuery.isLoading && <MatchListSkeleton />}
+            {matchesQuery.isPending && <MatchListSkeleton />}
 
             {matchesQuery.isError && !storedPage && (
               <ErrorView
@@ -560,11 +455,11 @@ export default function Profile() {
             {ranks.map((r) => (
               <RankCard key={r.queue} rank={r} player={r.tier ? player : undefined} />
             ))}
-            <AnalyticsPanel data={analyticsQuery.data} />
-            <ReviewPanel review={analyticsQuery.data?.review} lanes={analyticsQuery.data?.lanes} />
-            {analyticsQuery.data && (
+            <AnalyticsPanel data={analytics} />
+            <ReviewPanel review={analytics?.review} lanes={analytics?.lanes} />
+            {analytics && (
               <MostPlayed
-                analytics={analyticsQuery.data}
+                analytics={analytics}
                 championsPath={summonerPath(platform, name, tag, 'champions')}
               />
             )}
@@ -638,7 +533,7 @@ function UpdateControl({
     try {
       await onUpdate()
     } catch (error) {
-      setFailed(error instanceof Error ? error.message : 'The update failed.')
+      setFailed(publicErrorText(error).title)
     } finally {
       setBusy(false)
     }

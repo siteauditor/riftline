@@ -84,8 +84,13 @@ async function renderProfile(pathname, indexable) {
   if (live) liveInFlight += 1
   try {
     const rendered = await build.render(pathname, { noindex: !indexable, live })
+    // Live only when Riot answered: a busy key answers from storage, and the
+    // route drops that answer, but the header must never say `live` for it.
     const fresh = Boolean(
-      rendered.state?.queries?.some((q) => q.queryKey?.[0] === 'profile' && q.state?.status === 'success'),
+      rendered.state?.queries?.some(
+        (q) =>
+          q.queryKey?.[0] === 'profile' && q.state?.status === 'success' && q.state?.data?.source === 'live',
+      ),
     )
     return { rendered, fresh }
   } finally {
