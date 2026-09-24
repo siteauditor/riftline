@@ -24,6 +24,7 @@ export default function SelectField({
   options,
   disabled,
   className,
+  labelClassName,
   triggerClassName,
   contentClassName,
   bare = false,
@@ -36,6 +37,9 @@ export default function SelectField({
   options: SelectOption[]
   disabled?: boolean
   className?: string
+  /** For a label that reads only to a screen reader on a narrow screen
+   *  (`max-sm:sr-only`), where the control's own value says enough. */
+  labelClassName?: string
   triggerClassName?: string
   contentClassName?: string
   /** No border and no ground: for a select set into a frame of its own, like the search bar's region. */
@@ -45,7 +49,7 @@ export default function SelectField({
   return (
     <div className={cn('flex items-center gap-2 text-ink-dim', className)}>
       {label && (
-        <label htmlFor={id} className="text-xs text-ink-faint">
+        <label htmlFor={id} className={cn('text-xs text-ink-faint', labelClassName)}>
           {label}
         </label>
       )}

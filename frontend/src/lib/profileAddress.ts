@@ -25,6 +25,9 @@ export function summonerPath(platform: string, name: string, tag: string, tab?: 
   return tab ? `${base}/${tab}` : base
 }
 
+/** The id a game's row carries on a profile, which the form strip's bars name. */
+export const gameAnchor = (matchId: string) => `game-${matchId}`
+
 /** The shard whose page this is: the second shard shown, or the home. */
 export function canonicalPlatform(profile: Pick<Profile, 'shard' | 'platform' | 'home_platform'>): string {
   return profile.shard === 'second' ? profile.platform : profile.home_platform

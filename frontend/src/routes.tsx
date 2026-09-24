@@ -106,6 +106,10 @@ export const routes: RouteObject[] = [
             queryClient.prefetchQuery(queries.profileStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.matchesStored(platform, name, tag)),
             queryClient.prefetchQuery(queries.analyticsStored(platform, name, tag)),
+            // The static champion list, for the header's art: the player's
+            // most played champion, which was missing from the HTML and
+            // appeared only once the script had run.
+            queryClient.prefetchQuery(queries.champions()),
             // Under the page's own key, asked with `spare`: a crawler asking
             // for every profile in a minute would otherwise spend the calls a
             // visitor's search needs, so the API answers from storage when the

@@ -9,6 +9,7 @@ import {
   scoreColor,
 } from '../lib/format'
 import TimeAgo from './TimeAgo'
+import { gameAnchor } from '../lib/profileAddress'
 import Hint from './Hint'
 
 /**
@@ -36,9 +37,11 @@ interface Props {
   matches: MatchSummary[]
   /** The queues the list covers, for the heading. */
   scope?: QueueScope | null
+  /** A bar picked: the page opens that game's row below. */
+  onPick?: (matchId: string) => void
 }
 
-export default function FormStrip({ matches, scope }: Props) {
+export default function FormStrip({ matches, scope, onPick }: Props) {
   const [hovered, setHovered] = useState<number | null>(null)
 
   // Oldest on the left: the strip reads as a timeline.
@@ -91,7 +94,8 @@ export default function FormStrip({ matches, scope }: Props) {
         </div>
       </div>
 
-      <div className="mt-3 flex h-16 items-end gap-[3px]">
+      {/* 48px on a phone: every pixel above the first game counts there. */}
+      <div className="mt-3 flex h-12 items-end gap-[3px] sm:h-16">
         {games.map((game, i) => {
           const kda =
             game.deaths === 0 ? KDA_CEILING : (game.kills + game.assists) / game.deaths
@@ -109,6 +113,8 @@ export default function FormStrip({ matches, scope }: Props) {
               onMouseLeave={() => setHovered(null)}
               onFocus={() => setHovered(i)}
               onBlur={() => setHovered(null)}
+              onClick={() => onPick?.(game.match_id)}
+              aria-controls={onPick ? gameAnchor(game.match_id) : undefined}
               aria-label={
                 `${game.win ? 'Win' : 'Loss'} as ${game.champion.name}, ` +
                 `${game.kills}/${game.deaths}/${game.assists}` +
@@ -168,8 +174,8 @@ export default function FormStrip({ matches, scope }: Props) {
                 ? 'Bar height is KDA: none of these games can be scored.'
                 : `Bar height is the Riftline score, or KDA on the ${
                     games.length - scored
-                  } game${games.length - scored === 1 ? '' : 's'} it is withheld for.`}{' '}
-            Hover a game for detail.
+                  } game${games.length - scored === 1 ? '' : 's'} it is withheld for.`}
+            {onPick ? ' Pick a bar to open that game.' : ''}
           </span>
         )}
       </div>

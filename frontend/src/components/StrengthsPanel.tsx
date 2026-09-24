@@ -20,7 +20,14 @@ import Hint from './Hint'
  * that one game moves an average by ten points, which describes the last game
  * rather than the player, so the panel says how many there are and stops.
  */
-export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfile[] }) {
+export default function StrengthsPanel({
+  profiles,
+  layout = 'wide',
+}: {
+  profiles: RoleScoreProfile[]
+  /** `rail`: stacked for the profile's 280px column, every part shown. */
+  layout?: 'wide' | 'rail'
+}) {
   const ready = profiles.filter((p) => p.enough)
   const [picked, setPicked] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -40,6 +47,44 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
 
   const role = ready.find((p) => p.position === picked) ?? ready[0]
   const claim = strengthsClaim(role.components)
+  const sentence =
+    claim ?? `Every part sits between ${WEAK_TO} and ${STRONG_FROM}, where a gap between two is noise.`
+
+  if (layout === 'rail') {
+    return (
+      <section className="frame">
+        <header className="space-y-2 border-b border-line-soft px-4 py-2.5">
+          <h2 className="eyebrow">How they play {positionLabel(role.position)}</h2>
+          {ready.length > 1 && <RoleChips ready={ready} role={role} onPick={setPicked} />}
+        </header>
+        <div className="space-y-3 px-4 py-3">
+          <p className="flex items-baseline gap-3">
+            <CountUp
+              value={role.avg_score}
+              format={(n) => n.toFixed(1)}
+              className="tnum display text-4xl font-700 leading-none"
+              style={{ color: scoreColor(role.avg_score) }}
+            />
+            <span className="text-xs leading-snug text-ink-faint">
+              average of {role.scored_games} scored games, {role.avg_placement.toFixed(1)} of 10 in the
+              lobby, {role.mvp} MVP, {role.ace} ACE
+            </span>
+          </p>
+          <p className="text-sm text-ink">{sentence}</p>
+          <ul className="space-y-2">
+            {role.components.map((c) => (
+              <ComponentBar key={c.id} component={c} narrow />
+            ))}
+          </ul>
+        </div>
+        <p className="border-t border-line-soft px-4 py-2 text-xs leading-relaxed text-ink-faint">
+          Each bar is where a typical game of theirs lands among
+          {role.sample ? ` ${role.sample.toLocaleString('en-US')} ` : ' the '}
+          {positionLabel(role.position).toLowerCase()} games Riftline holds, with 50 in the middle.
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section className="frame">
@@ -47,22 +92,7 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
         <h2 className="eyebrow">
           How they play {positionLabel(role.position)}
         </h2>
-        {ready.length > 1 && (
-          <ChipGroup label="Role" className="gap-1">
-            {ready.map((p) => (
-              <Chip
-                key={p.position}
-                size="sm"
-                active={p.position === role.position}
-                onClick={() => setPicked(p.position)}
-                title={`${positionLabel(p.position)}, ${p.scored_games} scored games`}
-              >
-                <PositionIcon position={p.position} className="size-3.5" />
-                {positionLabel(p.position)}
-              </Chip>
-            ))}
-          </ChipGroup>
-        )}
+        {ready.length > 1 && <RoleChips ready={ready} role={role} onPick={setPicked} />}
       </header>
 
       {/*
@@ -96,10 +126,7 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
         </div>
 
         <div className="min-w-0">
-          <p className="text-sm text-ink">
-            {claim ??
-              `Every part sits between ${WEAK_TO} and ${STRONG_FROM}, where a gap between two is noise.`}
-          </p>
+          <p className="text-sm text-ink">{sentence}</p>
           <ul className={`${expanded ? '' : 'hidden'} mt-3 space-y-2 sm:block`}>
             {role.components.map((c) => (
               <ComponentBar key={c.id} component={c} />
@@ -111,7 +138,7 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
             aria-expanded={expanded}
             className="mt-2 text-xs text-ink-dim underline decoration-line underline-offset-2 hover:text-ink sm:hidden"
           >
-            {expanded ? 'Show less' : 'Show all six'}
+            {expanded ? 'Show less' : `Show all ${role.components.length}`}
           </button>
         </div>
       </div>
@@ -128,7 +155,41 @@ export default function StrengthsPanel({ profiles }: { profiles: RoleScoreProfil
   )
 }
 
-function ComponentBar({ component }: { component: RoleScoreProfile['components'][number] }) {
+function RoleChips({
+  ready,
+  role,
+  onPick,
+}: {
+  ready: RoleScoreProfile[]
+  role: RoleScoreProfile
+  onPick: (position: string) => void
+}) {
+  return (
+    <ChipGroup label="Role" className="gap-1">
+      {ready.map((p) => (
+        <Chip
+          key={p.position}
+          size="sm"
+          active={p.position === role.position}
+          onClick={() => onPick(p.position)}
+          title={`${positionLabel(p.position)}, ${p.scored_games} scored games`}
+        >
+          <PositionIcon position={p.position} className="size-3.5" />
+          {positionLabel(p.position)}
+        </Chip>
+      ))}
+    </ChipGroup>
+  )
+}
+
+function ComponentBar({
+  component,
+  narrow = false,
+}: {
+  component: RoleScoreProfile['components'][number]
+  /** In the 280px rail, where a 9rem label left the bar 50px. */
+  narrow?: boolean
+}) {
   const value = Math.round(component.avg_percentile * 100)
   // Gold for a real strength, red for a real weakness, grey for the middle:
   // the bands the sentence above claims by (`strengths.ts`).
@@ -141,7 +202,9 @@ function ComponentBar({ component }: { component: RoleScoreProfile['components']
     <Hint text={component.measures}>
     <li
       tabIndex={0}
-      className="grid grid-cols-[6.5rem_1fr_2rem] items-center gap-3 outline-none sm:grid-cols-[9rem_1fr_2rem]"
+      className={`grid items-center gap-3 outline-none ${
+        narrow ? 'grid-cols-[7.5rem_1fr_2rem]' : 'grid-cols-[6.5rem_1fr_2rem] sm:grid-cols-[9rem_1fr_2rem]'
+      }`}
     >
       <span className="truncate text-xs text-ink-dim">{component.label}</span>
       <span className="relative h-1.5 rounded-full bg-raised" aria-hidden>

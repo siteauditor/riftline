@@ -1,4 +1,7 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import { devices, expect, test, type Locator, type Page } from '@playwright/test'
+
+import type { MatchSummary } from '../src/lib/api'
+import { game } from '../src/test/fixtures/profile'
 
 /**
  * What must hold on any corpus, including the empty one CI runs with: the
@@ -407,7 +410,7 @@ test('an unknown path is the app saying not found, not a blank shell', async ({ 
  * address rules run on any corpus and never reach Riot. `asked` records every
  * summoner request, to prove nothing is asked under an address being left.
  */
-async function mockHomePlayer(page: Page, asked: string[]) {
+async function mockHomePlayer(page: Page, asked: string[], games: MatchSummary[] = []) {
   const profile = (platform: string, label: string) => ({
     puuid: 'mover', game_name: 'Mover', tag_line: 'EUW', riot_id: 'Mover#EUW',
     platform, platform_label: label,
@@ -427,7 +430,7 @@ async function mockHomePlayer(page: Page, asked: string[]) {
     const platform = shard === 'euw' ? 'euw1' : shard
     const json =
       rest === 'matches'
-        ? { puuid: 'mover', matches: [], start: 0, count: 20, has_more: false, source: 'riot', stored_total: null }
+        ? { puuid: 'mover', matches: games, start: 0, count: 20, has_more: false, source: 'riot', stored_total: null }
         : rest === 'analytics'
           ? {
               puuid: 'mover', basis: 'stored_matches', games_analysed: 0, roles: [], classes: [],
@@ -480,4 +483,46 @@ test('a player with no ranked games is offered every queue, and the chips move t
   // Ranked first, then every queue: the history and the numbers asked alike.
   expect(asked.some((a) => a.includes('/matches') && a.includes('scope=ranked'))).toBe(true)
   expect(asked.some((a) => a.includes('/analytics') && a.includes('scope=all'))).toBe(true)
+})
+
+// Games first: the first game is on the first screen at every width, and the
+// rail beside the games does not stick. On a 412x839 phone the first game sat
+// at 1,128px (2026-09-24).
+// A device's browser type cannot be set in a describe group: the rest can.
+const { defaultBrowserType: _browser, ...pixel7 } = devices['Pixel 7']
+
+for (const [label, options] of [
+  ['a 412x839 phone', pixel7],
+  ['a 768x1024 tablet', { viewport: { width: 768, height: 1024 } }],
+  ['a 1024x768 laptop', { viewport: { width: 1024, height: 768 } }],
+  ['a 1440x900 desktop', { viewport: { width: 1440, height: 900 } }],
+] as const) {
+  test.describe(`on ${label}`, () => {
+    test.use(options)
+
+    test("a profile's first game is on the first screen, and the rail does not stick", async ({ page }) => {
+      await mockHomePlayer(page, [], [game(1), game(2), game(3)])
+      await open(page, '/summoner/euw1/Mover/EUW')
+      const first = page.locator('main article').first()
+      await expect(first).toBeVisible()
+      const top = await first.evaluate((el) => el.getBoundingClientRect().top + window.scrollY)
+      const screen = await page.evaluate(() => window.innerHeight)
+      // The row's own opening lines, not only its edge, on the first screen.
+      expect(top + 120).toBeLessThanOrEqual(screen)
+      if (label.includes('phone')) expect(top).toBeLessThanOrEqual(560)
+      await expect(page.locator('aside')).toHaveCSS('position', 'static')
+    })
+  })
+}
+
+test('a bar of the form strip opens its game', async ({ page }) => {
+  await mockHomePlayer(page, [], [game(1), game(2), game(3)])
+  await open(page, '/summoner/euw1/Mover/EUW')
+  const bars = page.locator('section[aria-label="Recent form"] button[aria-controls]')
+  await expect(bars).toHaveCount(3)
+  // Oldest on the left: the first bar is the third game.
+  await bars.first().click()
+  const row = page.locator(`#game-${game(3).match_id}`)
+  await expect(row.locator('button[aria-expanded]')).toHaveAttribute('aria-expanded', 'true')
+  await expect(row.locator('button[aria-expanded]')).toBeFocused()
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import type { MatchSummary, ParticipantBrief } from '../lib/api'
@@ -23,7 +23,7 @@ import {
   timeAgo,
 } from '../lib/format'
 import Hint from './Hint'
-import { summonerPath } from '../lib/profileAddress'
+import { gameAnchor, summonerPath } from '../lib/profileAddress'
 import { WITHHELD, withheldText } from '../lib/withheld'
 
 /**
@@ -39,16 +39,41 @@ export default function MatchRow({
   match,
   platform,
   puuid,
+  openRequest = 0,
 }: {
   match: MatchSummary
   platform: string
   /** Whose history this is, so the scoreboard can mark their line. */
   puuid: string
+  /** A new value asks the row to open, scroll into view and take focus: a
+   *  bar of the form strip was picked. Zero asks nothing. */
+  openRequest?: number
 }) {
   const [open, setOpen] = useState(false)
   // Once opened the scoreboard stays mounted, so closing rolls it shut rather
   // than cutting it off, and opening again costs no request.
   const [opened, setOpened] = useState(false)
+  // Opened during render, React's pattern for information from props, so the
+  // scoreboard is on its way before the scroll; then scrolled to and focused
+  // once it is on the page.
+  const [seenRequest, setSeenRequest] = useState(openRequest)
+  if (openRequest !== seenRequest) {
+    setSeenRequest(openRequest)
+    if (openRequest) {
+      setOpen(true)
+      setOpened(true)
+    }
+  }
+  const article = useRef<HTMLElement>(null)
+  const handled = useRef(openRequest)
+  useEffect(() => {
+    if (!openRequest || openRequest === handled.current) return
+    handled.current = openRequest
+    article.current?.scrollIntoView({ block: 'start' })
+    article.current
+      ?.querySelector<HTMLButtonElement>('button[aria-expanded]')
+      ?.focus({ preventScroll: true })
+  }, [openRequest])
   const now = useNow()
   const { win, is_remake: remake } = match
   // Why there is no score, in words: the API's reason, in scoring's order.
@@ -68,7 +93,9 @@ export default function MatchRow({
 
   return (
     <article
-      className="border-b border-l-[3px] border-line-soft border-l-transparent"
+      ref={article}
+      id={gameAnchor(match.match_id)}
+      className="scroll-mt-20 border-b border-l-[3px] border-line-soft border-l-transparent"
       style={{ borderLeftColor: edge, background: `linear-gradient(0deg, ${tint}, ${tint})` }}
     >
     <div className="grid grid-cols-1 gap-x-4 gap-y-3 px-3 py-3 lift sm:grid-cols-[104px_auto_1fr_auto]">

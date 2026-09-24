@@ -20,10 +20,12 @@ export default function ProfileTabs({
   name,
   tag,
   scope,
+  className = 'ml-auto',
 }: {
   platform: string
   name: string
   tag: string
+  className?: string
   /** Carried between the overview and the champions tab, which read the same
    *  games; mastery and the live game are not about a set of games. */
   scope?: QueueScope
@@ -49,5 +51,5 @@ export default function ProfileTabs({
     tabs.push({ to: `${base}/live`, label: 'Live' })
   }
 
-  return <NavTabs tabs={tabs} label="Player sections" className="ml-auto" />
+  return <NavTabs tabs={tabs} label="Player sections" className={className} />
 }

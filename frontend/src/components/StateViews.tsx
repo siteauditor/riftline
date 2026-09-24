@@ -227,27 +227,32 @@ export function GridSkeleton({ items = 12 }: { items?: number }) {
  * feed, in the places the real ones land.
  */
 export function ProfileSkeleton() {
+  // The profile's own layout (`ProfileHeader`, then the games first): a
+  // compact header, the form strip, the filters and the rows, with the rail
+  // on the left from lg and below the games on a phone.
   return (
     <div aria-hidden>
       <div className="border-b border-line-soft">
-        <div className="mx-auto flex max-w-[1280px] items-center gap-5 px-4 py-7 sm:py-9">
-          <Skeleton className="size-16 shrink-0 rounded-md" />
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-56 max-w-[60vw]" />
-            <Skeleton className="h-3.5 w-72 max-w-[70vw]" />
-            <Skeleton className="h-3 w-40" />
+        <div className="mx-auto max-w-[1280px] space-y-3 px-4 py-4 sm:py-6">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <Skeleton className="size-10 shrink-0 rounded-md sm:size-16" />
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-56 max-w-[60vw] sm:h-9" />
+              <Skeleton className="h-4 w-72 max-w-[70vw]" />
+            </div>
           </div>
+          <Skeleton className="h-3 w-80 max-w-[85vw]" />
         </div>
       </div>
-      <div className="mx-auto grid max-w-[1280px] gap-5 px-4 pt-6 lg:grid-cols-[280px_1fr]">
-        <div className="space-y-4">
-          <Skeleton className="h-40 rounded-lg" />
-          <Skeleton className="h-56 rounded-lg" />
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-2/3" />
+      <div className="mx-auto grid max-w-[1280px] gap-5 px-4 pt-4 sm:pt-6 lg:grid-cols-[280px_1fr]">
+        <div className="min-w-0 space-y-4 lg:col-start-2 lg:row-start-1">
+          <Skeleton className="h-28 rounded-lg sm:h-32" />
+          <Skeleton className="h-8 w-2/3" />
           <MatchListSkeleton rows={5} />
+        </div>
+        <div className="space-y-4 lg:col-start-1 lg:row-start-1">
+          <Skeleton className="h-72 rounded-lg" />
+          <Skeleton className="h-40 rounded-lg" />
         </div>
       </div>
     </div>

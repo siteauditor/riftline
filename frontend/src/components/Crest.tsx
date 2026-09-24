@@ -19,6 +19,8 @@ import { rankArtFit, rankArtSrc, type RankArtKind } from '../lib/rankArt'
 const STEPS = {
   /** 11px tracked label, inside a rank pill. */
   pill: { box: 'size-[18px]', kind: 'mini', glow: false },
+  /** 16px tier type in a line of 14px text, in a profile's compact header. */
+  inline: { box: 'size-6', kind: 'mini', glow: false },
   /** 16px/700 tier type under a 30 to 48px headline, on a profile. */
   line: { box: 'size-8', kind: 'mini', glow: false },
   /** 26px/700 tier type on the rank card. */

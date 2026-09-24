@@ -18,11 +18,14 @@ export default function ArtHeader({
   art,
   children,
   tall = false,
+  compact = false,
 }: {
   /** Centred splash art, or null when the page has no subject yet. */
   art?: string | null
   children: ReactNode
   tall?: boolean
+  /** Less air, for a page whose content has to start on the first screen. */
+  compact?: boolean
 }) {
   return (
     <section className="relative isolate overflow-hidden border-b border-line-soft">
@@ -40,7 +43,9 @@ export default function ArtHeader({
       )}
       <span aria-hidden className="art-scrim absolute inset-0" />
       <div
-        className={`reveal relative mx-auto max-w-[1280px] px-4 ${tall ? 'py-12 sm:py-16' : 'py-7 sm:py-9'}`}
+        className={`reveal relative mx-auto max-w-[1280px] px-4 ${
+          tall ? 'py-12 sm:py-16' : compact ? 'py-4 sm:py-6' : 'py-7 sm:py-9'
+        }`}
       >
         {children}
       </div>
