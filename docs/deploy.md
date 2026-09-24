@@ -229,6 +229,7 @@ a dead key.
 | `winmodel` | no | **yes** |
 | `reviews` | no | **yes** |
 | `audit` | no | **yes** |
+| `names` (up to `NAME_CHECKS_NIGHTLY` players) | yes | skipped |
 | `prerender` | no | **yes** |
 
 `homes` runs first, whatever the key: it puts every player row back on its
@@ -247,6 +248,18 @@ spends at most `GROUP_NIGHTLY_CALLS` calls (2,000 by default, about 50 minutes
 of a development key), always leaves 20 calls in each two minutes for the
 site's own searches, and removes groups that have had nobody in them for a
 week. Both settings are in `.env`, so changing them is a container restart.
+
+`names` confirms the Riot IDs of the players who qualify for a profile page
+(ten scored ranked games in one role) and whom no lookup has confirmed. Most of
+them are rows made from the lobbies they played in, named only by their games,
+and a page is written only under a Riot ID account-v1 has confirmed: on
+2026-09-24 the local corpus had 515 such players and 20 pages. Each costs two
+calls (account-v1, then the active region, which also moves a row to its home),
+newest game first, at most `NAME_CHECKS_NIGHTLY` (300) a night, never the 20
+calls kept for searches. It runs after the local stages so tonight's scores
+decide who qualifies, and before `prerender` so they get their page tonight.
+An account Riot does not know is asked again after 30 days.
+`python -m scripts.ingest names --dry-run` counts who is due and asks nothing.
 
 `prerender` renders every page again from the night's numbers (see "The
 prerendered pages" below). It is its own compose service rather than a stage

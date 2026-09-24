@@ -16,7 +16,7 @@ python -m pytest "tests/test_integration.py::test_mastery_reads_the_shard_the_ac
 python -m pytest -q -k shard                     # by name substring
 python -m ruff check app scripts tests
 python -m scripts.migrate                        # additive schema migration, idempotent
-python -m scripts.ingest status                  # also: crawl, timelines, lobbyranks, ladders, aggregate, score, reextract, winmodel, reviews, audit, groups, draftpriors
+python -m scripts.ingest status                  # also: homes, crawl, timelines, lobbyranks, ladders, aggregate, score, reextract, winmodel, reviews, audit, groups, names, draftpriors
 ```
 
 Frontend commands run from `frontend/` (pnpm is pinned by `packageManager`):
@@ -44,7 +44,7 @@ CI (`.github/workflows/ci.yml`) runs the same suite, ruff, build and lint inside
 
 **Storage first.** `matches.raw` holds the full match-v5 payload and `match_timelines.raw_gz` the gzipped timeline, so most new features can be computed from disk without spending the rate limit (a development key allows 100 requests per two minutes). The Riftline performance score (`app/services/scores.py`) is computed entirely from stored data: percentile breakpoints per (queue, role, metric) in `role_metric_stats`, combined with the published per-role `WEIGHTS`. Bumping `WEIGHTS_VERSION` marks existing scores stale.
 
-**Ingestion order matters:** `homes` (storage only, first in the nightly) -> `crawl` (finds matches) -> `timelines` -> `lobbyranks` -> `aggregate` -> `score`. `aggregate` and `score` make no Riot calls. `score --rebuild-distributions` re-measures the percentiles and rescores every lobby; `score --rescore` recomputes scores left stale by a weights change.
+**Ingestion order matters:** `homes` (storage only, first in the nightly) -> `crawl` (finds matches) -> `timelines` -> `lobbyranks` -> `aggregate` -> `score` -> `names` (Riot IDs for the players who met a page's floor tonight and whom no lookup confirmed, before the render: a profile is prerendered only under a confirmed Riot ID). `aggregate` and `score` make no Riot calls. `score --rebuild-distributions` re-measures the percentiles and rescores every lobby; `score --rescore` recomputes scores left stale by a weights change.
 
 **Schema changes have no Alembic.** `init_db` (`create_all`) creates new tables but never alters existing ones, so a new column on an existing table must also be added to `ADDITIVE` in `scripts/migrate.py`. Every deploy runs the migration. A new column on a table the API reads takes two deploys: `deploy.sh` starts the new API and runs its health check before it migrates, so the first deploy only adds the column to `ADDITIVE` and the model declares it in the next. A column filled from `matches.raw` must also join `_unlifted()` in `app/services/scores.py`, the cursor of the backfill the score stage runs, or rows stored before the column existed are never filled.
 

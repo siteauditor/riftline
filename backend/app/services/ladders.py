@@ -678,6 +678,9 @@ class LadderService:
                 # not find the row and will pay for the same account-v1 call a
                 # second time. That is the whole "paid once per player" claim.
                 player.search_name = normalize_riot_name(name)
+                # Confirmed, as a search would stamp it: account-v1 named the
+                # account, so the nightly names stage has nothing to ask.
+                player.account_fetched_at = utcnow()
                 # Riot just said this account holds the name, so a row left
                 # holding it from before a rename stops answering for it.
                 await claim_riot_id(self.session, puuid, name, tag)

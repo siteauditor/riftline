@@ -285,6 +285,9 @@ async def test_an_unknown_player_is_resolved_once_and_the_name_is_kept():
     async with SessionLocal() as session:
         stored = await session.get(Player, puuid)
     assert stored.game_name == "Stranger"
+    # Confirmed as a search would confirm it, so the nightly names stage,
+    # which asks about unconfirmed players, has nothing to ask.
+    assert stored.search_name == "stranger" and stored.account_fetched_at is not None
 
 
 @respx.mock

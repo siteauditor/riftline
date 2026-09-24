@@ -13,13 +13,15 @@ from app.api.deps import DbDep, StaticDep
 from app.api.routes.meta import TierListChampion
 from app.api.schemas import BadgeOut, _badges_out
 from app.services.highlights import HIGHLIGHT_DAYS, best_games
+from app.services.homes import Address, addresses, canonical
 
 router = APIRouter(prefix="/api/highlights", tags=["highlights"])
 
 
 class BestGameOut(BaseModel):
     match_id: str
-    # The shard the game was played on, lower case, for the profile link.
+    # For the profile link: the player's home, or the game's shard when we
+    # hold no row for them.
     platform: str
     puuid: str
     game_name: str | None = None
@@ -58,6 +60,8 @@ async def get_best_games(
 ) -> BestGamesResponse:
     """The highest Riftline score in each role over the last few days."""
     found = await best_games(db, queue_id=queue_id, days=days)
+    homes = await addresses(db, [p.puuid for p in found.picks])
+    none = Address(platform="", game_name=None, tag_line=None)
     return BestGamesResponse(
         queue_id=queue_id,
         queue_name=sd.queue_name(queue_id),
@@ -68,10 +72,12 @@ async def get_best_games(
         games=[
             BestGameOut(
                 match_id=p.match_id,
-                platform=p.match.platform_id.lower(),
+                platform=homes.get(p.puuid, none).platform
+                or canonical(p.match.platform_id)
+                or p.match.platform_id.lower(),
                 puuid=p.puuid,
-                game_name=p.riot_id_game_name,
-                tag_line=p.riot_id_tagline,
+                game_name=homes.get(p.puuid, none).game_name or p.riot_id_game_name,
+                tag_line=homes.get(p.puuid, none).tag_line or p.riot_id_tagline,
                 champion=TierListChampion(
                     id=p.champion_id,
                     name=sd.champion_name(p.champion_id),

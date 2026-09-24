@@ -256,6 +256,29 @@ async def test_best_games_endpoint_carries_the_player_the_game_and_its_badges(cl
     assert "9.4" in game["badges"][0]["detail"]
 
 
+async def test_a_best_game_links_to_the_page_under_the_players_home_and_riot_id(client):
+    """The game's shard and the name in it say where the player was, not where
+    their page is: a stored row's home, and its Riot ID once confirmed, come
+    first, so the link does not land on an address the page must move from."""
+    moved = "qzx-home-moved".ljust(78, "0")
+    stub = "qzx-home-stub".ljust(78, "0")
+    await seed_lobby("QZX_HOME", {0: 9.1, 1: 9.2}, queue_id=7304, puuids={0: moved, 1: stub})
+    async with SessionLocal() as session:
+        session.add(Player(puuid=moved, game_name="Renamed", tag_line="NEW",
+                           search_name="renamed", platform="kr"))
+        # Named only by a game, on a merged shard's old id.
+        session.add(Player(puuid=stub, game_name="Qzx1", tag_line="EUW", platform="th2"))
+        await session.commit()
+
+    response = await client.get("/api/highlights/best-games", params={"queue_id": 7304})
+
+    games = {g["puuid"]: g for g in response.json()["games"]}
+    assert (games[moved]["platform"], games[moved]["game_name"], games[moved]["tag_line"]) == (
+        "kr", "Renamed", "NEW",
+    )
+    assert (games[stub]["platform"], games[stub]["game_name"]) == ("sg2", "Qzx1")
+
+
 # ------------------------------------------------------------------ corpus
 
 

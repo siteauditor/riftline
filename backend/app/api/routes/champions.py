@@ -72,6 +72,7 @@ from app.services.evidence import (
     parts_by_patch,
     read_records,
 )
+from app.services.homes import addresses, canonical
 from app.services.skins import MIN_CHAMPION_SIGHTINGS, champion_skin_counts
 from app.services.static_data import Ability, StaticDataService
 
@@ -412,7 +413,8 @@ class ChampionPlayer(BaseModel):
     puuid: str
     game_name: str | None = None
     tag_line: str | None = None
-    # Lower case, for the profile link: the shard of their latest stored game.
+    # For the profile link: the player's home, or the shard of their latest
+    # stored game when we hold no row for them.
     platform: str
     games: int
     wins: int
@@ -1151,6 +1153,9 @@ async def get_champion_players(champion: str, db: DbDep, sd: StaticDep) -> Champ
 
     # Name and shard from each player's latest stored game on any champion:
     # Riot IDs change, and the latest one is the one a profile link resolves.
+    # A stored player's home and confirmed Riot ID come before either, since
+    # that is the address their page is under.
+    homes = await addresses(db, puuids)
     identity: dict[str, tuple[str | None, str | None, str]] = {}
     for puuid, name, tag, platform in (
         await db.execute(
@@ -1165,7 +1170,10 @@ async def get_champion_players(champion: str, db: DbDep, sd: StaticDep) -> Champ
             .order_by(Match.game_creation.desc())
         )
     ).all():
-        identity.setdefault(puuid, (name, tag, (platform or "").lower()))
+        identity.setdefault(puuid, (name, tag, canonical(platform) or (platform or "").lower()))
+    for puuid, home in homes.items():
+        name, tag, _ = identity.get(puuid, (None, None, ""))
+        identity[puuid] = (home.game_name or name, home.tag_line or tag, home.platform)
 
     ranks = {
         entry.puuid: entry

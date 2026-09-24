@@ -766,6 +766,37 @@ async def test_a_few_good_games_do_not_top_a_long_record(client):
     assert few["ranked_score"] < few["avg_score"]
 
 
+async def test_a_board_player_links_to_the_page_under_their_home_and_riot_id(client):
+    """Each player was named by their latest game's shard and name, which is
+    where they were, not where their page is."""
+    from app.db.models import Player
+
+    champion = 9731
+
+    def games(name: str):
+        return [
+            [participant(champion, "MIDDLE", 100, True, puuid=_puuid(f"home-{name}"),
+                         performance_score=6.0, riot_id_game_name=name, riot_id_tagline="EUW")]
+            for _ in range(5)
+        ]
+
+    await seed("BOARD_HOME", games("moved") + games("stubbed") + games("unstored"))
+    async with SessionLocal() as session:
+        session.add(Player(puuid=_puuid("home-moved"), game_name="Nowcalled", tag_line="KR1",
+                           search_name="nowcalled", platform="kr"))
+        session.add(Player(puuid=_puuid("home-stubbed"), game_name="stubbed", tag_line="EUW",
+                           platform="th2"))
+        await session.commit()
+
+    body = (await client.get(f"/api/champions/{champion}/players")).json()
+
+    by = {r["puuid"]: (r["platform"], r["game_name"], r["tag_line"]) for r in body["players"]}
+    assert by[_puuid("home-moved")] == ("kr", "Nowcalled", "KR1")
+    # Unconfirmed, so the game's name; the home in its canonical spelling.
+    assert by[_puuid("home-stubbed")] == ("sg2", "stubbed", "EUW")
+    assert by[_puuid("home-unstored")] == ("euw1", "unstored", "EUW")
+
+
 async def test_an_item_is_set_against_its_slot_once_the_item_guide_has_the_buyers(client, corpus):
     """A final inventory favours winners, so an item's own win rate ran 2.3
     points above its champion. The item guide's figure against the same

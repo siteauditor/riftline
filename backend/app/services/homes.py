@@ -92,6 +92,51 @@ def canonical(value: str | None) -> str | None:
         return None
 
 
+@dataclass(frozen=True, slots=True)
+class Address:
+    """Where a stored player's profile lives: their home, and the Riot ID
+    account-v1 last confirmed for them (None while nobody has asked)."""
+
+    platform: str
+    game_name: str | None
+    tag_line: str | None
+
+
+async def addresses(session: AsyncSession, puuids: Collection[str]) -> dict[str, Address]:
+    """The profile address of every stored player among ``puuids``.
+
+    A link built from a stored game names the shard the game was played on
+    (PH2 for a game from before Riot merged it into SG2, the other region for
+    a player on a bootcamp) and the name the player had in it. Their page is
+    under their home and their confirmed Riot ID (`seo.profile_pages`), so a
+    link built that way went to an address the page then had to move from.
+    A name read from a game is not confirmed, and is left to the caller's
+    game, which may be newer.
+    """
+    if not puuids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                Player.puuid, Player.platform, Player.game_name, Player.tag_line,
+                Player.search_name,
+            ).where(Player.puuid.in_(list(set(puuids))))
+        )
+    ).all()
+    out: dict[str, Address] = {}
+    for row in rows:
+        home = canonical(row.platform)
+        if home is None:
+            continue
+        confirmed = bool(row.search_name and row.game_name and row.tag_line)
+        out[row.puuid] = Address(
+            platform=home,
+            game_name=row.game_name if confirmed else None,
+            tag_line=row.tag_line if confirmed else None,
+        )
+    return out
+
+
 async def restore_ranks(session: AsyncSession, player: Player, home_id: str) -> int:
     """Rebuild ``ranked_entries`` from the newest home reading of each queue.
 
@@ -531,9 +576,11 @@ async def _apply(session: AsyncSession, player: Player, plan: _Plan) -> None:
 
 __all__ = [
     "REPAIR_BATCH",
+    "Address",
     "RepairReport",
     "Role",
     "ShardView",
+    "addresses",
     "canonical",
     "drop_league",
     "drop_mastery",

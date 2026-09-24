@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     # one script from filling the database with groups or the key with lookups.
     group_creates_per_hour: int = Field(default=10, alias="GROUP_CREATES_PER_HOUR")
     group_adds_per_hour: int = Field(default=60, alias="GROUP_ADDS_PER_HOUR")
+    # Players the nightly `names` stage confirms (account-v1 and the active
+    # region, two calls each): those with enough scored games for a page whose
+    # Riot ID no lookup has confirmed. About 12 minutes of a development key.
+    name_checks_nightly: int = Field(default=300, alias="NAME_CHECKS_NIGHTLY")
 
     # Where the site lives, for the sitemap and the canonical links the
     # prerenderer writes. Absolute, because a sitemap must be.

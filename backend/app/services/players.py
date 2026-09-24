@@ -319,6 +319,21 @@ class PlayerService:
             raise PlayerNotFound(f"{game_name}#{tag_line} is not stored.")
         return player
 
+    async def confirm_account(self, player: Player) -> Player:
+        """Ask Riot who holds this account now and where it plays, and store both.
+
+        The names stage's question for a row named only by its games: account-v1
+        by puuid for the Riot ID, and the active region for the home, the same
+        two calls and the same write as a cold search. Raises ``RiotNotFound``
+        when account-v1 does not know the puuid, and its refusals of the key
+        for the caller to stop on; a failed region call keeps the row's shard,
+        as it does for a search.
+        """
+        asked = self.home_of(player)
+        account = await self.client.account_by_puuid(player.puuid, asked.account_region)
+        home = await self._active_region(player.puuid, asked)
+        return await self._upsert_from_account(account, asked, home)
+
     async def _find_cached(
         self, game_name: str, tag_line: str, *, reload: bool = False
     ) -> Player | None:

@@ -14,6 +14,7 @@
     python -m scripts.ingest audit
     python -m scripts.ingest groups --calls 2000
     python -m scripts.ingest homes --dry-run
+    python -m scripts.ingest names --players 300
 
 ``crawl`` is resumable: stop it whenever and it picks the frontier back up. On a
 development key expect roughly 3,000 matches an hour, and remember the key
@@ -55,6 +56,7 @@ from app.services.ladders import APEX_TIERS as LADDER_APEX_TIERS
 from app.services.ladders import DIVISIONS as LADDER_DIVISIONS
 from app.services.ladders import LadderService
 from app.services.lanes import rebuild_lane_distributions
+from app.services.names import confirm_names
 from app.services.reviews import rebuild_reviews
 from app.services.scores import ScoreService
 from app.services.static_data import static_data
@@ -603,6 +605,42 @@ async def cmd_homes(args) -> int:
     return 0
 
 
+async def cmd_names(args) -> int:
+    """Confirm the Riot IDs of players who qualify for a page, so they get one.
+
+    Run nightly after the local stages, so a player who reached the floor
+    tonight is asked before the pages are rendered.
+    """
+    settings = get_settings()
+    await init_db()
+    players = args.players if args.players is not None else settings.name_checks_nightly
+    if args.dry_run:
+        async with SessionLocal() as session:
+            report = await confirm_names(session, None, settings, players=players, dry_run=True)
+        print(f"names (dry run, nothing asked): {report.due} floor players to confirm")
+        for example in report.examples:
+            print(f"    {example}")
+        return 0
+    if not settings.has_key:
+        log.error("RIOT_API_KEY is not set. Put your key in backend/.env first.")
+        return 2
+    client = make_client(settings)
+    try:
+        async with SessionLocal() as session:
+            report = await confirm_names(session, client, settings, players=players)
+    finally:
+        await client.aclose()
+    print("names")
+    for line in report.lines():
+        print(f"  {line}")
+    for example in report.examples:
+        print(f"    {example}")
+    if report.stopped == "dead":
+        log.error("Riot refused the key")
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="ingest", description="Collect and aggregate League match data."
@@ -719,6 +757,18 @@ def main() -> int:
         "--dry-run", action="store_true", help="Report what would change and write nothing."
     )
 
+    nm = sub.add_parser(
+        "names",
+        help="Confirm the Riot IDs of players who qualify for a profile page.",
+    )
+    nm.add_argument(
+        "--players", type=int, default=None,
+        help="Players to ask about at most. Defaults to NAME_CHECKS_NIGHTLY.",
+    )
+    nm.add_argument(
+        "--dry-run", action="store_true", help="Count who is due and ask Riot nothing."
+    )
+
     agg = sub.add_parser("aggregate", help="Rebuild champion and matchup rollups.")
     agg.add_argument("--patch", default=None, help="Defaults to every patch held.")
     agg.add_argument("--queue", type=int, default=None)
@@ -777,6 +827,8 @@ def main() -> int:
         return asyncio.run(cmd_groups(args))
     if args.command == "homes":
         return asyncio.run(cmd_homes(args))
+    if args.command == "names":
+        return asyncio.run(cmd_names(args))
     return 1
 
 

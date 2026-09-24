@@ -9,9 +9,10 @@
 # expires 24 hours after it is issued, so on most nights some or all of it will
 # run with a dead key. It therefore splits into two halves.
 #
-#   Riot-dependent   crawl, timelines, lobbyranks, ladders, groups. Skipped entirely
-#                    when the key is dead, because every request would fail and
-#                    the log would be noise rather than information.
+#   Riot-dependent   crawl, timelines, lobbyranks, ladders, groups, and names
+#                    after the local stages. Skipped entirely when the key is
+#                    dead, because every request would fail and the log would
+#                    be noise rather than information.
 #   Local-only       aggregate, score. These read the stored corpus and make no
 #                    network call at all, so they always run and always finish.
 #                    A dead key therefore still leaves the site's derived data
@@ -125,7 +126,7 @@ case "$key_state" in
     run_stage "groups" python -m scripts.ingest groups || failures=$((failures+1))
     ;;
   expired|absent)
-    log "skipping crawl, timelines, lobbyranks, ladders and groups: the key is ${key_state}."
+    log "skipping crawl, timelines, lobbyranks, ladders, groups and names: the key is ${key_state}."
     log "rotate it with: docs/deploy.md -> 'Rotating the Riot key'"
     ;;
   *)
@@ -161,6 +162,16 @@ run_stage "score" "${score_stage[@]}" || failures=$((failures+1))
 run_stage "winmodel" python -m scripts.ingest winmodel || failures=$((failures+1))
 run_stage "reviews"  python -m scripts.ingest reviews  || failures=$((failures+1))
 run_stage "audit"    python -m scripts.ingest audit    || failures=$((failures+1))
+
+# Riot IDs for the players who qualify for a profile page and whom no lookup has
+# confirmed: rows made from lobbies, named only by their games, and a page is
+# written only under a confirmed Riot ID (backend/app/services/names.py). After
+# the local stages, so tonight's scores decide who qualifies, and before the
+# render, so they get their page tonight. Two calls a player, at most
+# NAME_CHECKS_NIGHTLY players, and never the calls kept for searches.
+if [ "$key_state" = alive ]; then
+  run_stage "names" python -m scripts.ingest names || failures=$((failures+1))
+fi
 
 # Every page as HTML again, now that the numbers behind them have moved. Not
 # through run_stage, which execs inside the api container: this is its own
