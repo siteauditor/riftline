@@ -17,7 +17,7 @@ import StoryPanel from '../components/champion/StoryPanel'
 import { parseTab, type ChampionTab } from '../components/champion/tabs'
 import { POSITIONS, type ChampionDetail, type ChampionRef, type PatchChange } from '../lib/api'
 import { compact, pct, positionLabel } from '../lib/format'
-import { championSummary } from '../lib/prose'
+import { championSummary, fallbackLines } from '../lib/prose'
 import { calledCount, pairPatches } from '../lib/pairs'
 import { CHAMPION_MIN_GAMES, queries } from '../lib/queries'
 import { heads } from '../lib/seo'
@@ -583,17 +583,7 @@ function Brief({ sentences, name }: { sentences: string[]; name: string }) {
  * the patch select went blank on a patch the site does not hold.
  */
 function FallbackNotice({ d, name }: { d: ChampionDetail; name: string }) {
-  const lines: string[] = []
-  if (d.requested_patch) {
-    lines.push(`Riftline holds no games of ${name} on patch ${d.requested_patch}, so this is patch ${d.patch}.`)
-  }
-  if (d.requested_position) {
-    const served = d.positions.find((p) => p.position === d.position)
-    lines.push(
-      `${name} has no ${positionLabel(d.requested_position).toLowerCase()} games on patch ${d.patch}. ` +
-        `This is ${positionLabel(d.position).toLowerCase()}, where ${pct(served?.share ?? 0)} of ${name}'s games are.`,
-    )
-  }
+  const lines = fallbackLines(d, name)
   if (lines.length === 0) return null
   return (
     <p role="status" className="mt-4 max-w-prose border-l-2 border-gold/50 py-1 pl-3 text-sm leading-relaxed text-ink-dim">

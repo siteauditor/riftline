@@ -25,6 +25,7 @@ import {
   useSliceCorrections,
   withParams,
 } from '../lib/searchParams'
+import { missingTierReason, separationLine, tierLegend } from '../lib/tierlist'
 import { useChampionArt } from '../lib/useChampionArt'
 import Hint from '../components/Hint'
 import LobbyRanks from '../components/LobbyRanks'
@@ -49,30 +50,6 @@ const TIER_STYLE: Record<string, { bg: string; fg: string; ring?: string }> = {
 }
 
 const MIN_GAMES = TIERLIST_MIN_GAMES
-
-/**
- * What a letter is, said once for the whole list rather than on every badge.
- * On 16.18 the games separated 8 of 247 picks as better than even and 8 as
- * worse, while the letters give 28 an S: a letter is a place in the ranking,
- * and the list says so.
- */
-function tierLegend(floor: number): string {
-  return (
-    `A place within the role on this patch, among champions with ${floor} or more games there: ` +
-    'S is the top tenth, then A, B, C and D. The ranking is by the low end of each win rate ' +
-    'range, so a letter is a place in that order, not a measured gap, and a few games can move it.'
-  )
-}
-
-/** How many of the listed picks the games tell apart from an even win rate. */
-function separationLine(data: MetaResponse, shown: number): string {
-  const { separated_above: above, separated_below: below } = data
-  const lead =
-    above + below === 0
-      ? `On patch ${data.patch} the games do not yet show any of these ${shown} picks to be better or worse than even.`
-      : `On patch ${data.patch} the games show ${above} of these ${shown} picks to be better than even and ${below} to be worse: their whole range sits above or below 50%.`
-  return `${lead} The letters rank the rest by the low end of their range, so a few games can move them.`
-}
 
 type SortKey =
   | 'confidence_win_rate'
@@ -314,11 +291,7 @@ function TierBadge({ row, floor }: { row: ChampionMetaRow; floor: number }) {
     return (
       <span className="text-ink-faint">
         <span aria-hidden>–</span>
-        <span className="sr-only">
-          {row.games < floor
-            ? `No letter: under ${floor} games`
-            : 'No letter: too few champions in this role to rank'}
-        </span>
+        <span className="sr-only">{missingTierReason(row.games, floor)}</span>
       </span>
     )
   }

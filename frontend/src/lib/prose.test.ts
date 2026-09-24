@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { Analytics, Profile } from './api'
-import { profileSummary } from './prose'
+import type { Analytics, ChampionDetail, Profile } from './api'
+import { fallbackLines, profileSummary } from './prose'
 
 const solo = {
   queue: 'RANKED_SOLO_5x5',
@@ -79,5 +79,34 @@ describe('profileSummary', () => {
   it('says nothing about games when there are none', () => {
     const empty = { ...analytics, games_analysed: 0 } as unknown as Analytics
     expect(profileSummary(profile, empty)).toHaveLength(1)
+  })
+})
+
+describe('fallbackLines', () => {
+  const served = {
+    patch: '16.18',
+    position: 'MIDDLE',
+    positions: [
+      { position: 'MIDDLE', games: 900, share: 0.9, win_rate: 0.5 },
+      { position: 'TOP', games: 100, share: 0.1, win_rate: 0.5 },
+    ],
+    requested_patch: null,
+    requested_position: null,
+  }
+
+  it('says which role was asked for and which is on screen, with its share', () => {
+    const d = { ...served, requested_position: 'JUNGLE' } as unknown as ChampionDetail
+    expect(fallbackLines(d, 'Ahri')).toEqual([
+      "Ahri has no jungle games on patch 16.18. This is mid, where 90% of Ahri's games are.",
+    ])
+  })
+
+  it('says a patch the site does not hold was replaced', () => {
+    const d = { ...served, requested_patch: '16.9' } as unknown as ChampionDetail
+    expect(fallbackLines(d, 'Ahri')).toEqual(['Riftline holds no games of Ahri on patch 16.9, so this is patch 16.18.'])
+  })
+
+  it('says nothing when the page is what the link asked for', () => {
+    expect(fallbackLines(served as unknown as ChampionDetail, 'Ahri')).toEqual([])
   })
 })

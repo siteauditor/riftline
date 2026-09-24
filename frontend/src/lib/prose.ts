@@ -63,6 +63,26 @@ export function championSummary(d: ChampionDetail): string[] {
   return out
 }
 
+/**
+ * Why the slice on screen is not the one the link asked for, when the API
+ * served another: a patch it does not hold, or a role the champion was not
+ * played in there. Empty when the page is what was asked for.
+ */
+export function fallbackLines(d: ChampionDetail, name: string): string[] {
+  const lines: string[] = []
+  if (d.requested_patch) {
+    lines.push(`Riftline holds no games of ${name} on patch ${d.requested_patch}, so this is patch ${d.patch}.`)
+  }
+  if (d.requested_position) {
+    const served = d.positions.find((p) => p.position === d.position)
+    lines.push(
+      `${name} has no ${positionLabel(d.requested_position).toLowerCase()} games on patch ${d.patch}. ` +
+        `This is ${positionLabel(d.position).toLowerCase()}, where ${pct(served?.share ?? 0)} of ${name}'s games are.`,
+    )
+  }
+  return lines
+}
+
 export function itemSummary(item: ItemDetail): string[] {
   const f = item.figures
   if (!f) return []
