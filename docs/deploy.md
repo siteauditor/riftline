@@ -189,7 +189,17 @@ mastery, live game) report that the key needs renewing, and everything served
 from the stored corpus (tier list, champion pages, leaderboards, the Riftline
 scores) carries on working, because none of it calls Riot.
 
-One command, from the repository root:
+Paste the new key into `backend/.env`, then from the repository root:
+
+```bash
+bash deploy/rotate-key.sh
+```
+
+It reads the key from `backend/.env`, checks it looks like a Riot key, puts it
+in the server's `.env` (restarting the API only when it changed), and asks
+Riot whether it takes it: `Riot accepts the key. Done.` or the reason it does
+not. The key travels over ssh's standard input, so it is never in a command
+line, the shell history or the output. Or, where `make` is installed:
 
 ```bash
 make rotate-key KEY=RGAPI-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
