@@ -195,6 +195,10 @@ Paste the new key into `backend/.env`, then from the repository root:
 bash deploy/rotate-key.sh
 ```
 
+On Windows, `rotate-key.cmd` at the repository root runs the same script with
+Git for Windows' bash: double-click it, or run it from cmd or PowerShell. It
+keeps its window open when double-clicked, so the answer can be read.
+
 It reads the key from `backend/.env`, checks it looks like a Riot key, puts it
 in the server's `.env` (restarting the API only when it changed), and asks
 Riot whether it takes it: `Riot accepts the key. Done.` or the reason it does

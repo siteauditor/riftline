@@ -15,6 +15,10 @@ Makefile    text eol=lf
 *.timer     text eol=lf
 *.conf      text eol=lf
 
+# Windows batch files are read by cmd.exe, which needs CRLF: with LF a label
+# or a multi-line block can be misread.
+*.cmd       text eol=crlf
+
 # Binary, so leave the bytes alone.
 *.png binary
 *.jpg binary
